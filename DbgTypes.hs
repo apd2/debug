@@ -2,6 +2,8 @@ module DbgTypes(ViewFactory(..),
                 Manager(..),
                 View) where
 
+import IDE
+
 -- Internal debugger state
 data DbgState = DbgState {
     -- transition relation
@@ -9,20 +11,12 @@ data DbgState = DbgState {
     -- symbol table
 }
 
-
-data Manager = Manager {
---    createWindow :: 
-}
-
+type RDbgState = IORef DbgState 
 
 -- View interface
-data ViewFactory = ViewFactory {
-    viewName   :: String,
-    viewCreate :: Manager -> IO View
-}
-
 data View = View {
-    viewDestroy :: IO ()
-
-    -- callbacks
+    viewName     :: String,
+    viewDefAlign :: IDEAlign,
+    viewShow     :: RDbgState -> IO G.Widget,
+    viewHide     :: IO ()
 }

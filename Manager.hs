@@ -7,35 +7,26 @@ import DbgTypes
 import Icon
 
 
-views :: [ViewFactory]
+views :: [View]
 views = [graphView, variableView]
 
-graphView :: ViewFactory
-graphView = ViewFactory {viewName   = "Transition graph view",
-                         viewCreate = graphViewCreate}
+graphView :: View
+graphView = View { viewName     = "Transition graph view"
+                 , viewDefAlign = AlignCenter
+                 , viewShow     = graphViewShow
+                 , viewHide     = return ()}
 
-graphViewCreate :: Manager -> IO View
-graphViewCreate m = undefined
+graphViewShow :: Manager -> IO View
+graphViewShow m = undefined
 
-variableView :: ViewFactory
-variableView = ViewFactory {viewName   = "Variables view",
-                            viewCreate = graphViewCreate}
+variableView :: View
+variableView = View { viewName     = "Variables view"
+                    , viewDefAlign = AlignLeft
+                    , viewShow     = variableViewShow
+                    , viewHide     = return ()}
 
-variableViewCreate :: Manager -> IO View
-variableViewCreate m = undefined
-
-data ManagerState = ManagerState {
-                        msLeft,
-                        msRight,
-                        msBottom,
-
-                        msLeftPane,  
-                        msRightPane,
-                        msTopPane,
-                        msBottomPane,
-                        msCentrePane,
-                        msRightPane
-                    }
+variableViewShow :: Manager -> IO View
+variableViewShow m = undefined
 
 -- GUI manager
 debugGUI :: IO ()
@@ -67,6 +58,12 @@ debugGUI = do
     iview <- menuItemNewWithLabel "View"
     menuItemSetSubmenu iview mview
     menuShellAppend mmain iview
+
+    -- IDE manager
+    ide <- ideNew
+    idew <- ideWidget ide
+
+    boxPackStart vbox idew PackNatural 0
 
     -- create menu item for each available view
     mapM (\v -> do mitem <- checkMenuItemNewWithLabel (viewName v)
