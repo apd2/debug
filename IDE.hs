@@ -1,14 +1,23 @@
-module IDE(IDE,
+module IDE(RIDE,
+           IDEAlign(..),
+           IDEPanel(..),
            ideNew,
            ideWidget,
-           IDEAlign(..),
-           ideNew) where
+           ideAddLeft,
+           ideAddCenter,
+           ideAddRight,
+           ideAddBottom,
+           ideRemove,
+           framePanelNew) where
 
 import qualified Graphics.UI.Gtk as G
 import Data.Maybe
 import Data.IORef
 import Control.Monad
 import System.IO
+
+ideDefaultWidth  = 800
+ideDefaultHeight = 600
 
 data IDEAlign = AlignLeft
               | AlignCenter
@@ -46,7 +55,7 @@ panelsDeleteWidget :: IDEPanels -> G.Widget -> IO ()
 panelsDeleteWidget panels w = do
     midx <- (panelsGetIndex panels) w
     case midx of
-         Nothing  -> hPutStrLn stderr "panelsDeleteWidget: widget does not exist"
+         Nothing  -> return ()
          Just idx -> (panelsDelete panels) idx
 
 panelsAppend :: IDEPanels -> G.Widget -> String -> IO ()
@@ -80,9 +89,9 @@ framePanelNew w name deletecb = do
                                  , fpName     = name
                                  , fpPanelCB  = panelCBNull
                                  , fpDeleteCB = deletecb}
-    return $ FramePanel { panelSetCB     = fpSetCB     ref
-                        , panelGetWidget = fpGetWidget ref
-                        , panelGetName   = fpGetName   ref}
+    return $ IDEPanel { panelSetCB     = fpSetCB     ref
+                      , panelGetWidget = fpGetWidget ref
+                      , panelGetName   = fpGetName   ref}
 
 
 fpSetCB :: RFramePanel -> PanelCB -> IO ()
@@ -94,7 +103,7 @@ fpSetCB ref cb = do
 fpGetWidget :: RFramePanel -> IO G.Widget
 fpGetWidget ref = do
     fp <- readIORef ref
-    (liftM head) $ G.containerGetChildren $ fpFrame fp
+    return $ G.toWidget $ fpFrame fp
 
 fpGetName :: RFramePanel -> IO String
 fpGetName ref = do
@@ -107,7 +116,7 @@ fpGetName ref = do
 ---------------------------------------------------------------
 data PanedPanels = PanedPanels {
     ppMkPaned     :: IO G.Paned,
-    ppBox         :: G.VBox,
+    ppFrame       :: G.Frame,
     ppNumChildren :: Int,
     ppPanes       :: [G.Paned],
     ppCB          :: PanelCB
@@ -117,10 +126,12 @@ type RPanedPanels = IORef PanedPanels
 
 panedPanelsNew :: IO G.Paned -> IO IDEPanels
 panedPanelsNew f = do
-    box <- G.vBoxNew
-    G.widgetShow box
+    frame <- G.frameNew
+    G.frameSetShadowType frame G.ShadowNone
+    --G.widgetSetSizeRequest frame ideDefaultWidth ideDefaultHeight
+    G.widgetShow frame
     ref <- newIORef $ PanedPanels { ppMkPaned     = f
-                                  , ppBox         = box
+                                  , ppFrame       = frame
                                   , ppNumChildren = 0
                                   , ppPanes       = []
                                   , ppCB          = panelCBNull}
@@ -137,42 +148,42 @@ ppInsert :: RPanedPanels -> Int -> G.Widget -> String -> IO ()
 ppInsert ref i w _ = do
     pp <- readIORef ref
     case (ppNumChildren pp, i) of
-         (0, _)  -> do G.boxPackStart (ppBox pp) w G.PackGrow 0
+         (0, _)  -> do G.containerAdd (ppFrame pp) w
                        writeIORef ref $ pp {ppNumChildren = 1}
          (_, -1) -> do -- create new top-level pane
                        pane <- ppMkPaned pp
                        G.widgetShow pane
                        G.panedAdd1 pane w
-                       oldw <- (liftM head) $ G.containerGetChildren $ ppBox pp
-                       G.containerRemove (ppBox pp) oldw
+                       oldw <- (liftM fromJust) $ G.binGetChild $ ppFrame pp
+                       G.containerRemove (ppFrame pp) oldw
                        G.panedAdd2 pane oldw
-                       G.boxPackStart (ppBox pp) pane
+                       G.containerAdd (ppFrame pp) pane
                        writeIORef ref $ pp {ppNumChildren = ppNumChildren pp + 1, ppPanes = [pane]}
          (1, _)  -> do pane <- ppMkPaned pp
                        G.widgetShow pane
                        G.panedAdd2 pane w
-                       oldw <- (liftM head) $ G.containerGetChildren $ ppBox pp
-                       G.containerRemove (ppBox pp) oldw
+                       oldw <- (liftM fromJust) $ G.binGetChild $ ppFrame pp
+                       G.containerRemove (ppFrame pp) oldw
                        G.panedAdd1 pane oldw
-                       G.boxPackStart (ppBox pp) pane
+                       G.containerAdd (ppFrame pp) pane
                        writeIORef ref $ pp {ppNumChildren = ppNumChildren pp + 1, ppPanes = [pane]}
          (_,_)   -> if i == ppNumChildren pp - 1
                        then do pane <- ppMkPaned pp
                                G.widgetShow pane
                                G.panedAdd2 pane w
-                               oldw <- G.panedGetChild2 $ tail $ ppPanes pp
-                               G.containerRemove (tail $ ppPanes pp) oldw
+                               oldw <- (liftM fromJust) $ G.panedGetChild2 $ last $ ppPanes pp
+                               G.containerRemove (last $ ppPanes pp) oldw
                                G.panedAdd1 pane oldw
-                               G.panedAdd2 (tail $ ppPanes pp) pane
+                               G.panedAdd2 (last $ ppPanes pp) pane
                                writeIORef ref $ pp {ppNumChildren = ppNumChildren pp + 1, ppPanes = (ppPanes pp)++[pane]}
                        else do pane <- ppMkPaned pp
                                G.widgetShow pane
                                G.panedAdd1 pane w
-                               oldw <- G.panedGetChild2 $ ppPanes pp !! i
+                               oldw <- (liftM fromJust) $ G.panedGetChild2 $ ppPanes pp !! i
                                G.containerRemove (ppPanes pp !! i) oldw
                                G.panedAdd2 pane oldw
                                G.panedAdd2 (ppPanes pp !! i) pane
-                               writeIORef ref $ pp {ppNumChildren = ppNumChildren pp + 1, ppPanes = (take i pp)++[pane]++(drop i pp)}
+                               writeIORef ref $ pp {ppNumChildren = ppNumChildren pp + 1, ppPanes = (take i $ ppPanes pp)++[pane]++(drop i $ ppPanes pp)}
          
 
 
@@ -180,28 +191,28 @@ ppDelete :: RPanedPanels -> Int -> IO ()
 ppDelete ref i = do
     pp <- readIORef ref
     case (ppNumChildren pp, i) of
-         (1,_) -> do w <- (liftM head) $ G.containerGetChildren $ ppBox pp
-                     G.containerRemove (ppBox pp) w
+         (1,_) -> do w <- (liftM fromJust) $ G.binGetChild $ ppFrame pp
+                     G.containerRemove (ppFrame pp) w
                      writeIORef ref $ pp {ppNumChildren = 0}
-         (_,0) -> do w1 <- G.panedGetChild1 (head $ ppPanes pp)
-                     w2 <- G.panedGetChild2 (head $ ppPanes pp)
+         (_,0) -> do w1 <- (liftM fromJust) $ G.panedGetChild1 (head $ ppPanes pp)
+                     w2 <- (liftM fromJust) $ G.panedGetChild2 (head $ ppPanes pp)
                      G.containerRemove (head $ ppPanes pp) w1
                      G.containerRemove (head $ ppPanes pp) w2
-                     G.containerRemove (ppBox pp) (head $ ppPanes pp)
-                     G.boxPackStart (ppBox pp) w2
+                     G.containerRemove (ppFrame pp) (head $ ppPanes pp)
+                     G.containerAdd (ppFrame pp) w2
                      writeIORef ref $ pp {ppNumChildren = ppNumChildren pp - 1, ppPanes = tail $ ppPanes pp}
-         (2,1) -> do w1 <- G.panedGetChild1 (head $ ppPanes pp)
-                     w2 <- G.panedGetChild2 (head $ ppPanes pp)
+         (2,1) -> do w1 <- (liftM fromJust) $ G.panedGetChild1 (head $ ppPanes pp)
+                     w2 <- (liftM fromJust) $ G.panedGetChild2 (head $ ppPanes pp)
                      G.containerRemove (head $ ppPanes pp) w1
                      G.containerRemove (head $ ppPanes pp) w2
-                     G.containerRemove (ppBox pp) (head $ ppPanes pp)
-                     G.boxPackStart (ppBox pp) w1
+                     G.containerRemove (ppFrame pp) (head $ ppPanes pp)
+                     G.containerAdd (ppFrame pp) w1
                      writeIORef ref $ pp {ppNumChildren = 1, ppPanes = []}                     
          (_,_) -> if i == ppNumChildren pp - 1
                      then do let pane = last $ ppPanes pp
                                  prev = ppPanes pp !! (ppNumChildren pp - 3)
-                             w1 <- G.panedGetChild1 pane
-                             w2 <- G.panedGetChild2 pane
+                             w1 <- (liftM fromJust) $ G.panedGetChild1 pane
+                             w2 <- (liftM fromJust) $ G.panedGetChild2 pane
                              G.containerRemove pane w1
                              G.containerRemove pane w2
                              G.containerRemove prev pane
@@ -209,8 +220,8 @@ ppDelete ref i = do
                              writeIORef ref $ pp {ppNumChildren = ppNumChildren pp - 1, ppPanes = init $ ppPanes pp}
                      else do let pane = ppPanes pp !! i
                                  prev = ppPanes pp !! (i-1)
-                             w1 <- G.panedGetChild1 pane
-                             w2 <- G.panedGetChild2 pane
+                             w1 <- (liftM fromJust) $ G.panedGetChild1 pane
+                             w2 <- (liftM fromJust) $ G.panedGetChild2 pane
                              G.containerRemove pane w1
                              G.containerRemove pane w2
                              G.containerRemove prev pane
@@ -224,23 +235,24 @@ ppGetIndex :: RPanedPanels -> G.Widget -> IO (Maybe Int)
 ppGetIndex ref w = do
     pp <- readIORef ref
     if ppNumChildren pp == 1
-       then do w0 <- (liftM head) $ G.containerGetChildren (ppBox pp)
+       then do w0 <- (liftM fromJust) $ G.binGetChild $ ppFrame pp
                if w0 == w
                   then return $ Just 0
                   else return Nothing
        else ppGetIndex' (ppPanes pp) w 0
 
+ppGetIndex' :: [G.Paned] -> G.Widget -> Int -> IO (Maybe Int)
 ppGetIndex' []  _ _ = return Nothing
 ppGetIndex' [p] w i = do
-    w1 <- G.panedGetChild1 p
-    w2 <- G.panedGetChild2 p
+    w1 <- (liftM fromJust) $ G.panedGetChild1 p
+    w2 <- (liftM fromJust) $ G.panedGetChild2 p
     if w1 == w
        then return $ Just i
        else if w2 == w
                then return $ Just $ i + 1
                else return Nothing
 ppGetIndex' (p:ps) w i = do
-    w1 <- G.panedGetChild1 p
+    w1 <- (liftM fromJust) $ G.panedGetChild1 p
     if w1 == w
        then return $ Just i
        else ppGetIndex' ps w (i+1)
@@ -254,7 +266,7 @@ ppGetNumChildren ref = do
 ppWidget :: RPanedPanels -> IO G.Widget
 ppWidget ref = do
     pp <- readIORef ref
-    G.toWidget $ ppBox pp
+    return $ G.toWidget $ ppFrame pp
 
 ppSetCB :: RPanedPanels -> PanelCB -> IO ()
 ppSetCB ref cb = do
@@ -276,6 +288,7 @@ type RTabbedPanels = IORef TabbedPanels
 tabbedPanelsNew :: IO IDEPanels
 tabbedPanelsNew = do
     nb <- G.notebookNew
+    G.widgetShow nb
     ref <- newIORef $ TabbedPanels { tpNotebook    = nb
                                    , tpNumChildren = 0
                                    , tpCB          = panelCBNull}
@@ -317,7 +330,7 @@ tpGetNumChildren ref = do
 tpWidget :: RTabbedPanels -> IO G.Widget
 tpWidget ref = do
     tp <- readIORef ref
-    return $ tpNotebook tp
+    return $ G.toWidget $ tpNotebook tp
 
 tpSetCB :: RTabbedPanels -> PanelCB -> IO ()
 tpSetCB ref cb = do
@@ -342,7 +355,7 @@ type RIDE = IORef IDE
 
 ideNew :: IO RIDE
 ideNew = do
-    main <- panedPanelsNew ((liftM G.toPaned) . G.hPanedNew)
+    main <- panedPanelsNew ((liftM G.toPaned) G.hPanedNew)
     newIORef $ IDE { ideMain      = main
                    , ideLeft      = Nothing
                    , ideTopBottom = Nothing
@@ -362,11 +375,11 @@ ideCreateLeft ref = do
    ide <- readIORef ref
    case ideLeft ide of
         Just _  -> return ()
-        Nothing -> do left <- panedPanelsNew ((liftM G.toPaned) . G.vPanedNew)
+        Nothing -> do left <- panedPanelsNew ((liftM G.toPaned) G.vPanedNew)
                       w <- panelsGetWidget left
                       panelsPrepend (ideMain ide) w ""
-                      panelsSetCB left (ideDeleteLeft ref) 
-                      writeIORef ide $ ide {ideLeft = Just left}
+                      panelsSetCB left (PanelCB $ ideDeleteLeft ref)
+                      writeIORef ref $ ide {ideLeft = Just left}
 
 ideDeleteLeft :: RIDE -> IO ()
 ideDeleteLeft ref = do
@@ -380,11 +393,11 @@ ideCreateTopBottom ref = do
     ide <- readIORef ref
     case ideTopBottom ide of
          Just _  -> return ()
-         Nothing -> do tb <- panedPanelsNew ((liftM G.toPaned) . G.vPanedNew)
+         Nothing -> do tb <- panedPanelsNew ((liftM G.toPaned) G.vPanedNew)
                        w <- panelsGetWidget tb
                        panelsAppend (ideMain ide) w ""
-                       panelsSetCB tb (ideDeleteTopBottom ref) 
-                       writeIORef ide $ ide {ideTopBottom = Just tb}
+                       panelsSetCB tb (PanelCB $ ideDeleteTopBottom ref) 
+                       writeIORef ref $ ide {ideTopBottom = Just tb}
 
 ideDeleteTopBottom :: RIDE -> IO ()
 ideDeleteTopBottom ref = do
@@ -402,9 +415,9 @@ ideCreateBottom ref = do
          Just _  -> return ()
          Nothing -> do bottom <- tabbedPanelsNew
                        w <- panelsGetWidget bottom
-                       panelsAppend (ideTopBottom ide) w ""
-                       panelsSetCB bottom (ideDeleteBottom ref)
-                       writeIORef ide $ ide {ideBottom = Just bottom}
+                       panelsAppend (fromJust $ ideTopBottom ide) w ""
+                       panelsSetCB bottom (PanelCB $ ideDeleteBottom ref)
+                       writeIORef ref $ ide {ideBottom = Just bottom}
 
 ideDeleteBottom :: RIDE -> IO ()
 ideDeleteBottom ref = do
@@ -420,11 +433,11 @@ ideCreateTop ref = do
     ide <- readIORef ref
     case ideTop ide of
          Just _  -> return ()
-         Nothing -> do top <- panedPanelsNew ((liftM G.toPaned) . G.hPanedNew)
+         Nothing -> do top <- panedPanelsNew ((liftM G.toPaned) G.hPanedNew)
                        w <- panelsGetWidget top
-                       panelsPrepend (ideTopBottom ide) w ""
-                       panelsSetCB top (ideDeleteTop ref)
-                       writeIORef ide $ ide {ideTop = Just top}
+                       panelsPrepend (fromJust $ ideTopBottom ide) w ""
+                       panelsSetCB top (PanelCB $ ideDeleteTop ref)
+                       writeIORef ref $ ide {ideTop = Just top}
 
 ideDeleteTop :: RIDE -> IO ()
 ideDeleteTop ref = do
@@ -439,11 +452,11 @@ ideCreateCenter ref = do
     ide <- readIORef ref
     case ideCenter ide of
          Just _  -> return ()
-         Nothing -> do center <- panedPanelsNew ((liftM G.toPaned) . G.hPanedNew)
+         Nothing -> do center <- panedPanelsNew ((liftM G.toPaned) G.hPanedNew)
                        w <- panelsGetWidget center
-                       panelsPrepend (ideTop ide) w ""
-                       panelsSetCB center (ideDeleteCenter ref)
-                       writeIORef ide $ ide {ideCenter = Just center}
+                       panelsPrepend (fromJust $ ideTop ide) w ""
+                       panelsSetCB center (PanelCB $ ideDeleteCenter ref)
+                       writeIORef ref $ ide {ideCenter = Just center}
 
 ideDeleteCenter :: RIDE -> IO ()
 ideDeleteCenter ref = do
@@ -458,11 +471,11 @@ ideCreateRight ref = do
     ide <- readIORef ref
     case ideRight ide of
          Just _  -> return ()
-         Nothing -> do right <- panedPanelsNew ((liftM G.toPaned) . G.vPanedNew)
+         Nothing -> do right <- panedPanelsNew ((liftM G.toPaned) G.vPanedNew)
                        w <- panelsGetWidget right
-                       panelsAppend (ideTop ide) w ""
-                       panelsSetCB right (ideDeleteRight ref)
-                       writeIORef ide $ ide {ideRight = Just right}
+                       panelsAppend (fromJust $ ideTop ide) w ""
+                       panelsSetCB right (PanelCB $ ideDeleteRight ref)
+                       writeIORef ref $ ide {ideRight = Just right}
 
 ideDeleteRight :: RIDE -> IO ()
 ideDeleteRight ref = do
@@ -479,7 +492,7 @@ ideAddLeft ref panel = do
     w <- panelGetWidget panel
     n <- panelGetName   panel
     panelsAppend (fromJust $ ideLeft ide) w n
-    panelSetCB panel (panelsDeleteWidget (fromJust $ ideLeft ide) w)
+    panelSetCB panel (PanelCB $ panelsDeleteWidget (fromJust $ ideLeft ide) w)
 
 ideAddRight :: RIDE -> IDEPanel -> IO ()
 ideAddRight ref panel = do
@@ -488,7 +501,7 @@ ideAddRight ref panel = do
     w <- panelGetWidget panel
     n <- panelGetName   panel
     panelsAppend (fromJust $ ideRight ide) w n
-    panelSetCB panel (panelsDeleteWidget (fromJust $ ideRight ide) w)
+    panelSetCB panel (PanelCB $ panelsDeleteWidget (fromJust $ ideRight ide) w)
 
 ideAddCenter :: RIDE -> IDEPanel -> IO ()
 ideAddCenter ref panel = do
@@ -497,7 +510,7 @@ ideAddCenter ref panel = do
     w <- panelGetWidget panel
     n <- panelGetName   panel
     panelsAppend (fromJust $ ideCenter ide) w n
-    panelSetCB panel (panelsDeleteWidget (fromJust $ ideCenter ide) w)
+    panelSetCB panel (PanelCB $ panelsDeleteWidget (fromJust $ ideCenter ide) w)
 
 ideAddBottom :: RIDE -> IDEPanel -> IO ()
 ideAddBottom ref panel = do
@@ -506,4 +519,21 @@ ideAddBottom ref panel = do
     w <- panelGetWidget panel
     n <- panelGetName   panel
     panelsAppend (fromJust $ ideBottom ide) w n
-    panelSetCB panel (panelsDeleteWidget (fromJust $ ideBottom ide) w)
+    panelSetCB panel (PanelCB $ panelsDeleteWidget (fromJust $ ideBottom ide) w)
+
+ideRemove :: RIDE -> IDEPanel -> IO ()
+ideRemove ref panel = do
+    ide <- readIORef ref
+    w   <- panelGetWidget panel
+    case ideLeft ide of
+         Nothing -> return ()
+         Just p  -> panelsDeleteWidget p w
+    case ideCenter ide of
+         Nothing -> return ()
+         Just p  -> panelsDeleteWidget p w
+    case ideRight ide of
+         Nothing -> return ()
+         Just p  -> panelsDeleteWidget p w
+    case ideBottom ide of
+         Nothing -> return ()
+         Just p  -> panelsDeleteWidget p w
