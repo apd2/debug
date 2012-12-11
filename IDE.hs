@@ -16,9 +16,6 @@ import Data.IORef
 import Control.Monad
 import System.IO
 
-ideDefaultWidth  = 800
-ideDefaultHeight = 600
-
 data IDEAlign = AlignLeft
               | AlignCenter
               | AlignRight
@@ -158,7 +155,7 @@ ppInsert ref i w _ = do
                        G.containerRemove (ppFrame pp) oldw
                        G.panedAdd2 pane oldw
                        G.containerAdd (ppFrame pp) pane
-                       writeIORef ref $ pp {ppNumChildren = ppNumChildren pp + 1, ppPanes = [pane]}
+                       writeIORef ref $ pp {ppNumChildren = ppNumChildren pp + 1, ppPanes = pane:(ppPanes pp)}
          (1, _)  -> do pane <- ppMkPaned pp
                        G.widgetShow pane
                        G.panedAdd2 pane w
@@ -184,7 +181,6 @@ ppInsert ref i w _ = do
                                G.panedAdd2 pane oldw
                                G.panedAdd2 (ppPanes pp !! i) pane
                                writeIORef ref $ pp {ppNumChildren = ppNumChildren pp + 1, ppPanes = (take i $ ppPanes pp)++[pane]++(drop i $ ppPanes pp)}
-         
 
 
 ppDelete :: RPanedPanels -> Int -> IO ()
@@ -210,7 +206,7 @@ ppDelete ref i = do
                      writeIORef ref $ pp {ppNumChildren = 1, ppPanes = []}                     
          (_,_) -> if i == ppNumChildren pp - 1
                      then do let pane = last $ ppPanes pp
-                                 prev = ppPanes pp !! (ppNumChildren pp - 3)
+                                 prev = last $ init $ ppPanes pp
                              w1 <- (liftM fromJust) $ G.panedGetChild1 pane
                              w2 <- (liftM fromJust) $ G.panedGetChild2 pane
                              G.containerRemove pane w1
@@ -226,7 +222,7 @@ ppDelete ref i = do
                              G.containerRemove pane w2
                              G.containerRemove prev pane
                              G.panedAdd2 prev w2
-                             writeIORef ref $ pp {ppNumChildren = ppNumChildren pp - 1, ppPanes = (take (i-1) $ ppPanes pp)++(drop i $ ppPanes pp)}
+                             writeIORef ref $ pp {ppNumChildren = ppNumChildren pp - 1, ppPanes = (take i $ ppPanes pp)++(drop (i+1) $ ppPanes pp)}
     if ppNumChildren pp == 1
        then cbDelete $ ppCB pp
        else return ()

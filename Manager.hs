@@ -19,12 +19,20 @@ dbgDefaultHeight = 768
 viewFactories :: [IO View]
 viewFactories = [ graphViewNew "left1" AlignLeft
                 , graphViewNew "left2" AlignLeft
+                , graphViewNew "left3" AlignLeft
+                , graphViewNew "left4" AlignLeft
                 , graphViewNew "right1" AlignRight
                 , graphViewNew "right2" AlignRight
+                , graphViewNew "right3" AlignRight
+                , graphViewNew "right4" AlignRight
                 , graphViewNew "center1" AlignCenter
                 , graphViewNew "center2" AlignCenter
+                , graphViewNew "center3" AlignCenter
+                , graphViewNew "center4" AlignCenter
                 , graphViewNew "bottom1" AlignBottom
-                , graphViewNew "bottom2" AlignBottom]
+                , graphViewNew "bottom2" AlignBottom
+                , graphViewNew "bottom3" AlignBottom
+                , graphViewNew "bottom4" AlignBottom]
 
 ------------------------------------------------
 -- Transition graph view
