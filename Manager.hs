@@ -7,11 +7,43 @@ import System.Glib.MainLoop
 
 import DbgTypes
 import IDE
-import DbgTypes
 import Icon
 
 dbgDefaultWidth  = 1024
 dbgDefaultHeight = 768
+
+data Debugger = Debugger {
+    dbgIDE      :: RIDE,
+    dbgViews    :: [DbgView]
+--    dbgTGraph   :: TransitionGraph
+}
+
+-- State associated by the debugger with each registered view (visible or invisible)
+data DbgView = DbgView {
+    dbgViewView     :: View,
+    dbgViewPanel    :: IDEPanel,
+    dbgViewVisible  :: Bool,
+    dbgViewMenuItem :: G.CheckMenuItem
+}
+
+type RDebugger = IORef Debugger
+
+dbgGetIDE :: RDebugger -> IO RIDE
+dbgGetIDE ref = do
+    dbg <- readIORef ref
+    return $ dbgIDE dbg
+
+dbgGetView :: RDebugger -> Int -> IO DbgView
+dbgGetView ref id = do
+    dbg <- readIORef ref
+    return $ dbgViews dbg !! id
+
+dbgSetView :: RDebugger -> Int -> DbgView -> IO ()
+dbgSetView ref id view = do
+    dbg <- readIORef ref
+    writeIORef ref $ dbg {dbgViews = (take id (dbgViews dbg)) ++ [view] ++ drop (id+1) (dbgViews dbg)}
+
+
 
 
 
