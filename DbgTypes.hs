@@ -1,7 +1,8 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts #-}
 
 module DbgTypes(View(..),
-                Type(..)) where
+                Type(..),
+                Rel) where
 
 import qualified Graphics.UI.Gtk as G 
 import Data.IORef
@@ -16,16 +17,23 @@ class (Variable c v,
        Eq a, 
        EqConst c v a, 
        Serialisable c a, 
-       Satisfiable c v a s r, 
+       Satisfiable c v a s [Bool], 
        BoolOp c v a, 
-       EqRaw c v a r,
+       EqRaw c v a [Bool],
        CUDDLike c v a,
-       Show a) => Rel c v a s r
+       Cubeable c v a,
+       Show a) => Rel c v a s
 
 data Type = Bool
           | SInt Int
           | UInt Int
           | Enum [String]
+
+instance Show Type where
+    show Bool      = "bool"
+    show (SInt i)  = "sint<" ++ show i ++ ">"
+    show (UInt i)  = "uint<" ++ show i ++ ">"
+    show (Enum es) = "enum"
 
 -- View interface
 data View a = View {

@@ -58,7 +58,7 @@ data VarEntry v a = VarEntry {
 -- External interface
 ----------------------------------------------------------
 
-setExplorerNew :: c -> [(String, v, D.Type, [Int])] -> SetExplorerEvents -> IO (RSetExplorer c v a)
+setExplorerNew :: D.Rel c v a s => c -> [(String, v, D.Type, [Int])] -> SetExplorerEvents -> IO (RSetExplorer c v a)
 setExplorerNew ctx vars cb = do
     let ?m = ctx
     -- vbox to hold explorer widgets
@@ -91,13 +91,16 @@ setExplorerNew ctx vars cb = do
     G.boxPackStart vbox view G.PackGrow 0
     G.widgetShow view
 
-    let addColumn title renderers = do
+    let addColumn :: String -> [(G.Object,(G.TreeIter -> IO ()))] -> IO ()
+        addColumn title renderers = do
             col <- G.treeViewColumnNew
             G.treeViewColumnSetTitle col title
-            mapM (\(rend,func) -> do G.cellLayoutPackStart col rend False
-                                     G.cellLayoutSetAttributeFunc col rend store func)
+            mapM (\(w,func) -> do let rend = G.castToCellRenderer w
+                                  G.cellLayoutPackStart col rend False
+                                  G.cellLayoutSetAttributeFunc col rend store func)
                  renderers
             G.treeViewAppendColumn view col
+            return ()
 
     let nodeFromIter iter = do
             let idx = G.listStoreIterToIndex iter
@@ -109,7 +112,7 @@ setExplorerNew ctx vars cb = do
             e@VarEntry{..} <- nodeFromIter iter 
             G.set varNameRend [G.cellText G.:= varName,
                                G.cellTextForegroundColor G.:= entryColor e]
-    addColumn "Variable" [(varNameRend,nameAttrFunc)]
+    addColumn "Variable" [(G.toObject varNameRend,nameAttrFunc)]
 
     -- Type column
     typeRend <- G.cellRendererTextNew
@@ -117,7 +120,7 @@ setExplorerNew ctx vars cb = do
             e@VarEntry{..} <- nodeFromIter iter
             G.set typeRend [G.cellText G.:= show varType,
                             G.cellTextForegroundColor G.:= entryColor e]        
-    addColumn "Type" [(typeRend,typeAttrFunc)]
+    addColumn "Type" [(G.toObject typeRend,typeAttrFunc)]
 
     -- Constraint
     constrTextRend  <- G.cellRendererTextNew
@@ -145,7 +148,7 @@ setExplorerNew ctx vars cb = do
                                    G.cellComboHasEntry G.:= False,
                                    G.cellText G.:= varUserSelectionText]
 
-    addColumn "Constraint" [(constrTextRend, textSetFunc), (constrComboRend, comboSetFunc)]
+    addColumn "Constraint" [(G.toObject constrTextRend, textSetFunc), (G.toObject constrComboRend, comboSetFunc)]
 
     -- Variable assignment column
     valRend <- G.cellRendererTextNew
@@ -153,7 +156,7 @@ setExplorerNew ctx vars cb = do
             e <- nodeFromIter iter
             G.set valRend [G.cellText G.:= varAssignmentStr e,
                            G.cellTextForegroundColor G.:= entryColor e]        
-    addColumn "Value" [(valRend,valAttrFunc)]
+    addColumn "Value" [(G.toObject valRend,valAttrFunc)]
 
     ref <- newIORef $ SetExplorer { seCtx   = ctx
                                   , seRel   = b
@@ -174,23 +177,21 @@ setExplorerNew ctx vars cb = do
 
     return ref
     
-setExplorerSetRelation :: RSetExplorer c v a -> a -> IO ()
+setExplorerSetRelation :: (D.Rel c v a s) => RSetExplorer c v a -> a -> IO ()
 setExplorerSetRelation ref rel = do
     se <- readIORef ref
-    let ?m = seCtx se
     let se' = se {seRel = rel}
     writeIORef ref se'
     entries <- G.listStoreToList $ seStore se'
     updateStore ref $ map varUserSelectionText entries
 
 -- Clear all value selections
-setExplorerReset :: RSetExplorer c v a -> IO ()
+setExplorerReset :: (D.Rel c v a s) => RSetExplorer c v a -> IO ()
 setExplorerReset ref = updateStore ref $ repeat "*"
 
 setExplorerGetVarAssignment :: RSetExplorer c v a -> IO [(String, a)]
 setExplorerGetVarAssignment ref = do
     se <- readIORef ref
-    let ?m = seCtx se
     entries <- G.listStoreToList $ seStore se
     return $ map (\e -> (varName e, varAssignment e)) entries
 
@@ -198,10 +199,11 @@ setExplorerGetVarAssignment ref = do
 -- GUI event handlers
 ---------------------------------------------------------------------
 
-userConstraintSelectionStarted :: RSetExplorer c v a -> G.Widget -> G.TreePath -> IO ()
+userConstraintSelectionStarted :: (D.Rel c v a s) => RSetExplorer c v a -> G.Widget -> G.TreePath -> IO ()
 userConstraintSelectionStarted ref w (idx:_) = do
     se@SetExplorer{..} <- readIORef ref
-    entries <- G.listStoreToList seStore idx
+    let ?m = seCtx
+    entries <- G.listStoreToList seStore
     let var@VarEntry{..} = entries !! idx
         combo = G.castToComboBox w
         -- user constraints over all other variables
@@ -219,7 +221,7 @@ userConstraintSelectionStarted ref w (idx:_) = do
     --G.comboBoxSetModel combo (Just store)
     G.comboBoxSetRowSeparatorSource combo (Just (store, (==sep)))
 
-userConstraintChanged :: RSetExplorer c v a -> G.TreePath -> String -> IO ()
+userConstraintChanged :: (D.Rel c v a s) => RSetExplorer c v a -> G.TreePath -> String -> IO ()
 userConstraintChanged ref (idx:_) val = do
     se <- readIORef ref
     entries <- G.listStoreToList $ seStore se
@@ -237,22 +239,23 @@ entryColor e | not (varEnabled e) = colorDisabled
              | otherwise          = colorNormal
 
 listStoreFromList :: G.ListStore a -> [a] -> IO()
-listStoreFromList ls xs = mapM (\(x,id) -> G.listStoreSetValue ls id x) $ zip xs [0..]
+listStoreFromList ls xs = do mapM (\(x,id) -> G.listStoreSetValue ls id x) $ zip xs [0..]
+                             return ()
 
-supportVars :: [VarEntry v a] -> a -> S.Set String
+supportVars :: (D.Rel c v a s, ?m::c) => [VarEntry v a] -> a -> S.Set String
 supportVars entries rel = S.fromList 
                           $ map varName 
                           $ filter (any (\idx -> S.member idx support) . varIndices)
                           $ entries
     where support = S.fromList $ supportIndices rel
 
-varUserConstraint :: VarEntry v a -> a
+varUserConstraint :: (D.Rel c v a s, ?m::c) => VarEntry v a -> a
 varUserConstraint var = constraintFromStr var (varUserSelectionText var)
 
-varAssignmentStr :: VarEntry v a -> String
+varAssignmentStr :: (D.Rel c v a s, ?m::c) => VarEntry v a -> String
 varAssignmentStr var = constraintToStr var (varAssignment var)
 
-constraintFromStr :: VarEntry v a -> String -> a
+constraintFromStr :: (D.Rel c v a s, ?m::c) => VarEntry v a -> String -> a
 constraintFromStr VarEntry{..} str =
     case str of 
          ""  -> t
@@ -270,7 +273,7 @@ constraintFromStr VarEntry{..} str =
                    D.Enum es -> eqConst varVar (fromJust $ findIndex (==str) es)
     where ichoice::(Maybe Integer) = readMay str
          
-constraintToStr :: VarEntry v a -> a -> String
+constraintToStr :: (D.Rel c v a s, ?m::c) => VarEntry v a -> a -> String
 constraintToStr _ rel            | rel == t = "*"
 constraintToStr _ rel            | rel == b = "#"
 constraintToStr VarEntry{..} rel = 
@@ -280,16 +283,17 @@ boolArrToBitsBe :: (Bits a) => [Bool] -> a
 boolArrToBitsBe bits = foldl' (\x (bit, id) -> if bit then setBit x id else x) 0 $ zip (reverse bits) [0..]
 
 valStrFromInt :: D.Type -> Integer -> String
-valStrFromInt D.Bool      0                    = "False"
-valStrFromInt D.Bool      1                    = "True"
-valStrFromInt (D.Enum es) i | length es >= i+1 = es !! i
-                            | otherwise        = "?"
-valStrFromInt _           i                    = show i
+valStrFromInt D.Bool      0                                = "False"
+valStrFromInt D.Bool      1                                = "True"
+valStrFromInt (D.Enum es) i | length es >= fromInteger i+1 = es !! (fromInteger i)
+                            | otherwise                    = "?"
+valStrFromInt _           i                                = show i
 
 -- transition relation or user selection has changed--update the store
-updateStore :: RSetExplorer c v a -> [String] -> IO ()
+updateStore :: (D.Rel c v a s) => RSetExplorer c v a -> [String] -> IO ()
 updateStore ref selects = do
     se@(SetExplorer {..}) <- readIORef ref
+    let ?m = seCtx
     -- update store
     entries <- G.listStoreToList seStore
     let entries'  = map (\(e,s) -> e{varUserSelectionText = s}) $ zip entries selects
@@ -303,7 +307,7 @@ updateStore ref selects = do
     writeIORef ref $ se {seCover = primeCover rel'}
     showImplicant ref 0
 
-showImplicant :: RSetExplorer c v a -> Int -> IO ()
+showImplicant :: (D.Rel c v a s, ?m::c) => RSetExplorer c v a -> Int -> IO ()
 showImplicant ref idx = do
     SetExplorer {..} <- readIORef ref
     entries <- G.listStoreToList seStore
@@ -315,7 +319,7 @@ showImplicant ref idx = do
                        entries
     listStoreFromList seStore entries'
     -- update spin button
-    G.spinButtonSetValue seSpin idx
+    G.spinButtonSetValue seSpin (fromIntegral idx)
     case remaining of
-         (_:_:_) -> G.spinButtonSetRange seSpin 0 (idx+1)
-         _       -> G.spinButtonSetRange seSpin 0 idx
+         (_:_:_) -> G.spinButtonSetRange seSpin 0 (fromIntegral $ idx+1)
+         _       -> G.spinButtonSetRange seSpin 0 (fromIntegral idx)
