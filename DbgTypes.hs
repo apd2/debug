@@ -1,7 +1,11 @@
-module DbgTypes(View(..)) where
+{-# LANGUAGE MultiParamTypeClasses #-}
+
+module DbgTypes(View(..),
+                Type(..)) where
 
 import qualified Graphics.UI.Gtk as G 
 import Data.IORef
+import Control.Monad
 
 import IDE
 import LogicClasses
@@ -18,6 +22,11 @@ class (Variable c v,
        CUDDLike c v a,
        Show a) => Rel c v a s r
 
+data Type = Bool
+          | SInt Int
+          | UInt Int
+          | Enum [String]
+
 -- View interface
 data View a = View {
     viewName      :: String,
@@ -28,15 +37,39 @@ data View a = View {
     viewCB        :: ViewEvents a
 }
 
+data Transition a = Transition {
+    tranRel :: a    
+}
+
+tranFromState :: Transition a -> a
+tranFromState = undefined
+
+tranToState   :: Transition a -> a
+tranToState = undefined
+
+tranLabel     :: Transition a -> a
+tranLabel = undefined
+
 data ViewEvents a = ViewEvents {
      evtStateSelected :: Maybe a -> IO (),
-     evtTransition    :: a -> Label a -> a -> IO ()
+     evtTransition    :: Transition a -> IO ()
 }
 
 ------------------------------------------------------
 -- Top-level debugger state
 ------------------------------------------------------
 
-data Model = Model
+data Model a = Model {
+    mStateRels :: [(String, a)],
+    mTransRels :: [(String, a)]
+    --modelStateVars :: [(String, )]
 
-type RModel = IORef Model
+}
+
+type RModel a = IORef (Model a)
+
+modelTransRels :: RModel a -> IO [(String, a)]
+modelTransRels ref = (liftM mTransRels) $ readIORef ref
+
+modelStateRels :: RModel a -> IO [(String, a)]
+modelStateRels ref = (liftM mStateRels) $ readIORef ref
