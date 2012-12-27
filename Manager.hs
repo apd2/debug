@@ -8,6 +8,8 @@ import System.Glib.MainLoop
 import DbgTypes
 import IDE
 import Icon
+import VarView
+import GraphView
 
 dbgDefaultWidth  = 1024
 dbgDefaultHeight = 768
@@ -15,7 +17,6 @@ dbgDefaultHeight = 768
 data Debugger = Debugger {
     dbgIDE      :: RIDE,
     dbgViews    :: [DbgView]
---    dbgTGraph   :: TransitionGraph
 }
 
 -- State associated by the debugger with each registered view (visible or invisible)
@@ -29,9 +30,7 @@ data DbgView = DbgView {
 type RDebugger = IORef Debugger
 
 dbgGetIDE :: RDebugger -> IO RIDE
-dbgGetIDE ref = do
-    dbg <- readIORef ref
-    return $ dbgIDE dbg
+dbgGetIDE ref = (liftM dbgIDE) $ readIORef ref
 
 dbgGetView :: RDebugger -> Int -> IO DbgView
 dbgGetView ref id = do
@@ -43,55 +42,34 @@ dbgSetView ref id view = do
     dbg <- readIORef ref
     writeIORef ref $ dbg {dbgViews = (take id (dbgViews dbg)) ++ [view] ++ drop (id+1) (dbgViews dbg)}
 
-
-
-
-
 -- List of available views
-viewFactories :: [IO View]
-viewFactories = [ graphViewNew "left1" AlignLeft
-                , graphViewNew "left2" AlignLeft
-                , graphViewNew "left3" AlignLeft
-                , graphViewNew "left4" AlignLeft
-                , graphViewNew "right1" AlignRight
-                , graphViewNew "right2" AlignRight
-                , graphViewNew "right3" AlignRight
-                , graphViewNew "right4" AlignRight
-                , graphViewNew "center1" AlignCenter
-                , graphViewNew "center2" AlignCenter
-                , graphViewNew "center3" AlignCenter
-                , graphViewNew "center4" AlignCenter
-                , graphViewNew "bottom1" AlignBottom
-                , graphViewNew "bottom2" AlignBottom
-                , graphViewNew "bottom3" AlignBottom
-                , graphViewNew "bottom4" AlignBottom]
+viewFactories :: [(D.RModel c a -> IO View)]
+viewFactories = [ varViewNew
+                , graphViewNew]
 
-------------------------------------------------
--- Transition graph view
--------------------------------------------------
-
-data GraphView = GraphView
-type RGraphView = IORef GraphView
-
-graphViewNew :: String -> IDEAlign -> IO View
-graphViewNew name align = do
-    layout <- G.layoutNew Nothing Nothing
-    G.widgetShow layout
-    ref <- newIORef GraphView
-    return $ View { viewName      = name 
-                  , viewDefAlign  = align
-                  , viewShow      = (\_ -> return ())
-                  , viewHide      = (\_ -> return ())
-                  , viewGetWidget = return $ G.toWidget layout}
-
--------------------------------------------------
--- State variable view
--------------------------------------------------
-
+--------------------------------------------------
+---- Transition graph view
+---------------------------------------------------
+--
+--data GraphView = GraphView
+--type RGraphView = IORef GraphView
+--
+--graphViewNew :: String -> IDEAlign -> IO View
+--graphViewNew name align = do
+--    layout <- G.layoutNew Nothing Nothing
+--    G.widgetShow layout
+--    ref <- newIORef GraphView
+--    return $ View { viewName      = name 
+--                  , viewDefAlign  = align
+--                  , viewShow      = (\_ -> return ())
+--                  , viewHide      = (\_ -> return ())
+--                  , viewGetWidget = return $ G.toWidget layout}
 
 -- GUI manager
-debugGUI :: IO ()
-debugGUI = do
+debugGUI :: D.Model c a -> IO ()
+debugGUI model = do
+    rmodel <- newIORef model
+
     -- Initialize GTK+ engine
     G.initGUI 
     -- Every so often, we try to run other threads.
@@ -131,18 +109,18 @@ debugGUI = do
 
     G.boxPackStart vbox idew G.PackGrow 0
 
-    views <- mapM (\(f,id) -> do view <- f
-                                 mitem <- G.checkMenuItemNewWithLabel (viewName view)
-                                 G.menuShellAppend mview mitem
-                                 G.on mitem G.checkMenuItemToggled (dbgViewToggle ref id mitem)
-                                 G.widgetShow mitem                                 
-                                 w <- viewGetWidget view
-                                 panel <- framePanelNew w (viewName view) (dbgViewHideCB ref id)
-                                 return $ DbgView { dbgViewView     = view
-                                                  , dbgViewPanel    = panel
-                                                  , dbgViewVisible  = False
-                                                  , dbgViewMenuItem = mitem})
-                  $ zip viewFactories [0..]
+    views <- mapIdxM (\f id -> do view <- f rmodel
+                                  mitem <- G.checkMenuItemNewWithLabel (viewName view)
+                                  G.menuShellAppend mview mitem
+                                  G.on mitem G.checkMenuItemToggled (dbgViewToggle ref id mitem)
+                                  G.widgetShow mitem                                 
+                                  w <- viewGetWidget view
+                                  panel <- framePanelNew w (viewName view) (dbgViewHideCB ref id)
+                                  return $ DbgView { dbgViewView     = view
+                                                   , dbgViewPanel    = panel
+                                                   , dbgViewVisible  = False
+                                                   , dbgViewMenuItem = mitem})
+                  viewFactories
 
     dbg <- readIORef ref
     writeIORef ref $ dbg {dbgViews = views}

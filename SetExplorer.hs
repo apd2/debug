@@ -1,9 +1,12 @@
 {-# LANGUAGE RecordWildCards, ImplicitParams, ScopedTypeVariables #-}
 
-module SetExplorer(setExplorerNew,
+module SetExplorer(RSetExplorer,
+                   setExplorerNew,
                    setExplorerSetRelation,
                    setExplorerReset,
-                   setExplorerGetVarAssignment) where
+                   setExplorerGetVarAssignment,
+                   setExplorerGetWidget,
+                   SetExplorerEvents(..)) where
 
 import Safe
 import Data.IORef
@@ -14,6 +17,7 @@ import Control.Monad
 import qualified Data.Set        as S
 import qualified Graphics.UI.Gtk as G
 
+import Util
 import qualified DbgTypes        as D
 import Implicit
 
@@ -26,26 +30,27 @@ colorChanged  = G.Color 65535 0     0
 colorNormal   = G.Color 0     0     0
 
 data SetExplorerEvents = SetExplorerEvents {
+    evtValueChanged :: IO ()
 }
 
 ----------------------------------------------------------
 -- Types
 ----------------------------------------------------------
 
-data SetExplorer c v a = SetExplorer {
+data SetExplorer c a = SetExplorer {
     seCtx            :: c,
+    seCB             :: SetExplorerEvents,
     seRel            :: a,
     seVBox           :: G.VBox,
     seSpin           :: G.SpinButton,
-    seStore          :: G.ListStore (VarEntry v a),
+    seStore          :: G.ListStore (VarEntry a),
     seCover          :: [a]          -- prime cover of seRel conjuncted with user selections
 }
 
-type RSetExplorer c v a = IORef (SetExplorer c v a)
+type RSetExplorer c a = IORef (SetExplorer c a)
 
-data VarEntry v a = VarEntry {
+data VarEntry a = VarEntry {
     varName              :: String,
-    varVar               :: v,
     varType              :: D.Type,
     varIndices           :: [Int],
     varUserSelectionText :: String,
@@ -54,11 +59,15 @@ data VarEntry v a = VarEntry {
     varChanged           :: Bool      -- True = highlight variable as changed
 }
 
+varVar :: (D.Rel c v a s, ?m::c) => VarEntry a -> v
+varVar VarEntry{..} = vconcat $ map varAtIndex varIndices
+
+
 ----------------------------------------------------------
 -- External interface
 ----------------------------------------------------------
 
-setExplorerNew :: D.Rel c v a s => c -> [(String, v, D.Type, [Int])] -> SetExplorerEvents -> IO (RSetExplorer c v a)
+setExplorerNew :: D.Rel c v a s => c -> [(String, D.Type, [Int])] -> SetExplorerEvents -> IO (RSetExplorer c a)
 setExplorerNew ctx vars cb = do
     let ?m = ctx
     -- vbox to hold explorer widgets
@@ -71,18 +80,21 @@ setExplorerNew ctx vars cb = do
     G.spinButtonSetNumeric spin True
     G.spinButtonSetUpdatePolicy spin G.UpdateIfValid
     --G.spinButtonSetIncrements spin 1 (-1)
-    G.boxPackStart vbox spin G.PackNatural 0
-    G.widgetShow spin
+
+    -- don't show the spin button if there is only one variable
+    if length vars > 1
+       then do G.boxPackStart vbox spin G.PackNatural 0
+               G.widgetShow spin
+       else return ()
 
     -- list store
-    let entries = map (\(n,v,d,i) -> VarEntry { varName              = n
-                                              , varVar               = v
-                                              , varType              = d
-                                              , varIndices           = i
-                                              , varUserSelectionText = "*"
-                                              , varAssignment        = b
-                                              , varEnabled           = True
-                                              , varChanged           = False })
+    let entries = map (\(n,d,i) -> VarEntry { varName              = n
+                                            , varType              = d
+                                            , varIndices           = i
+                                            , varUserSelectionText = "*"
+                                            , varAssignment        = b
+                                            , varEnabled           = True
+                                            , varChanged           = False })
                       vars
     store <- G.listStoreNew entries
 
@@ -159,6 +171,7 @@ setExplorerNew ctx vars cb = do
     addColumn "Value" [(G.toObject valRend,valAttrFunc)]
 
     ref <- newIORef $ SetExplorer { seCtx   = ctx
+                                  , seCB    = cb
                                   , seRel   = b
                                   , seVBox  = vbox
                                   , seSpin  = spin
@@ -177,7 +190,7 @@ setExplorerNew ctx vars cb = do
 
     return ref
     
-setExplorerSetRelation :: (D.Rel c v a s) => RSetExplorer c v a -> a -> IO ()
+setExplorerSetRelation :: (D.Rel c v a s) => RSetExplorer c a -> a -> IO ()
 setExplorerSetRelation ref rel = do
     se <- readIORef ref
     let se' = se {seRel = rel}
@@ -186,20 +199,23 @@ setExplorerSetRelation ref rel = do
     updateStore ref $ map varUserSelectionText entries
 
 -- Clear all value selections
-setExplorerReset :: (D.Rel c v a s) => RSetExplorer c v a -> IO ()
+setExplorerReset :: (D.Rel c v a s) => RSetExplorer c a -> IO ()
 setExplorerReset ref = updateStore ref $ repeat "*"
 
-setExplorerGetVarAssignment :: RSetExplorer c v a -> IO [(String, a)]
+setExplorerGetVarAssignment :: RSetExplorer c a -> IO [(String, a)]
 setExplorerGetVarAssignment ref = do
     se <- readIORef ref
     entries <- G.listStoreToList $ seStore se
     return $ map (\e -> (varName e, varAssignment e)) entries
 
+setExplorerGetWidget :: RSetExplorer c a -> IO G.Widget
+setExplorerGetWidget ref = (liftM $ G.toWidget . seVBox) $ readIORef ref
+
 ---------------------------------------------------------------------
 -- GUI event handlers
 ---------------------------------------------------------------------
 
-userConstraintSelectionStarted :: (D.Rel c v a s) => RSetExplorer c v a -> G.Widget -> G.TreePath -> IO ()
+userConstraintSelectionStarted :: (D.Rel c v a s) => RSetExplorer c a -> G.Widget -> G.TreePath -> IO ()
 userConstraintSelectionStarted ref w (idx:_) = do
     se@SetExplorer{..} <- readIORef ref
     let ?m = seCtx
@@ -216,12 +232,11 @@ userConstraintSelectionStarted ref w (idx:_) = do
                        _         -> []
         (avail, unavail) = partition ((/= b) . (rel' .&) . constraintFromStr var) vals
         sep = "====================="
-
     store <- G.listStoreNew $ ["*"] ++ [sep] ++ avail ++ [sep] ++ unavail
     --G.comboBoxSetModel combo (Just store)
     G.comboBoxSetRowSeparatorSource combo (Just (store, (==sep)))
 
-userConstraintChanged :: (D.Rel c v a s) => RSetExplorer c v a -> G.TreePath -> String -> IO ()
+userConstraintChanged :: (D.Rel c v a s) => RSetExplorer c a -> G.TreePath -> String -> IO ()
 userConstraintChanged ref (idx:_) val = do
     se <- readIORef ref
     entries <- G.listStoreToList $ seStore se
@@ -233,54 +248,55 @@ userConstraintChanged ref (idx:_) val = do
 -- Private functions
 ---------------------------------------------------------------------
 
-entryColor :: VarEntry v a -> G.Color
+entryColor :: VarEntry a -> G.Color
 entryColor e | not (varEnabled e) = colorDisabled
              | varChanged e       = colorChanged
              | otherwise          = colorNormal
 
 listStoreFromList :: G.ListStore a -> [a] -> IO()
-listStoreFromList ls xs = do mapM (\(x,id) -> G.listStoreSetValue ls id x) $ zip xs [0..]
+listStoreFromList ls xs = do mapIdxM (\x id -> G.listStoreSetValue ls id x) xs
                              return ()
 
-supportVars :: (D.Rel c v a s, ?m::c) => [VarEntry v a] -> a -> S.Set String
+supportVars :: (D.Rel c v a s, ?m::c) => [VarEntry a] -> a -> S.Set String
 supportVars entries rel = S.fromList 
                           $ map varName 
                           $ filter (any (\idx -> S.member idx support) . varIndices)
                           $ entries
     where support = S.fromList $ supportIndices rel
 
-varUserConstraint :: (D.Rel c v a s, ?m::c) => VarEntry v a -> a
+varUserConstraint :: (D.Rel c v a s, ?m::c) => VarEntry a -> a
 varUserConstraint var = constraintFromStr var (varUserSelectionText var)
 
-varAssignmentStr :: (D.Rel c v a s, ?m::c) => VarEntry v a -> String
+varAssignmentStr :: (D.Rel c v a s, ?m::c) => VarEntry a -> String
 varAssignmentStr var = constraintToStr var (varAssignment var)
 
-constraintFromStr :: (D.Rel c v a s, ?m::c) => VarEntry v a -> String -> a
-constraintFromStr VarEntry{..} str =
+constraintFromStr :: (D.Rel c v a s, ?m::c) => VarEntry a -> String -> a
+constraintFromStr var@VarEntry{..} str =
     case str of 
          ""  -> t
          "*" -> t
          _   -> case varType of
                    D.SInt _  -> case ichoice of 
                                      Nothing   -> t
-                                     Just ival -> eqConst varVar ival
+                                     Just ival -> eqConst v ival
                    D.UInt _  -> case ichoice of 
                                      Nothing   -> t
-                                     Just ival -> eqConst varVar ival
+                                     Just ival -> eqConst v ival
                    D.Bool    -> case str of
-                                     "true"  -> eqConst varVar (1::Int)
-                                     "false" -> eqConst varVar (0::Int)
-                   D.Enum es -> eqConst varVar (fromJust $ findIndex (==str) es)
+                                     "true"  -> eqConst v (1::Int)
+                                     "false" -> eqConst v (0::Int)
+                   D.Enum es -> eqConst v (fromJust $ findIndex (==str) es)
     where ichoice::(Maybe Integer) = readMay str
+          v = varVar var
          
-constraintToStr :: (D.Rel c v a s, ?m::c) => VarEntry v a -> a -> String
+constraintToStr :: (D.Rel c v a s, ?m::c) => VarEntry a -> a -> String
 constraintToStr _ rel            | rel == t = "*"
 constraintToStr _ rel            | rel == b = "#"
-constraintToStr VarEntry{..} rel = 
-    valStrFromInt varType $ boolArrToBitsBe $ extract varVar $ fromJust $ satOne rel
+constraintToStr var@VarEntry{..} rel = 
+    valStrFromInt varType $ boolArrToBitsBe $ extract (varVar var) $ fromJust $ satOne rel
     
 boolArrToBitsBe :: (Bits a) => [Bool] -> a
-boolArrToBitsBe bits = foldl' (\x (bit, id) -> if bit then setBit x id else x) 0 $ zip (reverse bits) [0..]
+boolArrToBitsBe bits = foldIdx (\x bit id -> if bit then setBit x id else x) 0 (reverse bits)
 
 valStrFromInt :: D.Type -> Integer -> String
 valStrFromInt D.Bool      0                                = "False"
@@ -290,7 +306,7 @@ valStrFromInt (D.Enum es) i | length es >= fromInteger i+1 = es !! (fromInteger 
 valStrFromInt _           i                                = show i
 
 -- transition relation or user selection has changed--update the store
-updateStore :: (D.Rel c v a s) => RSetExplorer c v a -> [String] -> IO ()
+updateStore :: (D.Rel c v a s) => RSetExplorer c a -> [String] -> IO ()
 updateStore ref selects = do
     se@(SetExplorer {..}) <- readIORef ref
     let ?m = seCtx
@@ -307,14 +323,14 @@ updateStore ref selects = do
     writeIORef ref $ se {seCover = primeCover rel'}
     showImplicant ref 0
 
-showImplicant :: (D.Rel c v a s, ?m::c) => RSetExplorer c v a -> Int -> IO ()
+showImplicant :: (D.Rel c v a s, ?m::c) => RSetExplorer c a -> Int -> IO ()
 showImplicant ref idx = do
     SetExplorer {..} <- readIORef ref
     entries <- G.listStoreToList seStore
     let remaining = drop idx seCover
         entries' = map (\e@VarEntry{..} -> let asn = case remaining of
                                                           []  -> b
-                                                          i:_ -> fromJust $ oneCube varVar i
+                                                          i:_ -> fromJust $ oneCube (varVar e) i
                                            in e {varAssignment = asn, varChanged = (asn /= varAssignment)})
                        entries
     listStoreFromList seStore entries'
@@ -323,3 +339,4 @@ showImplicant ref idx = do
     case remaining of
          (_:_:_) -> G.spinButtonSetRange seSpin 0 (fromIntegral $ idx+1)
          _       -> G.spinButtonSetRange seSpin 0 (fromIntegral idx)
+    evtValueChanged seCB
