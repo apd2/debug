@@ -1,11 +1,15 @@
-{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, ImplicitParams #-}
 
 module DbgTypes(Rel,
                 View(..),
                 ViewEvents(..),
                 Type(..),
                 Transition(..),
+                Model(..),
                 RModel,
+                contRelName,
+                idxToVS,
+                valStrFromInt,
                 modelCtx,
                 modelStateVars,
                 modelLabelVars,
@@ -21,25 +25,35 @@ import Data.IORef
 import Control.Monad
 
 import IDE
-import LogicClasses
+import qualified LogicClasses as L
+import Implicit
+
+------------------------------------------------------
+-- Constants
+------------------------------------------------------
+
+contRelName = "Controllable states"
 
 ------------------------------------------------------
 -- Types
 ------------------------------------------------------
 
-class (Variable c v, 
-       VarDecl c v,
-       Shiftable c v a, 
-       QBF c v a, 
+class (L.Variable c v, 
+       L.VarDecl c v,
+       L.Shiftable c v a, 
+       L.QBF c v a, 
+       L.EqConst c v a, 
+       L.Serialisable c a, 
+       L.Satisfiable c v a s [Bool], 
+       L.BoolOp c v a, 
+       L.EqRaw c v a [Bool],
+       L.CUDDLike c v a,
+       L.Cubeable c v a,
        Eq a, 
-       EqConst c v a, 
-       Serialisable c a, 
-       Satisfiable c v a s [Bool], 
-       BoolOp c v a, 
-       EqRaw c v a [Bool],
-       CUDDLike c v a,
-       Cubeable c v a,
        Show a) => Rel c v a s
+
+idxToVS :: (Rel c v a s, ?m::c) => [Int] -> v
+idxToVS indices = vconcat $ map varAtIndex indices
 
 -- Debugger's own type system
 data Type = Bool
@@ -52,6 +66,13 @@ instance Show Type where
     show (SInt i)  = "sint<" ++ show i ++ ">"
     show (UInt i)  = "uint<" ++ show i ++ ">"
     show (Enum es) = "enum"
+
+valStrFromInt :: Type -> Integer -> String
+valStrFromInt Bool      0                                = "False"
+valStrFromInt Bool      1                                = "True"
+valStrFromInt (Enum es) i | length es >= fromInteger i+1 = es !! (fromInteger i)
+                          | otherwise                    = "?"
+valStrFromInt _         i                                = show i
 
 -- View interface
 data View a = View {
@@ -79,10 +100,13 @@ data Transition a = Transition {
 -- Debugger state
 data Model c a = Model {
     mCtx           :: c,
+
+    -- Variable sections
     mStateVars     :: [(String, Type, ([Int],[Int]))],
     mUntrackedVars :: [(String, Type, [Int])],
     mLabelVars     :: [(String, Type, [Int])],
 
+    -- State and transition relations being debugged
     mStateRels     :: [(String, a)],
     mTransRels     :: [(String, a)],
 

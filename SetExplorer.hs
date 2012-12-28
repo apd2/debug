@@ -60,8 +60,7 @@ data VarEntry a = VarEntry {
 }
 
 varVar :: (D.Rel c v a s, ?m::c) => VarEntry a -> v
-varVar VarEntry{..} = vconcat $ map varAtIndex varIndices
-
+varVar = D.idxToVS . varIndices
 
 ----------------------------------------------------------
 -- External interface
@@ -260,9 +259,9 @@ listStoreFromList ls xs = do mapIdxM (\x id -> G.listStoreSetValue ls id x) xs
 supportVars :: (D.Rel c v a s, ?m::c) => [VarEntry a] -> a -> S.Set String
 supportVars entries rel = S.fromList 
                           $ map varName 
-                          $ filter (any (\idx -> S.member idx support) . varIndices)
+                          $ filter (any (\idx -> elem idx support) . varIndices)
                           $ entries
-    where support = S.fromList $ supportIndices rel
+    where support = supportIndices rel
 
 varUserConstraint :: (D.Rel c v a s, ?m::c) => VarEntry a -> a
 varUserConstraint var = constraintFromStr var (varUserSelectionText var)
@@ -293,18 +292,8 @@ constraintToStr :: (D.Rel c v a s, ?m::c) => VarEntry a -> a -> String
 constraintToStr _ rel            | rel == t = "*"
 constraintToStr _ rel            | rel == b = "#"
 constraintToStr var@VarEntry{..} rel = 
-    valStrFromInt varType $ boolArrToBitsBe $ extract (varVar var) $ fromJust $ satOne rel
+    D.valStrFromInt varType $ boolArrToBitsBe $ extract (varVar var) $ fromJust $ satOne rel
     
-boolArrToBitsBe :: (Bits a) => [Bool] -> a
-boolArrToBitsBe bits = foldIdx (\x bit id -> if bit then setBit x id else x) 0 (reverse bits)
-
-valStrFromInt :: D.Type -> Integer -> String
-valStrFromInt D.Bool      0                                = "False"
-valStrFromInt D.Bool      1                                = "True"
-valStrFromInt (D.Enum es) i | length es >= fromInteger i+1 = es !! (fromInteger i)
-                            | otherwise                    = "?"
-valStrFromInt _           i                                = show i
-
 -- transition relation or user selection has changed--update the store
 updateStore :: (D.Rel c v a s) => RSetExplorer c a -> [String] -> IO ()
 updateStore ref selects = do

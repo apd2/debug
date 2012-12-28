@@ -1,10 +1,12 @@
-module Manager(debugGUI) where
+module DbgGUI(debugGUI) where
 
 import qualified Graphics.UI.Gtk as G
 import Control.Concurrent
+import Control.Monad
 import Data.IORef
 import System.Glib.MainLoop
 
+import Util
 import DbgTypes
 import IDE
 import Icon
@@ -14,59 +16,43 @@ import GraphView
 dbgDefaultWidth  = 1024
 dbgDefaultHeight = 768
 
-data Debugger = Debugger {
+data Debugger a = Debugger {
     dbgIDE      :: RIDE,
-    dbgViews    :: [DbgView]
+    dbgViews    :: [DbgView a]
 }
 
+type RDebugger a = IORef (Debugger a)
+
 -- State associated by the debugger with each registered view (visible or invisible)
-data DbgView = DbgView {
-    dbgViewView     :: View,
+data DbgView a = DbgView {
+    dbgViewView     :: View a,
     dbgViewPanel    :: IDEPanel,
     dbgViewVisible  :: Bool,
     dbgViewMenuItem :: G.CheckMenuItem
 }
 
-type RDebugger = IORef Debugger
 
-dbgGetIDE :: RDebugger -> IO RIDE
+dbgGetIDE :: RDebugger a -> IO RIDE
 dbgGetIDE ref = (liftM dbgIDE) $ readIORef ref
 
-dbgGetView :: RDebugger -> Int -> IO DbgView
+dbgGetView :: RDebugger a -> Int -> IO (DbgView a)
 dbgGetView ref id = do
     dbg <- readIORef ref
     return $ dbgViews dbg !! id
 
-dbgSetView :: RDebugger -> Int -> DbgView -> IO ()
+dbgSetView :: RDebugger a -> Int -> DbgView a -> IO ()
 dbgSetView ref id view = do
     dbg <- readIORef ref
     writeIORef ref $ dbg {dbgViews = (take id (dbgViews dbg)) ++ [view] ++ drop (id+1) (dbgViews dbg)}
 
 -- List of available views
-viewFactories :: [(D.RModel c a -> IO View)]
+viewFactories :: (Rel c v a s) => [(RModel c a -> IO (View a))]
 viewFactories = [ varViewNew
                 , graphViewNew]
 
---------------------------------------------------
----- Transition graph view
----------------------------------------------------
---
---data GraphView = GraphView
---type RGraphView = IORef GraphView
---
---graphViewNew :: String -> IDEAlign -> IO View
---graphViewNew name align = do
---    layout <- G.layoutNew Nothing Nothing
---    G.widgetShow layout
---    ref <- newIORef GraphView
---    return $ View { viewName      = name 
---                  , viewDefAlign  = align
---                  , viewShow      = (\_ -> return ())
---                  , viewHide      = (\_ -> return ())
---                  , viewGetWidget = return $ G.toWidget layout}
 
 -- GUI manager
-debugGUI :: D.Model c a -> IO ()
+debugGUI :: (Rel c v a s) => Model c a -> IO ()
 debugGUI model = do
     rmodel <- newIORef model
 
@@ -129,7 +115,7 @@ debugGUI model = do
     G.mainGUI
 
 
-dbgViewToggle :: RDebugger -> Int -> G.CheckMenuItem -> IO ()
+dbgViewToggle :: RDebugger a -> Int -> G.CheckMenuItem -> IO ()
 dbgViewToggle ref id item = do
     active <- G.checkMenuItemGetActive item
     view <- dbgGetView ref id
@@ -140,10 +126,10 @@ dbgViewToggle ref id item = do
                else return ()
 
 
-dbgViewShow :: RDebugger -> Int  -> IO ()
+dbgViewShow :: RDebugger a -> Int  -> IO ()
 dbgViewShow ref id = do
     view <- dbgGetView ref id
-    (viewShow $ dbgViewView view) ref
+    viewShow $ dbgViewView view
     ide  <- dbgGetIDE ref
     let align = viewDefAlign $ dbgViewView view
         panel = dbgViewPanel view
@@ -155,10 +141,10 @@ dbgViewShow ref id = do
     dbgSetView ref id $ view {dbgViewVisible = True}
 
 
-dbgViewHide :: RDebugger -> Int  -> IO ()
+dbgViewHide :: RDebugger a -> Int  -> IO ()
 dbgViewHide ref id = do
     view <- dbgGetView ref id
-    (viewHide $ dbgViewView view) ref
+    viewHide $ dbgViewView view
     ide  <- dbgGetIDE ref
     let panel = dbgViewPanel view
     ideRemove ide panel
@@ -167,7 +153,7 @@ dbgViewHide ref id = do
 -- Callback triggered by a view when it wants to hide itself.
 -- Simply toggle the menu item to unchecked state.  Do the actual
 -- deletion in the event handler.
-dbgViewHideCB :: RDebugger -> Int -> IO ()
+dbgViewHideCB :: RDebugger a -> Int -> IO ()
 dbgViewHideCB ref id = do
     view <- dbgGetView ref id
     G.checkMenuItemSetActive (dbgViewMenuItem view) False
