@@ -68,7 +68,7 @@ varViewNew model = do
     let cb = D.ViewEvents { D.evtStateSelected      = varViewStateSelected      ref 
                           , D.evtTransitionSelected = varViewTransitionSelected ref
                           }
-    return $ D.View { D.viewName      = "Transition graph"
+    return $ D.View { D.viewName      = "Variables"
                     , D.viewDefAlign  = D.AlignLeft
                     , D.viewShow      = return ()
                     , D.viewHide      = return ()

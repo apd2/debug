@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, ImplicitParams #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, ImplicitParams, FunctionalDependencies #-}
 
 module DbgTypes(Rel,
                 View(..),
@@ -50,7 +50,7 @@ class (L.Variable c v,
        L.CUDDLike c v a,
        L.Cubeable c v a,
        Eq a, 
-       Show a) => Rel c v a s
+       Show a) => Rel c v a s | c -> v, c -> a, c -> s
 
 idxToVS :: (Rel c v a s, ?m::c) => [Int] -> v
 idxToVS indices = vconcat $ map varAtIndex indices

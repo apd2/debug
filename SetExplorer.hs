@@ -25,7 +25,7 @@ import Implicit
 -- Constants
 ----------------------------------------------------------
 
-colorDisabled = G.Color 20000 20000 20000
+colorDisabled = G.Color 30000 30000 30000
 colorChanged  = G.Color 65535 0     0
 colorNormal   = G.Color 0     0     0
 
@@ -74,7 +74,7 @@ setExplorerNew ctx vars cb = do
     G.widgetShow vbox
 
     -- spin button
-    adj <- G.adjustmentNew 0 0 0 1 1 1
+    adj <- G.adjustmentNew 0 0 0 1 1 0
     spin <- G.spinButtonNew adj 1 0
     G.spinButtonSetNumeric spin True
     G.spinButtonSetUpdatePolicy spin G.UpdateIfValid
@@ -149,6 +149,8 @@ setExplorerNew ctx vars cb = do
                                   G.cellText G.:= varUserSelectionText]
                                   
         comboSetFunc iter = do
+            lstore <- G.listStoreNew ["*"]
+            G.customStoreSetColumn lstore (G.makeColumnIdString 0) id
             e@VarEntry{..} <- nodeFromIter iter    
             G.set constrComboRend [G.cellVisible G.:= case varType of
                                                            D.Bool   -> True
@@ -157,6 +159,7 @@ setExplorerNew ctx vars cb = do
                                                            D.UInt _ -> False,
                                    G.cellTextEditable G.:= True,
                                    G.cellComboHasEntry G.:= False,
+                                   G.cellComboTextModel G.:= (lstore, G.makeColumnIdString 0),
                                    G.cellText G.:= varUserSelectionText]
 
     addColumn "Constraint" [(G.toObject constrTextRend, textSetFunc), (G.toObject constrComboRend, comboSetFunc)]
@@ -216,6 +219,7 @@ setExplorerGetWidget ref = (liftM $ G.toWidget . seVBox) $ readIORef ref
 
 userConstraintSelectionStarted :: (D.Rel c v a s) => RSetExplorer c a -> G.Widget -> G.TreePath -> IO ()
 userConstraintSelectionStarted ref w (idx:_) = do
+    putStrLn "userConstraintSelectionStarted"
     se@SetExplorer{..} <- readIORef ref
     let ?m = seCtx
     entries <- G.listStoreToList seStore
@@ -232,8 +236,9 @@ userConstraintSelectionStarted ref w (idx:_) = do
         (avail, unavail) = partition ((/= b) . (rel' .&) . constraintFromStr var) vals
         sep = "====================="
     store <- G.listStoreNew $ ["*"] ++ [sep] ++ avail ++ [sep] ++ unavail
-    --G.comboBoxSetModel combo (Just store)
+    G.customStoreSetColumn store (G.makeColumnIdString 0) id
     G.comboBoxSetRowSeparatorSource combo (Just (store, (==sep)))
+    G.comboBoxSetModel combo (Just store)
 
 userConstraintChanged :: (D.Rel c v a s) => RSetExplorer c a -> G.TreePath -> String -> IO ()
 userConstraintChanged ref (idx:_) val = do

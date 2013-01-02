@@ -20,7 +20,7 @@ import GraphDraw
 -- Constants
 --------------------------------------------------------------
 
-initLocation        = (1500, 50)
+initLocation        = (200, 50)
 childYOffset        = 50
 graphSearchStep     = 30
 
@@ -52,7 +52,7 @@ data State a = State {
     sCategory :: StateCategory
 }
 
-data Edge a = EdgeTransition {eId :: Int, eLabel :: a}
+data Edge a = EdgeTransition {eId :: Int, eTran :: D.Transition a}
             | EdgeSubset     {eId :: Int}
             | EdgeOverlap    {eId :: Int}
 
@@ -81,13 +81,16 @@ graphViewNew model = do
                                 , gvSelectedState = Nothing
                                 , gvLastEdgeId    = 0
                                 }
+    graphDrawSetCB draw $ graphDrawDefaultCB { onEdgeLeftClick = edgeLeftClick ref
+                                             , onNodeLeftClick = nodeLeftClick ref}
+
     let cb = D.ViewEvents { D.evtStateSelected      = graphViewStateSelected      ref 
                           , D.evtTransitionSelected = graphViewTransitionSelected ref
                           }
     return $ D.View { D.viewName      = "Transition graph"
                     , D.viewDefAlign  = D.AlignCenter
-                    , D.viewShow      = return ()
-                    , D.viewHide      = return ()
+                    , D.viewShow      = graphDrawConnect draw
+                    , D.viewHide      = graphDrawDisconnect draw
                     , D.viewGetWidget = graphDrawWidget draw
                     , D.viewCB        = cb
                     }
@@ -98,10 +101,10 @@ graphViewStateSelected ref mrel = do
     gv <- readIORef ref
     ctx <- D.modelCtx $ gvModel gv
     let ?m = ctx
-    let id = case mrel of
-                  Nothing  -> Nothing
-                  Just rel -> findState gv rel
-    gv' <- setSelected gv id
+    gv' <- case mrel of
+                Nothing  -> setSelected gv Nothing
+                Just rel -> do (id, gv') <- findOrCreateState gv Nothing rel
+                               setSelected gv' (Just id)
     writeIORef ref gv'
 
 graphViewTransitionSelected :: (D.Rel c v a s) => RGraphView c a -> D.Transition a -> IO ()
@@ -116,6 +119,23 @@ graphViewTransitionSelected ref tran = do
     -- Add transition
     (_, gv3)      <- findOrCreateTransition gv2 fromid toid tran
     writeIORef ref gv3
+
+--------------------------------------------------------------
+-- GraphDraw callbacks
+--------------------------------------------------------------
+
+edgeLeftClick :: RGraphView c a -> (Int, Int, GEdgeId) -> IO ()
+edgeLeftClick ref (from, to, id) = do
+    gv <- readIORef ref
+    case findEdge gv id of
+         Just (EdgeTransition _ tran) -> D.modelSelectTransition (gvModel gv) tran
+         _                            -> return ()
+    
+nodeLeftClick :: RGraphView c a -> GNodeId -> IO ()
+nodeLeftClick ref id = do
+    gv <- readIORef ref
+    D.modelSelectState (gvModel gv) (Just $ sState $ getState gv id)
+
 
 --------------------------------------------------------------
 -- Private functions
@@ -140,12 +160,15 @@ findState gv rel = fmap fst $ find (\(id, s) -> sState s == rel) $ G.labNodes $ 
 getState :: GraphView c a -> G.Node -> State a
 getState gv id = fromJust $ G.lab (gvGraph gv) id
 
+findEdge :: GraphView c a -> Int -> Maybe (Edge a)
+findEdge gv id = fmap trd3 $ find ((==id) . eId . trd3) $ G.labEdges $ gvGraph gv
+
 findTransition :: (D.Rel c v a s, ?m::c) => GraphView c a -> G.Node -> G.Node -> a -> Maybe GEdgeId
 findTransition gv fromid toid labrel = 
     fmap (\(_,_,e) -> eId e)
     $ find (\(f,t,e) -> f == fromid && t == toid &&
                         case e of 
-                             EdgeTransition _ l -> l == labrel
+                             EdgeTransition _ t -> D.tranLabel t == labrel
                              _                  -> False) 
     $ G.labEdges $ gvGraph gv
 
@@ -195,7 +218,7 @@ createState gv coords rel = do
 createTransition :: (D.Rel c v a s, ?m::c) => GraphView c a -> G.Node -> G.Node -> D.Transition a -> IO (GEdgeId, GraphView c a)
 createTransition gv fromid toid tran = do
     annots <- transitionAnnots gv tran
-    createEdge gv fromid toid (\id -> EdgeTransition id (D.tranLabel tran)) annots transitionStyle EndArrow True
+    createEdge gv fromid toid (\id -> EdgeTransition id tran) annots transitionStyle EndArrow True
 
 createSubsetEdge :: GraphView c a -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a)
 createSubsetEdge gv fromid toid = 
