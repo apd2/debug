@@ -48,14 +48,15 @@ dbgSetView ref id view = do
     writeIORef ref $ dbg {dbgViews = (take id (dbgViews dbg)) ++ [view] ++ drop (id+1) (dbgViews dbg)}
 
 -- List of available views
-viewFactories :: (Rel c v a s) => [(RModel c a -> IO (View a))]
-viewFactories = [ varViewNew
-                , graphViewNew]
+viewFactories :: (Rel c v a s) => [(RModel c a -> IO (View a), Bool)]
+viewFactories = [ (varViewNew,   True)
+                , (graphViewNew, True)]
 
 
 -- GUI manager
 debugGUI :: (Rel c v a s) => Model c a -> IO ()
 debugGUI model = do
+    let factories = viewFactories
     rmodel <- newIORef model
 
     -- Initialize GTK+ engine
@@ -98,7 +99,7 @@ debugGUI model = do
     G.boxPackStart vbox idew G.PackGrow 0
 
 
-    views <- mapM (\f -> f rmodel) viewFactories
+    views <- mapM (\f -> (fst f) rmodel) factories
     modifyIORef rmodel (\m -> m{mViews = views})
 
     dviews <- mapIdxM (\v id -> do mitem <- G.checkMenuItemNewWithLabel (viewName v)
@@ -117,6 +118,9 @@ debugGUI model = do
     writeIORef ref $ dbg {dbgViews = dviews}
 
     G.widgetShowAll wmain
+
+    mapM (\(v,s) -> G.checkMenuItemSetActive (dbgViewMenuItem v) s)
+         $ zip dviews (map snd factories)
 
     let initrel = fmap snd $ find ((== "init") . fst) $ mStateRels model
     modelSelectState rmodel initrel

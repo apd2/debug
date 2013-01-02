@@ -16,8 +16,9 @@ import Data.List
 import Control.Monad
 import qualified Data.Set        as S
 import qualified Graphics.UI.Gtk as G
+import Debug.Trace
 
-import Util
+import Util hiding (trace)
 import qualified DbgTypes        as D
 import Implicit
 
@@ -58,6 +59,9 @@ data VarEntry a = VarEntry {
     varEnabled           :: Bool,     -- False = don't care variable
     varChanged           :: Bool      -- True = highlight variable as changed
 }
+
+instance Eq (VarEntry a) where
+    (==) e1 e2 = varIndices e1 == varIndices e2
 
 varVar :: (D.Rel c v a s, ?m::c) => VarEntry a -> v
 varVar = D.idxToVS . varIndices
@@ -158,6 +162,7 @@ setExplorerNew ctx vars cb = do
                                                            D.SInt _ -> False
                                                            D.UInt _ -> False,
                                    G.cellTextEditable G.:= True,
+                                   G.cellTextForegroundColor G.:= entryColor e,
                                    G.cellComboHasEntry G.:= False,
                                    G.cellComboTextModel G.:= (lstore, G.makeColumnIdString 0),
                                    G.cellText G.:= varUserSelectionText]
@@ -219,7 +224,6 @@ setExplorerGetWidget ref = (liftM $ G.toWidget . seVBox) $ readIORef ref
 
 userConstraintSelectionStarted :: (D.Rel c v a s) => RSetExplorer c a -> G.Widget -> G.TreePath -> IO ()
 userConstraintSelectionStarted ref w (idx:_) = do
-    putStrLn "userConstraintSelectionStarted"
     se@SetExplorer{..} <- readIORef ref
     let ?m = seCtx
     entries <- G.listStoreToList seStore
@@ -261,10 +265,8 @@ listStoreFromList :: G.ListStore a -> [a] -> IO()
 listStoreFromList ls xs = do mapIdxM (\x id -> G.listStoreSetValue ls id x) xs
                              return ()
 
-supportVars :: (D.Rel c v a s, ?m::c) => [VarEntry a] -> a -> S.Set String
-supportVars entries rel = S.fromList 
-                          $ map varName 
-                          $ filter (any (\idx -> elem idx support) . varIndices)
+supportVars :: (D.Rel c v a s, ?m::c) => [VarEntry a] -> a -> [VarEntry a]
+supportVars entries rel = filter (any (\idx -> elem idx support) . varIndices)
                           $ entries
     where support = supportIndices rel
 
@@ -276,6 +278,7 @@ varAssignmentStr var = constraintToStr var (varAssignment var)
 
 constraintFromStr :: (D.Rel c v a s, ?m::c) => VarEntry a -> String -> a
 constraintFromStr var@VarEntry{..} str =
+    --trace (varName ++ " = " ++ str) $
     case str of 
          ""  -> t
          "*" -> t
@@ -310,7 +313,7 @@ updateStore ref selects = do
         rels      = conj $ map varUserConstraint entries'
         rel'      = rels .& seRel
         support   = supportVars entries rel'
-        entries'' = map (\e -> e{varEnabled = S.member (varName e) support}) entries'
+        entries'' = map (\e -> e{varEnabled = elem e support}) entries'
     listStoreFromList seStore entries''
 
     -- Recompute prime implicants
@@ -322,9 +325,12 @@ showImplicant ref idx = do
     SetExplorer {..} <- readIORef ref
     entries <- G.listStoreToList seStore
     let remaining = drop idx seCover
+        support = supportVars entries (head remaining)
         entries' = map (\e@VarEntry{..} -> let asn = case remaining of
                                                           []  -> b
-                                                          i:_ -> fromJust $ oneCube (varVar e) i
+                                                          i:_ -> if elem e support
+                                                                    then fromJust $ oneCube (varVar e) i
+                                                                    else t
                                            in e {varAssignment = asn, varChanged = (asn /= varAssignment)})
                        entries
     listStoreFromList seStore entries'

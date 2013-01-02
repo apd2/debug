@@ -68,8 +68,8 @@ instance Show Type where
     show (Enum es) = "enum"
 
 valStrFromInt :: Type -> Integer -> String
-valStrFromInt Bool      0                                = "False"
-valStrFromInt Bool      1                                = "True"
+valStrFromInt Bool      0                                = "false"
+valStrFromInt Bool      1                                = "true"
 valStrFromInt (Enum es) i | length es >= fromInteger i+1 = es !! (fromInteger i)
                           | otherwise                    = "?"
 valStrFromInt _         i                                = show i
