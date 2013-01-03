@@ -18,8 +18,6 @@ import SetExplorer
 import Implicit
 
 
-type Section = (String, [(String, D.Type, [Int])])
-
 data MultiSetExplorer c a = MultiSetExplorer {
     mseCtx            :: c,
     mseCB             :: SetExplorerEvents,
@@ -45,16 +43,11 @@ multiSetExplorerNew ctx sections cb = do
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox
 
-    explorers <- mapIdxM (\(_, vars) idx -> setExplorerNew ctx vars (SetExplorerEvents (asnChanged ref idx))) sections
+    explorers <- mapIdxM (\section idx -> setExplorerNew ctx [section] (SetExplorerEvents (asnChanged ref idx))) sections
 
     -- pack section widgets in the vbox
     widgets <- mapM setExplorerGetWidget explorers
-    mapM (\((n,_),w) -> do frame <- G.frameNew
-                           G.frameSetLabel frame n
-                           G.widgetShow frame
-                           G.containerAdd frame w
-                           G.boxPackStart vbox frame G.PackNatural 0)
-         $ zip sections widgets
+    mapM (\w -> G.boxPackStart vbox w G.PackNatural 0) widgets
 
     writeIORef ref $ MultiSetExplorer { mseCtx       = ctx
                                       , mseCB        = cb
@@ -69,7 +62,7 @@ multiSetExplorerSetRelation :: (D.Rel c v a s) => RMultiSetExplorer c a -> a -> 
 multiSetExplorerSetRelation ref rel = do 
     mse@MultiSetExplorer{..} <- readIORef ref
     let ?m = mseCtx
-    let rel0 = project mse rel 0
+    let rel0 = projectSect mse rel 0
     setExplorerSetRelation (head mseExplorers) rel0
 
 multiSetExplorerReset :: (D.Rel c v a s) => RMultiSetExplorer c a -> IO ()
@@ -81,8 +74,8 @@ multiSetExplorerReset ref = do
 multiSetExplorerGetVarAssignment :: (D.Rel c v a s) => RMultiSetExplorer c a -> IO [(String, [(String, a)])]
 multiSetExplorerGetVarAssignment ref = do
     MultiSetExplorer{..} <- readIORef ref
-    mapM (\((n,_),e) -> do asn <- setExplorerGetVarAssignment e
-                           return (n,asn)) 
+    mapM (\((n,_,_),e) -> do asn <- (liftM concat) $ setExplorerGetVarAssignment e
+                             return (n,asn)) 
          $ zip mseSections mseExplorers
 
 multiSetExplorerGetWidget :: RMultiSetExplorer c a -> IO G.Widget
@@ -99,7 +92,7 @@ asnChanged ref idx = do
     let ?m = mseCtx
     constr <- (liftM conj) $ mapM childConstr $ take (idx+1) mseExplorers
     if idx < length mseExplorers - 1
-       then setExplorerSetRelation (mseExplorers !! (idx + 1)) $ project mse (mseRel .& constr) (idx + 1)
+       then setExplorerSetRelation (mseExplorers !! (idx + 1)) $ projectSect mse (mseRel .& constr) (idx + 1)
        else return ()
 
 ---------------------------------------------------------------------
@@ -108,11 +101,11 @@ asnChanged ref idx = do
 
 -- project relation on one of the sections by quantifying away variables from 
 -- other sections
-project :: (D.Rel c v a s, ?m::c) => MultiSetExplorer c a -> a -> Int -> a
-project MultiSetExplorer{..} rel sect = exists (vconcat vs) rel
-    where vs = map varAtIndex $ concatMap trd3 $ concatMap snd $ take sect mseSections ++ drop (sect+1) mseSections
+projectSect :: (D.Rel c v a s, ?m::c) => MultiSetExplorer c a -> a -> Int -> a
+projectSect MultiSetExplorer{..} rel sect = project ids rel
+    where ids = concatMap trd3 $ trd3 $ mseSections !! sect
 
 childConstr :: (D.Rel c v a s, ?m::c) => RSetExplorer c a -> IO a
 childConstr ref = do
     asns <- setExplorerGetVarAssignment ref
-    return $ conj $ map snd asns
+    return $ conj $ map snd $ concat asns

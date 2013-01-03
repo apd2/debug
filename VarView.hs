@@ -10,13 +10,13 @@ import Control.Monad
 import Util
 import qualified DbgTypes        as D
 import qualified IDE             as D
-import MultiSetExplorer
+--import MultiSetExplorer
 import SetExplorer
 import Implicit
 
 data VarView c a = VarView {
     vvModel    :: D.RModel c a,
-    vvExplorer :: RMultiSetExplorer c a
+    vvExplorer :: RSetExplorer c a
 }
 
 type RVarView c a = IORef (VarView c a)
@@ -34,13 +34,13 @@ varViewNew model = do
     untrackedSection <- D.modelUntrackedVars model
     labelSection     <- D.modelLabelVars     model
     nextSection      <- (liftM $ map (mapTrd3 snd)) $ D.modelStateVars model
-    let sections = [ ("State Variables",      stateSection)
-                   , ("Untracked Variables",  untrackedSection)
-                   , ("Label Variables",      labelSection)
-                   , ("Next-state Variables", nextSection)
+    let sections = [ ("State Variables",      True,  stateSection)
+                   , ("Untracked Variables",  False, untrackedSection)
+                   , ("Label Variables",      False, labelSection)
+                   , ("Next-state Variables", True,  nextSection)
                    ]
-    explorer         <- multiSetExplorerNew ctx sections (SetExplorerEvents {evtValueChanged = return ()})
-    w                <- multiSetExplorerGetWidget explorer
+    explorer         <- setExplorerNew ctx sections (SetExplorerEvents {evtValueChanged = return ()})
+    w                <- setExplorerGetWidget explorer
     ref <- newIORef $ VarView { vvModel    = model 
                               , vvExplorer = explorer
                               }
@@ -56,7 +56,7 @@ varViewNew model = do
     G.boxPackStart vbox bbox G.PackNatural 0
 
     resetbutton <- G.buttonNewFromStock G.stockClear
-    G.on resetbutton G.buttonActivated (multiSetExplorerReset explorer)
+    G.on resetbutton G.buttonActivated (setExplorerReset explorer)
     G.widgetShow resetbutton
     G.boxPackStart bbox resetbutton G.PackNatural 10
 
@@ -82,16 +82,17 @@ varViewStateSelected ref mrel = do
     ctx <- D.modelCtx vvModel
     let ?m = ctx
     trel <- D.modelActiveTransRel vvModel
-    multiSetExplorerSetRelation vvExplorer $ case mrel of
-                                                  Nothing  -> b
-                                                  Just rel -> rel .& trel
+    putStrLn $ "trel support: " ++ (show $ supportIndices trel)
+    setExplorerSetRelation vvExplorer $ case mrel of
+                                             Nothing  -> trel
+                                             Just rel -> rel .& trel
 
 varViewTransitionSelected :: (D.Rel c v a s) => RVarView c a -> D.Transition a -> IO ()
 varViewTransitionSelected ref tran = do
     vv@VarView{..} <- readIORef ref
-    ctx <- D.modelCtx vvModel
-    let ?m = ctx
-    multiSetExplorerSetRelation vvExplorer (conj [D.tranFrom tran, D.tranUntracked tran, D.tranLabel tran, D.tranTo tran])
+    model <- readIORef vvModel
+    let ?m = D.mCtx model
+    setExplorerSetRelation vvExplorer (conj [D.tranFrom tran, D.tranUntracked tran, D.tranLabel tran, D.tranTo' tran])
 
 ---------------------------------------------------------------------
 -- Private functions
@@ -100,8 +101,8 @@ varViewTransitionSelected ref tran = do
 executeTransition :: (D.Rel c v a s, ?m::c) => RVarView c a -> IO ()
 executeTransition ref = do
     VarView{..} <- readIORef ref
-    [from, untracked, label, to] <- multiSetExplorerGetVarAssignment vvExplorer 
-    D.modelSelectTransition vvModel D.Transition { D.tranFrom      = conj $ map snd $ snd from
-                                                 , D.tranUntracked = conj $ map snd $ snd untracked 
-                                                 , D.tranLabel     = conj $ map snd $ snd label
-                                                 , D.tranTo        = conj $ map snd $ snd to}
+    [from, untracked, label, to] <- setExplorerGetVarAssignment vvExplorer 
+    D.modelSelectTransition vvModel D.Transition { D.tranFrom      = conj $ map snd $ from
+                                                 , D.tranUntracked = conj $ map snd $ untracked 
+                                                 , D.tranLabel     = conj $ map snd $ label
+                                                 , D.tranTo'       = conj $ map snd $ to}

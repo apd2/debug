@@ -1,6 +1,8 @@
 module IDE(RIDE,
            IDEAlign(..),
            IDEPanel(..),
+           IDEPanels(..),
+           panelsAppend,
            ideNew,
            ideWidget,
            ideAddLeft,
@@ -8,7 +10,9 @@ module IDE(RIDE,
            ideAddRight,
            ideAddBottom,
            ideRemove,
-           framePanelNew) where
+           framePanelNew,
+           panedPanelsNew,
+           tabbedPanelsNew) where
 
 import qualified Graphics.UI.Gtk as G
 import Data.Maybe

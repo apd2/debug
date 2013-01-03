@@ -63,6 +63,7 @@ data GraphView c a = GraphView {
     gvGraphDraw     :: RGraphDraw,
     gvGraph         :: TrGraph a,
     gvSelectedState :: Maybe G.Node,
+    gvSelectedTrans :: Maybe GEdgeId,
     gvLastEdgeId    :: GEdgeId
 }
 
@@ -79,6 +80,7 @@ graphViewNew model = do
                                 , gvGraphDraw     = draw
                                 , gvGraph         = G.empty
                                 , gvSelectedState = Nothing
+                                , gvSelectedTrans = Nothing
                                 , gvLastEdgeId    = 0
                                 }
     graphDrawSetCB draw $ graphDrawDefaultCB { onEdgeLeftClick = edgeLeftClick ref
@@ -101,24 +103,27 @@ graphViewStateSelected ref mrel = do
     gv <- readIORef ref
     ctx <- D.modelCtx $ gvModel gv
     let ?m = ctx
-    gv' <- case mrel of
-                Nothing  -> setSelected gv Nothing
+    gv1 <- case mrel of
+                Nothing  -> setSelectedState gv Nothing
                 Just rel -> do (id, gv') <- findOrCreateState gv Nothing rel
-                               setSelected gv' (Just id)
-    writeIORef ref gv'
+                               setSelectedState gv' (Just id)
+    gv2 <- setSelectedTrans gv1 Nothing
+    writeIORef ref gv2
 
 graphViewTransitionSelected :: (D.Rel c v a s) => RGraphView c a -> D.Transition a -> IO ()
 graphViewTransitionSelected ref tran = do
     gv <- readIORef ref
-    ctx <- D.modelCtx $ gvModel gv
-    let ?m = ctx
+    model <- readIORef $ gvModel gv
+    let ?m = D.mCtx model
     -- Find or create from-state
     (fromid, gv1) <- findOrCreateState gv (gvSelectedState gv) $ D.tranFrom tran
     -- Find or create to-state
-    (toid, gv2)   <- findOrCreateState gv1 (Just fromid) $ D.tranTo tran
+    (toid, gv2)   <- findOrCreateState gv1 (Just fromid) $ D.tranTo model tran
     -- Add transition
-    (_, gv3)      <- findOrCreateTransition gv2 fromid toid tran
-    writeIORef ref gv3
+    (eid, gv3)      <- findOrCreateTransition gv2 fromid toid tran
+    gv4 <- setSelectedState gv3 Nothing
+    gv5 <- setSelectedTrans gv4 (Just eid)
+    writeIORef ref gv5
 
 --------------------------------------------------------------
 -- GraphDraw callbacks
@@ -172,8 +177,8 @@ findTransition gv fromid toid labrel =
                              _                  -> False) 
     $ G.labEdges $ gvGraph gv
 
-setSelected :: GraphView c a -> (Maybe G.Node) -> IO (GraphView c a)
-setSelected gv mid = do
+setSelectedState :: GraphView c a -> (Maybe G.Node) -> IO (GraphView c a)
+setSelectedState gv mid = do
     let gv' = gv {gvSelectedState = mid}
     -- Deselect previous active node
     case gvSelectedState gv of
@@ -183,6 +188,19 @@ setSelected gv mid = do
     case mid of
          Nothing -> return ()
          Just id -> graphDrawSetNodeStyle (gvGraphDraw gv) id (stateStyle gv' id)
+    return gv'
+
+setSelectedTrans :: GraphView c a -> (Maybe GEdgeId) -> IO (GraphView c a)
+setSelectedTrans gv mid = do
+    let gv' = gv {gvSelectedTrans = mid}
+    -- Deselect previous active node
+    case gvSelectedTrans gv of
+         Nothing -> return ()
+         Just id -> graphDrawSetEdgeStyle (gvGraphDraw gv) id transitionStyle
+    -- Set new selection
+    case mid of
+         Nothing -> return ()
+         Just id -> graphDrawSetEdgeStyle (gvGraphDraw gv) id (transitionStyle {gcLW = gcLW transitionStyle + 2})
     return gv'
 
 findOrCreateState :: (D.Rel c v a s, ?m::c) => GraphView c a -> Maybe G.Node -> a -> IO (G.Node, GraphView c a)

@@ -5,8 +5,13 @@ module DbgTypes(Rel,
                 ViewEvents(..),
                 Type(..),
                 Transition(..),
+                tranTo,
                 Model(..),
                 RModel,
+                mStateV, 
+                mNextV, 
+                mUntrackedV, 
+                mLabelV,
                 contRelName,
                 idxToVS,
                 valStrFromInt,
@@ -24,6 +29,7 @@ import qualified Graphics.UI.Gtk as G
 import Data.IORef
 import Control.Monad
 
+import Util
 import IDE
 import qualified LogicClasses as L
 import Implicit
@@ -94,8 +100,14 @@ data Transition a = Transition {
     tranFrom      :: a,
     tranUntracked :: a,
     tranLabel     :: a,
-    tranTo        :: a
+    tranTo'       :: a
 }
+
+-- Project next state to current state vars
+tranTo :: (Rel c v a s, ?m::c) => Model c a -> Transition a -> a
+tranTo model t = trace ("tranTo: " ++ show (supportIndices $ tranTo' t) ++ "->" ++ show (supportIndices res)) res
+    where res = swap (mNextV model) (mStateV model) (tranTo' t)
+
 
 -- Debugger state
 data Model c a = Model {
@@ -112,6 +124,13 @@ data Model c a = Model {
 
     mViews         :: [View a]
 }
+
+mStateV, mNextV, mUntrackedV, mLabelV :: (Rel c v a s, ?m::c) => Model c a -> v
+mStateV     = vconcat . map varAtIndex . concatMap (fst . trd3) . mStateVars
+mNextV      = vconcat . map varAtIndex . concatMap (snd . trd3) . mStateVars
+mUntrackedV = vconcat . map varAtIndex . concatMap trd3         . mUntrackedVars
+mLabelV     = vconcat . map varAtIndex . concatMap trd3         . mLabelVars
+
 
 type RModel c a = IORef (Model c a)
 

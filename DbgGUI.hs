@@ -1,3 +1,5 @@
+{-# LANGUAGE ImplicitParams #-}
+
 module DbgGUI(debugGUI) where
 
 import qualified Graphics.UI.Gtk as G
@@ -6,6 +8,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.IORef
 import Data.List
+import Data.Maybe
 import System.Glib.MainLoop
 
 import Util
@@ -14,6 +17,7 @@ import IDE
 import Icon
 import VarView
 import GraphView
+import Implicit
 
 dbgDefaultWidth  = 1024
 dbgDefaultHeight = 768
@@ -50,12 +54,13 @@ dbgSetView ref id view = do
 -- List of available views
 viewFactories :: (Rel c v a s) => [(RModel c a -> IO (View a), Bool)]
 viewFactories = [ (varViewNew,   True)
-                , (graphViewNew, True)]
+                , (graphViewNew, False)]
 
 
 -- GUI manager
 debugGUI :: (Rel c v a s) => Model c a -> IO ()
 debugGUI model = do
+    let ?m = mCtx model
     let factories = viewFactories
     rmodel <- newIORef model
 
@@ -122,7 +127,7 @@ debugGUI model = do
     mapM (\(v,s) -> G.checkMenuItemSetActive (dbgViewMenuItem v) s)
          $ zip dviews (map snd factories)
 
-    let initrel = fmap snd $ find ((== "init") . fst) $ mStateRels model
+    let initrel = fmap (fromJust . oneCube (mStateV model) . snd) $ find ((== "init") . fst) $ mStateRels model
     modelSelectState rmodel initrel
 
     G.mainGUI
