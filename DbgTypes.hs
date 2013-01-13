@@ -1,11 +1,16 @@
 {-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, ImplicitParams, FunctionalDependencies #-}
 
 module DbgTypes(Rel,
+                Vals,
                 View(..),
                 ViewEvents(..),
                 Type(..),
+                State(..),
+                StateCategory(..),
+                stateCategory,
                 Transition(..),
-                tranTo,
+                tranTo',
+                tranRel,
                 Model(..),
                 RModel,
                 mStateV, 
@@ -27,6 +32,7 @@ module DbgTypes(Rel,
 
 import qualified Graphics.UI.Gtk as G 
 import Data.IORef
+import Data.List
 import Control.Monad
 
 import Util
@@ -58,6 +64,9 @@ class (L.Variable c v,
        Eq a, 
        Show a) => Rel c v a s | c -> v, c -> a, c -> s
 
+-- Concrete variable valuation
+class (Eq b) => Vals b
+
 idxToVS :: (Rel c v a s, ?m::c) => [Int] -> v
 idxToVS indices = vconcat $ map varAtIndex indices
 
@@ -81,36 +90,71 @@ valStrFromInt (Enum es) i | length es >= fromInteger i+1 = es !! (fromInteger i)
 valStrFromInt _         i                                = show i
 
 -- View interface
-data View a = View {
+data View a b = View {
     viewName      :: String,
     viewDefAlign  :: IDEAlign,
     viewShow      :: IO (),
     viewHide      :: IO (),
     viewGetWidget :: IO G.Widget,
-    viewCB        :: ViewEvents a
+    viewCB        :: ViewEvents a b
 }
 
 -- Events sent from the debugger core to each view
-data ViewEvents a = ViewEvents {
-     evtStateSelected      :: Maybe a -> IO (),
-     evtTransitionSelected :: Transition a -> IO ()
+data ViewEvents a b = ViewEvents {
+     evtStateSelected      :: Maybe (State a b) -> IO (),
+     evtTransitionSelected :: Transition a b -> IO ()
 }
 
-data Transition a = Transition {
-    tranFrom      :: a,
-    tranUntracked :: a,
-    tranLabel     :: a,
-    tranTo'       :: a
+data StateCategory = StateControllable
+                   | StateUncontrollable
+                   | StateBoth
+
+data State a b = State {
+    sAbstract :: a,      -- abstract state
+    sConcrete :: Maybe b -- concrete state
 }
+
+instance (Eq a, Eq b) => Eq (State a b) where
+    (==) x y = sAbstract x == sAbstract y && sConcrete x == sConcrete y
+
+stateCategory :: (Rel c v a s, ?m::c) => Model c a b -> a -> IO StateCategory
+stateCategory model rel = 
+    case find ((==contRelName) . fst) (mStateRels model) of
+         Nothing        -> return StateBoth
+         Just (_, cont) -> if rel `leq` cont
+                              then return StateControllable
+                              else if rel `leq` nt cont
+                                      then return StateUncontrollable
+                                      else return StateBoth
+
+data Transition a b = Transition {
+    tranFrom          :: State a b,
+    tranUntracked     :: a,
+    tranAbstractLabel :: a,
+    tranConcreteLabel :: Maybe b,
+    tranTo            :: State a b
+}
+
+instance (Eq a, Eq b) => Eq (Transition a b) where
+    (==) x y =  tranFrom x == tranFrom y
+             && tranTo x == tranTo y
+             && tranUntracked x == tranUntracked y
+             && tranAbstractLabel x == tranAbstractLabel y
+             && tranConcreteLabel x == tranConcreteLabel y
 
 -- Project next state to current state vars
-tranTo :: (Rel c v a s, ?m::c) => Model c a -> Transition a -> a
-tranTo model t = trace ("tranTo: " ++ show (supportIndices $ tranTo' t) ++ "->" ++ show (supportIndices res)) res
-    where res = swap (mNextV model) (mStateV model) (tranTo' t)
+tranTo' :: (Rel c v a s, ?m::c) => Model c a b -> Transition a b -> a
+tranTo' model t = swap (mNextV model) (mStateV model) (sAbstract $ tranTo t)
 
+-- Conjunction of state, next, label, and untracked relations
+tranRel :: (Rel c v a s, ?m::c) => Model c a b -> Transition a b -> a
+tranRel model t =  (sAbstract $ tranFrom t) 
+                .& (tranTo' model t)
+                .& (tranUntracked t)
+                .& (tranAbstractLabel t)
 
 -- Debugger state
-data Model c a = Model {
+data Model c a b = Model {
     mCtx           :: c,
 
     -- Variable sections
@@ -122,17 +166,17 @@ data Model c a = Model {
     mStateRels     :: [(String, a)],
     mTransRels     :: [(String, a)],
 
-    mViews         :: [View a]
+    mViews         :: [View a b]
 }
 
-mStateV, mNextV, mUntrackedV, mLabelV :: (Rel c v a s, ?m::c) => Model c a -> v
+mStateV, mNextV, mUntrackedV, mLabelV :: (Rel c v a s, ?m::c) => Model c a b -> v
 mStateV     = vconcat . map varAtIndex . concatMap (fst . trd3) . mStateVars
 mNextV      = vconcat . map varAtIndex . concatMap (snd . trd3) . mStateVars
 mUntrackedV = vconcat . map varAtIndex . concatMap trd3         . mUntrackedVars
 mLabelV     = vconcat . map varAtIndex . concatMap trd3         . mLabelVars
 
 
-type RModel c a = IORef (Model c a)
+type RModel c a b = IORef (Model c a b)
 
 
 ----------------------------------------------------------
@@ -140,36 +184,36 @@ type RModel c a = IORef (Model c a)
 ----------------------------------------------------------
 
 -- Querying state
-modelCtx :: RModel c a -> IO c
+modelCtx :: RModel c a b -> IO c
 modelCtx ref = (liftM mCtx) $ readIORef ref
 
-modelStateVars :: RModel c a -> IO [(String, Type, ([Int],[Int]))]
+modelStateVars :: RModel c a b -> IO [(String, Type, ([Int],[Int]))]
 modelStateVars ref = (liftM mStateVars) $ readIORef ref
 
-modelUntrackedVars :: RModel c a -> IO [(String, Type, [Int])]
+modelUntrackedVars :: RModel c a b -> IO [(String, Type, [Int])]
 modelUntrackedVars ref = (liftM mUntrackedVars) $ readIORef ref
 
-modelLabelVars :: RModel c a -> IO [(String, Type, [Int])]
+modelLabelVars :: RModel c a b -> IO [(String, Type, [Int])]
 modelLabelVars ref = (liftM mLabelVars) $ readIORef ref
 
-modelTransRels :: RModel c a -> IO [(String, a)]
+modelTransRels :: RModel c a b -> IO [(String, a)]
 modelTransRels ref = (liftM mTransRels) $ readIORef ref
 
-modelStateRels :: RModel c a -> IO [(String, a)]
+modelStateRels :: RModel c a b -> IO [(String, a)]
 modelStateRels ref = (liftM mStateRels) $ readIORef ref
 
 -- TODO: implement proper selection of transition relation to debug
-modelActiveTransRel :: RModel c a -> IO a
+modelActiveTransRel :: RModel c a b -> IO a
 modelActiveTransRel ref = (liftM (snd . head . mTransRels)) $ readIORef ref
 
 -- Actions
-modelSelectTransition :: RModel c a -> Transition a -> IO ()
+modelSelectTransition :: RModel c a b -> Transition a b -> IO ()
 modelSelectTransition ref tran = do
    views <- modelViews ref
    mapM (\v -> (evtTransitionSelected $ viewCB v) tran) views
    return ()
 
-modelSelectState :: RModel c a -> Maybe a -> IO ()
+modelSelectState :: RModel c a b -> Maybe (State a b) -> IO ()
 modelSelectState ref mrel = do
    views <- modelViews ref
    mapM (\v -> (evtStateSelected $ viewCB v) mrel) views
@@ -179,5 +223,5 @@ modelSelectState ref mrel = do
 -- Private functions
 ----------------------------------------------------------
 
-modelViews :: RModel c a -> IO [View a]
+modelViews :: RModel c a b -> IO [View a b]
 modelViews ref = (liftM mViews) $ readIORef ref

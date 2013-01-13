@@ -14,20 +14,20 @@ import qualified IDE             as D
 import SetExplorer
 import Implicit
 
-data VarView c a = VarView {
-    vvModel    :: D.RModel c a,
+data VarView c a b = VarView {
+    vvModel    :: D.RModel c a b,
     vvExplorer :: RSetExplorer c a
 }
 
-type RVarView c a = IORef (VarView c a)
+type RVarView c a b = IORef (VarView c a b)
 
 --------------------------------------------------------------
 -- View callbacks
 --------------------------------------------------------------
 
-varViewNew :: (D.Rel c v a s) => D.RModel c a -> IO (D.View a)
+varViewNew :: (D.Rel c v a s) => D.RModel c a b -> IO (D.View a b)
 varViewNew model = do
-    ctx              <- D.modelCtx model
+    ctx <- D.modelCtx model
     let ?m = ctx
     -- Set explorer for choosing transition variables
     stateSection     <- (liftM $ map (mapTrd3 fst)) $ D.modelStateVars model
@@ -76,33 +76,38 @@ varViewNew model = do
                     , D.viewCB        = cb
                     }
 
-varViewStateSelected :: (D.Rel c v a s) => RVarView c a -> Maybe a -> IO ()
-varViewStateSelected ref mrel = do
+varViewStateSelected :: (D.Rel c v a s) => RVarView c a b -> Maybe (D.State a b) -> IO ()
+varViewStateSelected ref mstate = do
     VarView{..} <- readIORef ref
     ctx <- D.modelCtx vvModel
     let ?m = ctx
     trel <- D.modelActiveTransRel vvModel
     putStrLn $ "trel support: " ++ (show $ supportIndices trel)
-    setExplorerSetRelation vvExplorer $ case mrel of
-                                             Nothing  -> trel
-                                             Just rel -> rel .& trel
+    setExplorerSetRelation vvExplorer $ case mstate of
+                                             Nothing    -> trel
+                                             Just state -> (D.sAbstract state) .& trel
 
-varViewTransitionSelected :: (D.Rel c v a s) => RVarView c a -> D.Transition a -> IO ()
+varViewTransitionSelected :: (D.Rel c v a s) => RVarView c a b -> D.Transition a b -> IO ()
 varViewTransitionSelected ref tran = do
     vv@VarView{..} <- readIORef ref
     model <- readIORef vvModel
     let ?m = D.mCtx model
-    setExplorerSetRelation vvExplorer (conj [D.tranFrom tran, D.tranUntracked tran, D.tranLabel tran, D.tranTo' tran])
+    setExplorerSetRelation vvExplorer (D.tranRel model tran)
 
 ---------------------------------------------------------------------
 -- Private functions
 ---------------------------------------------------------------------
 
-executeTransition :: (D.Rel c v a s, ?m::c) => RVarView c a -> IO ()
+executeTransition :: (D.Rel c v a s, ?m::c) => RVarView c a b -> IO ()
 executeTransition ref = do
     VarView{..} <- readIORef ref
     [from, untracked, label, to] <- setExplorerGetVarAssignment vvExplorer 
-    D.modelSelectTransition vvModel D.Transition { D.tranFrom      = conj $ map snd $ from
-                                                 , D.tranUntracked = conj $ map snd $ untracked 
-                                                 , D.tranLabel     = conj $ map snd $ label
-                                                 , D.tranTo'       = conj $ map snd $ to}
+    model <- readIORef vvModel
+    let tranFrom          = D.State { sAbstract = conj $ map snd $ from
+                                    , sConcrete = Nothing}
+        tranUntracked     = conj $ map snd $ untracked 
+        tranAbstractLabel = conj $ map snd $ label
+        tranConcreteLabel = Nothing
+        tranTo            = D.State { sAbstract = swap (D.mNextV model) (D.mStateV model) (conj $ map snd $ to)
+                                    , sConcrete = Nothing}
+    D.modelSelectTransition vvModel D.Transition{..}

@@ -22,43 +22,43 @@ import Implicit
 dbgDefaultWidth  = 1024
 dbgDefaultHeight = 768
 
-data Debugger a = Debugger {
+data Debugger a b = Debugger {
     dbgIDE      :: RIDE,
-    dbgViews    :: [DbgView a]
+    dbgViews    :: [DbgView a b]
 }
 
-type RDebugger a = IORef (Debugger a)
+type RDebugger a b = IORef (Debugger a b)
 
 -- State associated by the debugger with each registered view (visible or invisible)
-data DbgView a = DbgView {
-    dbgViewView     :: View a,
+data DbgView a b = DbgView {
+    dbgViewView     :: View a b,
     dbgViewPanel    :: IDEPanel,
     dbgViewVisible  :: Bool,
     dbgViewMenuItem :: G.CheckMenuItem
 }
 
 
-dbgGetIDE :: RDebugger a -> IO RIDE
+dbgGetIDE :: RDebugger a b -> IO RIDE
 dbgGetIDE ref = (liftM dbgIDE) $ readIORef ref
 
-dbgGetView :: RDebugger a -> Int -> IO (DbgView a)
+dbgGetView :: RDebugger a b -> Int -> IO (DbgView a b)
 dbgGetView ref id = do
     dbg <- readIORef ref
     return $ dbgViews dbg !! id
 
-dbgSetView :: RDebugger a -> Int -> DbgView a -> IO ()
+dbgSetView :: RDebugger a b -> Int -> DbgView a b -> IO ()
 dbgSetView ref id view = do
     dbg <- readIORef ref
     writeIORef ref $ dbg {dbgViews = (take id (dbgViews dbg)) ++ [view] ++ drop (id+1) (dbgViews dbg)}
 
 -- List of available views
-viewFactories :: (Rel c v a s) => [(RModel c a -> IO (View a), Bool)]
+viewFactories :: (Rel c v a s, Vals b) => [(RModel c a b -> IO (View a b), Bool)]
 viewFactories = [ (varViewNew,   True)
-                , (graphViewNew, False)]
+                , (graphViewNew, True)]
 
 
 -- GUI manager
-debugGUI :: (Rel c v a s) => Model c a -> IO ()
+debugGUI :: (Rel c v a s, Vals b) => Model c a b -> IO ()
 debugGUI model = do
     let ?m = mCtx model
     let factories = viewFactories
@@ -127,14 +127,15 @@ debugGUI model = do
     mapM (\(v,s) -> G.checkMenuItemSetActive (dbgViewMenuItem v) s)
          $ zip dviews (map snd factories)
 
-    let initrel = fmap (fromJust . oneCube (mStateV model) . snd) $ find ((== "init") . fst) $ mStateRels model
-    modelSelectState rmodel initrel
+    let initst = fmap ((\rel -> State rel Nothing) . fromJust . oneCube (mStateV model) . snd) 
+                      $ find ((== "init") . fst) $ mStateRels model
+    modelSelectState rmodel initst
 
     G.mainGUI
     putStrLn "exiting debugger"
 
 
-dbgViewToggle :: RDebugger a -> Int -> G.CheckMenuItem -> IO ()
+dbgViewToggle :: RDebugger a b -> Int -> G.CheckMenuItem -> IO ()
 dbgViewToggle ref id item = do
     active <- G.checkMenuItemGetActive item
     view <- dbgGetView ref id
@@ -145,7 +146,7 @@ dbgViewToggle ref id item = do
                else return ()
 
 
-dbgViewShow :: RDebugger a -> Int  -> IO ()
+dbgViewShow :: RDebugger a b -> Int  -> IO ()
 dbgViewShow ref id = do
     view <- dbgGetView ref id
     ide  <- dbgGetIDE ref
@@ -160,7 +161,7 @@ dbgViewShow ref id = do
     viewShow $ dbgViewView view
 
 
-dbgViewHide :: RDebugger a -> Int  -> IO ()
+dbgViewHide :: RDebugger a b -> Int  -> IO ()
 dbgViewHide ref id = do
     view <- dbgGetView ref id
     viewHide $ dbgViewView view
@@ -172,7 +173,7 @@ dbgViewHide ref id = do
 -- Callback triggered by a view when it wants to hide itself.
 -- Simply toggle the menu item to unchecked state.  Do the actual
 -- deletion in the event handler.
-dbgViewHideCB :: RDebugger a -> Int -> IO ()
+dbgViewHideCB :: RDebugger a b -> Int -> IO ()
 dbgViewHideCB ref id = do
     view <- dbgGetView ref id
     G.checkMenuItemSetActive (dbgViewMenuItem view) False
