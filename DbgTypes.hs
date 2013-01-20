@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, ImplicitParams, FunctionalDependencies #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, ImplicitParams, FunctionalDependencies, UndecidableInstances #-}
 
 module DbgTypes(Rel,
                 Vals,
@@ -61,7 +61,6 @@ class (L.Variable c v,
        L.EqRaw c v a [Bool],
        L.CUDDLike c v a,
        L.Cubeable c v a,
-       Eq a, 
        Show a) => Rel c v a s | c -> v, c -> a, c -> s
 
 -- Concrete variable valuation
@@ -114,8 +113,8 @@ data State a b = State {
     sConcrete :: Maybe b -- concrete state
 }
 
-instance (Eq a, Eq b) => Eq (State a b) where
-    (==) x y = sAbstract x == sAbstract y && sConcrete x == sConcrete y
+instance (?m::c, L.Boolean c a, Eq b) => Eq (State a b) where
+    (==) x y = sAbstract x .== sAbstract y && sConcrete x == sConcrete y
 
 stateCategory :: (Rel c v a s, ?m::c) => Model c a b -> a -> IO StateCategory
 stateCategory model rel = 
@@ -135,11 +134,11 @@ data Transition a b = Transition {
     tranTo            :: State a b
 }
 
-instance (Eq a, Eq b) => Eq (Transition a b) where
+instance (?m::c, L.Boolean c a, Eq b) => Eq (Transition a b) where
     (==) x y =  tranFrom x == tranFrom y
              && tranTo x == tranTo y
-             && tranUntracked x == tranUntracked y
-             && tranAbstractLabel x == tranAbstractLabel y
+             && tranUntracked x .== tranUntracked y
+             && tranAbstractLabel x .== tranAbstractLabel y
              && tranConcreteLabel x == tranConcreteLabel y
 
 -- Project next state to current state vars
@@ -157,7 +156,7 @@ tranRel model t =  (sAbstract $ tranFrom t)
 data Model c a b = Model {
     mCtx           :: c,
 
-    -- Variable sections
+    -- Abstract variable sections
     mStateVars     :: [(String, Type, ([Int],[Int]))],
     mUntrackedVars :: [(String, Type, [Int])],
     mLabelVars     :: [(String, Type, [Int])],

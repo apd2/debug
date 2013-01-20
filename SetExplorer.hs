@@ -160,7 +160,7 @@ userConstraintSelectionStarted ref offset w (num:_) = do
                        D.Bool    -> ["false","true"]
                        D.Enum es -> es
                        _         -> []
-        (avail, unavail) = partition ((/= b) . (rel' .&) . constraintFromStr var) vals
+        (avail, unavail) = partition ((./= b) . (rel' .&) . constraintFromStr var) vals
         sep = "====================="
     store <- G.listStoreNew $ ["*"] ++ [sep] ++ avail ++ [sep] ++ unavail
     G.customStoreSetColumn store (G.makeColumnIdString 0) id
@@ -228,8 +228,8 @@ constraintFromStr var@VarEntry{..} str =
           v = varVar var
          
 constraintToStr :: (D.Rel c v a s, ?m::c) => VarEntry a -> a -> String
-constraintToStr _ rel            | rel == t = "*"
-constraintToStr _ rel            | rel == b = "#"
+constraintToStr _ rel            | rel .== t = "*"
+constraintToStr _ rel            | rel .== b = "#"
 constraintToStr var@VarEntry{..} rel = 
     D.valStrFromInt varType $ boolArrToBitsBe $ extract (varVar var) $ fromJust $ satOne rel
 
@@ -377,7 +377,7 @@ showImplicant ref idx = do
                                              i:_ -> if (elem e support) || varMustChoose e
                                                        then fromJust $ oneCube (varVar e) i
                                                        else t
-                              in e {varAssignment = asn, varChanged = (asn /= varAssignment e)})
+                              in e {varAssignment = asn, varChanged = (asn ./= varAssignment e)})
                        entries
     storeFromList seStores entries'
     -- update spin button

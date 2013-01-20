@@ -201,9 +201,9 @@ createState gv coords s = do
     let rel = D.sAbstract s
         id = (snd $ G.nodeRange (gvGraph gv)) + 1
         gv' = gv {gvGraph = G.insNode (id, s) (gvGraph gv)}
-        (subsets, other1)   = partition ((== t) . (.-> rel) . D.sAbstract . getState gv) (G.nodes $ gvGraph gv)
-        (supersets, other2) = partition ((== t) . (rel .->) . D.sAbstract . getState gv) other1
-        overlaps            = filter    ((/= b) . (.& rel)  . D.sAbstract . getState gv) other2
+        (subsets, other1)   = partition ((.== t) . (.-> rel) . D.sAbstract . getState gv) (G.nodes $ gvGraph gv)
+        (supersets, other2) = partition ((.== t) . (rel .->) . D.sAbstract . getState gv) other1
+        overlaps            = filter    ((./= b) . (.& rel)  . D.sAbstract . getState gv) other2
     (ls, as) <- stateStyle gv' id
     annots <- stateAnnots gv' rel
     graphDrawInsertNode (gvGraphDraw gv') id annots coords (ls, as)
@@ -264,14 +264,14 @@ stateStyle gv id = do
 stateAnnots :: (D.Rel c v a s, ?m::c) => GraphView c a b -> a -> IO [GAnnotation]
 stateAnnots gv srel = do
     staterels <- D.modelStateRels (gvModel gv)
-    let supersets = map fst $ filter (\(n,r) -> (srel .-> r) == t) staterels
+    let supersets = map fst $ filter (\(n,r) -> (srel .-> r) .== t) staterels
     return $ map (\n -> GAnnotation n AnnotRight stateAnnotStyle) supersets
 
 transitionAnnots :: (D.Rel c v a s, ?m::c) => GraphView c a b -> D.Transition a b -> IO [GAnnotation]
 transitionAnnots gv tran = do
     model <- readIORef $ gvModel gv
     let tranrels = D.mTransRels model
-        relnames = map fst $ filter (\(n,r) -> (D.tranRel model tran .& r) /= b) tranrels
+        relnames = map fst $ filter (\(n,r) -> (D.tranRel model tran .& r) ./= b) tranrels
     labstr <- transitionLabel (gvModel gv) (D.tranAbstractLabel tran)
     return $ GAnnotation labstr AnnotRight labelStyle
            : map (\n -> GAnnotation n AnnotLeft tranAnnotStyle) relnames

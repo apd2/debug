@@ -58,10 +58,10 @@ viewFactories = [ (varViewNew,   True)
 
 
 -- GUI manager
-debugGUI :: (Rel c v a s, Vals b) => Model c a b -> IO ()
-debugGUI model = do
+debugGUI :: (Rel c v a s, Vals b) => [(RModel c a b -> IO (View a b), Bool)] -> Model c a b -> IO ()
+debugGUI extraFactories model = do
     let ?m = mCtx model
-    let factories = viewFactories
+    let factories = viewFactories ++ extraFactories
     rmodel <- newIORef model
 
     -- Initialize GTK+ engine
