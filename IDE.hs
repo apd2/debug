@@ -355,7 +355,7 @@ type RIDE = IORef IDE
 
 ideNew :: IO RIDE
 ideNew = do
-    main <- panedPanelsNew ((liftm g.topaned) g.hpanednew)
+    main <- panedPanelsNew ((liftM G.toPaned) G.hPanedNew)
     newIORef $ IDE { ideMain      = main
                    , ideLeft      = Nothing
                    , ideTopBottom = Nothing
