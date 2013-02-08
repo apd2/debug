@@ -19,13 +19,13 @@ Store = SStruct [(String, Store)] -- name/value pairs (used for structs and for 
       | SArr    [Store]           -- array assignment
       | SVal    Maybe I.Val       -- scalar
 
+-- process stack, including uncontrollable and controllable task stacks
+data PStack = [(I.Frame, (I.PID, Maybe String))]
 
-storeGetLoc :: Store -> I.PID -> Maybe String -> I.Loc
-storeGetLoc store pid methname = pcEnumToLoc pc
-    where pcname = mkPCVarName $ pid ++ maybeToList methname
-          pc     = storeGetScalar s pcname
-
-data TraceEntry = TraceEntry I.Stack Store
+data TraceEntry = TraceEntry {
+    teStack :: PStack,
+    teStore :: Store
+}
 
 type Trace = [TraceEntry]
 
@@ -66,7 +66,7 @@ data SourceView c a = SourceView {
 
 sourceViewNew :: (D.Rel c v a s) => C.Spec -> D.RModel c a Store -> IO (D.View a Store)
 sourceViewNew spec model = do
-    ref = newIORef $ SourceView { svSpec         = spec
+    ref = newIORef $ SourceView { svSpec         = C.specInlineWireAlways spec
                                 , svState        = error "SourceView: state undefined"
                                 , svTrace        = []
                                 , svTracePos     = 0
@@ -199,7 +199,7 @@ run ref = do
 
 
 --------------------------------------------------------------
--- Components
+-- GUI components
 --------------------------------------------------------------
 
 -- Process selector --
@@ -371,7 +371,7 @@ traceViewUpdate ref = do
     G.widgetSetSensitive (svTraceRedo sv) (svTracePos sv /= length (svTrace sv) - 1)
 
 
-traceAppend :: SourceView c a -> Store -> I.Stack -> SourceView c a
+traceAppend :: SourceView c a -> Store -> PStack -> SourceView c a
 traceAppend sv store stack = sv {svTrace = tr, svTracePos = pos}
     where tr  = take (svTracePos sv + 1) (svTrace sv) ++ [TraceEntry stack store]
           pos = length tr - 1
@@ -508,35 +508,39 @@ commandButtonsDisable ref
 
 -- Given a snapshot of the store at a pause location, compute
 -- process stack.
-stackFromStore :: Store -> I.PID -> Stack
-stackFromStore s pid = fst $ unzip $ stackFromStore' s pid Nothing
+stackFromStore :: Store -> I.PID -> PStack
+stackFromStore s pid = stackFromStore' s pid Nothing
 
 --    -- concatenate stacks from each process down the branch of the process tree
 --    concat $ reverse $ map (\pid -> stackFromStore' s pid Nothing) $ tail $ inits pid
 
 -- Returns extended version of the stack with PID and task name 
 -- attached to each frame
-stackFromStore' :: Store -> I.PID -> Maybe String -> [(Frame, (PID, Maybe String))]
+stackFromStore' :: Store -> I.PID -> Maybe String -> PStack
 stackFromStore' s pid methname = stack' ++ stack
-    where cfa    = C.getCFA pid methname
+    where cfa    = C.specGetCFA (svSpec sv) pid methname
           loc    = storeGetLoc store pid methname
           label  = cfaLocLabel loc cfa
           stack  = zip (locStack label) (repeat (pid, methname))
           -- If this location corresponds to a task call, recurse into task's CFA
           stack' = case label of 
                         LPause _ _ e -> case isWaitForTask e of
-                                             Nothing   -> []
+                                             Nothing   -> if isWaitForMagic e
+                                                             then case getTag s of
+                                                                       Nothing -> []
+                                                                       Just t  -> stackFromStore' s [] (Just t)
+                                                             else []
                                              Just name -> stackFromStore' s pid (Just name)
                         _            -> []
 
 
 isProcEnabled :: SourceView c a -> I.PID -> Bool
 isProcEnabled sv pid = 
-    where (frame, (pid, mmeth)) = head $ stackFromStore' (currentStore sv) pid Nothing
-          cfa = C.getCFA pid mmeth
-          case cfaLocLabel (fLoc frame) cfa of
-               LPause _ _ cond -> eval cond == BoolVal True
-               _               -> True
+    let (frame, (pid, mmeth)) = head $ stackFromStore' (currentStore sv) pid Nothing
+        cfa = C.specGetCFA (svSpec sv) pid mmeth
+    in case cfaLocLabel (fLoc frame) cfa of
+            LPause _ _ cond -> eval cond == I.BoolVal True
+            _               -> True
 
 
 -- update all displays
@@ -572,33 +576,50 @@ disable ref = do
     watchDisable ref
 
 
+storeGetLoc :: Store -> I.PID -> Maybe String -> I.Loc
+storeGetLoc store pid methname = pcEnumToLoc pc
+    where pcname = mkPCVarName $ pid ++ maybeToList methname
+          pc     = storeGetScalar s pcname
+
+
 -- Access current location in the trace --
 
 currentCFA :: SourceView -> I.CFA
+currentCFA sv = getCFA sv (svTracePos sv)
 
 currentLoc :: SourceView -> I.Loc
+currentLoc sv = getLoc sv (svTracePos sv)
 
 currentLocLabel :: SourceView -> I.LocLabel
+currentLocLabel sv = getLocLabel sv (svTracePos sv)
 
 currentStore :: SourceView -> Store
+currentStore sv = getStack sv (svTracePos sv)
 
-currentStack :: SourceView -> I.Stack
+currentStack :: SourceView -> PStack
+currentStack sv = getStack sv (svTracePos sv)
 
-cfaAtFrame :: SourcView -> Int -> I.CFA
-cfaAtFrame sv frame
-    --
+cfaAtFrame :: SourceView -> Int -> I.CFA
+cfaAtFrame sv frame = C.specGetCFA (svSpec sv) pid mmeth
+    where (pid, mmeth) = currentStack sv !! frame
 
 -- Access arbitrary location in the trace 
+
 getCFA :: SourceView -> Int -> I.CFA
+getCFA sv pos = C.specGetCFA (svSpec sv) pid mmeth
+    where (pid, mmeth) = snd $ head $ getStack sv pos
 
 getLoc :: SourceView -> Int -> I.Loc
+getLoc sv pos = fLoc $ fst $ head $ getStack sv pos
 
 getLocLabel :: SourceView -> Int -> I.LocLabel
+getLocLabel sv pos = I.cfaLocLabel (getLoc sv pos) (getCFA sv pos)
 
 getStore :: SourceView -> Int -> Store
+getStore sv pos = teStore $ svTrace sv !! pos
 
-getStack :: SourceView -> Int -> I.Stack
-
+getStack :: SourceView -> Int -> PStack
+getStack sv pos = teStack $ svTrace sv !! pos
 
 -- Execute one CFA transition
 -- Returns True if the step was performed successfully and
@@ -615,7 +636,7 @@ microstep ref = do
          (Just (store, stack)):_ -> do writeIORef ref $ traceAppend sv' store stack
                                        return True
 
-microstep' :: SourceView c a -> (I.Loc, I.TranLabel) -> Maybe (Store, I.Stack)
+microstep' :: SourceView c a -> (I.Loc, I.TranLabel) -> Maybe (Store, PStack)
 microstep' sv (to, TranCall scope)         = Just (currentStore sv, (Frame scope to) : currentStack sv)
 microstep' sv (to, TranReturn)             = Just (currentStore sv, tail $ currentStack sv)
 microstep' sv (to, TranNop)                = Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
