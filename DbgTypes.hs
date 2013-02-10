@@ -205,6 +205,12 @@ modelStateRels ref = (liftM mStateRels) $ readIORef ref
 modelActiveTransRel :: RModel c a b -> IO a
 modelActiveTransRel ref = (liftM (snd . head . mTransRels)) $ readIORef ref
 
+-- Abstraction/concretisation
+modelAbstractTransition :: RModel c a b -> State a b -> b -> Transition a b
+modelAbstractTransition ref from label = 
+
+modelAbstractState :: RModel c a b -> b -> State a b
+
 -- Actions
 modelSelectTransition :: RModel c a b -> Transition a b -> IO ()
 modelSelectTransition ref tran = do

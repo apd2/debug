@@ -19,6 +19,8 @@ Store = SStruct [(String, Store)] -- name/value pairs (used for structs and for 
       | SArr    [Store]           -- array assignment
       | SVal    Maybe I.Val       -- scalar
 
+storeEval :: Store -> I.Expr -> I.Val
+
 -- process stack, including uncontrollable and controllable task stacks
 data PStack = [(I.Frame, (I.PID, Maybe String))]
 
@@ -30,6 +32,7 @@ data TraceEntry = TraceEntry {
 type Trace = [TraceEntry]
 
 data SourceView c a = SourceView {
+    svModel        :: D.RModel a Store
     svSpec         :: C.Spec,
     svState        :: D.State a Store,            -- current state set via view callback
 
@@ -66,7 +69,8 @@ data SourceView c a = SourceView {
 
 sourceViewNew :: (D.Rel c v a s) => C.Spec -> D.RModel c a Store -> IO (D.View a Store)
 sourceViewNew spec model = do
-    ref = newIORef $ SourceView { svSpec         = C.specInlineWireAlways spec
+    ref = newIORef $ SourceView { svModel        = model
+                                , svSpec         = C.specInlineWireAlways spec
                                 , svState        = error "SourceView: state undefined"
                                 , svTrace        = []
                                 , svTracePos     = 0
@@ -404,11 +408,12 @@ watchCreate ref = do
     valrend <- G.cellRendererTextNew
     G.cellLayoutPackStart view valrend True
     G.cellLayoutSetAttributeFunc view valrend store $ 
-        (\iter -> idx  <- G.listStoreIterToIndex iter
+        (\iter -> sv <- readIORef ref
+                  idx  <- G.listStoreIterToIndex iter
                   mexp <- G.listStoreGetValue store idx
                   set valrend [cellTextMarkup := case mexp of 
                                                       Nothing  -> ""
-                                                      Just exp -> case evalStrInScope exp of
+                                                      Just exp -> case storeEvalStr (currentStore sv) (currentStack sv !! svStackFrame sv) exp of
                                                                        Left e  -> e
                                                                        Right v -> show v])
 
@@ -456,7 +461,7 @@ sourceWindowUpdate :: RSourceView c a -> IO ()
 sourceWindowUpdate ref = do
     sv <- readIORef ref
     let cfa = cfaAtFrame sv (svStackFrame sv)
-        loc = fLoc $ (currentStack sv) !! (svStackFrame sv)
+        loc = fLoc $ fst $ (currentStack sv) !! (svStackFrame sv)
         p = case locAct $ I.cfaLocLabel cfa loc of
                  ActNone   -> return ()
                  ActExpr e -> sourceSetPos sv $ pos e
@@ -486,12 +491,13 @@ sourceSetPos sv (from, to) = do
 -- Command buttons --
 commandButtonsUpdate :: RSourceView c a -> IO ()
 commandButtonsUpdate ref = do
-    lab <- getIORef currentLocLabel ref
+    sv <- readIORef ref
     -- enable step and run buttons if we are not at a pause location or
     -- if we are in a pause location and the wait condition is true
-    let en = case lab of
+    let lab = currentLocLabel sv
+        en = case lab of
                   LInst _      -> True
-                  LPause _ _ c -> eval c == BoolVal True 
+                  LPause _ _ c -> storeEval (currentStore sv) c == BoolVal True 
                   LFinal _ _   -> True
     G.widgetSetSensitive (svStepButton sv) en
     G.widgetSetSensitive (svRunButton sv) en
@@ -511,16 +517,13 @@ commandButtonsDisable ref
 stackFromStore :: Store -> I.PID -> PStack
 stackFromStore s pid = stackFromStore' s pid Nothing
 
---    -- concatenate stacks from each process down the branch of the process tree
---    concat $ reverse $ map (\pid -> stackFromStore' s pid Nothing) $ tail $ inits pid
-
 -- Returns extended version of the stack with PID and task name 
 -- attached to each frame
 stackFromStore' :: Store -> I.PID -> Maybe String -> PStack
 stackFromStore' s pid methname = stack' ++ stack
     where cfa    = C.specGetCFA (svSpec sv) pid methname
           loc    = storeGetLoc store pid methname
-          label  = cfaLocLabel loc cfa
+          label  = I.cfaLocLabel loc cfa
           stack  = zip (locStack label) (repeat (pid, methname))
           -- If this location corresponds to a task call, recurse into task's CFA
           stack' = case label of 
@@ -533,15 +536,17 @@ stackFromStore' s pid methname = stack' ++ stack
                                              Just name -> stackFromStore' s pid (Just name)
                         _            -> []
 
+getTag :: Store -> String
+getTag s = storeGetScalar s mkTagVarName
 
 isProcEnabled :: SourceView c a -> I.PID -> Bool
 isProcEnabled sv pid = 
-    let (frame, (pid, mmeth)) = head $ stackFromStore' (currentStore sv) pid Nothing
+    let store = D.sConcrete $ svState sv
+        (frame, (pid, mmeth)) = head $ stackFromStore' store pid Nothing
         cfa = C.specGetCFA (svSpec sv) pid mmeth
     in case cfaLocLabel (fLoc frame) cfa of
-            LPause _ _ cond -> eval cond == I.BoolVal True
+            LPause _ _ cond -> storeEval store cond == I.BoolVal True
             _               -> True
-
 
 -- update all displays
 updateDisplays :: RSourceView c a -> IO ()
@@ -558,7 +563,7 @@ reset ref = do
     processSelectorUpdate ref
     sv <- readIORef ref
     -- initialise stack and trace
-    let trace = [stackFromStore (D.sConcrete s) (svPID sv)]
+    let trace = [stackFromStore (D.sConcrete $ svState sv) (svPID sv)]
     writeIORef ref sv{svTrace = trace, svTracePos = 0, svStackFrame = 0}
     updateDisplays ref
 
@@ -582,43 +587,43 @@ storeGetLoc store pid methname = pcEnumToLoc pc
           pc     = storeGetScalar s pcname
 
 
--- Access current location in the trace --
+-- Access current location in the trace 
 
-currentCFA :: SourceView -> I.CFA
+currentCFA :: SourceView c a -> I.CFA
 currentCFA sv = getCFA sv (svTracePos sv)
 
-currentLoc :: SourceView -> I.Loc
+currentLoc :: SourceView c a -> I.Loc
 currentLoc sv = getLoc sv (svTracePos sv)
 
-currentLocLabel :: SourceView -> I.LocLabel
+currentLocLabel :: SourceView c a -> I.LocLabel
 currentLocLabel sv = getLocLabel sv (svTracePos sv)
 
-currentStore :: SourceView -> Store
-currentStore sv = getStack sv (svTracePos sv)
+currentStore :: SourceView c a -> Store
+currentStore sv = getStore sv (svTracePos sv)
 
-currentStack :: SourceView -> PStack
+currentStack :: SourceView c a -> PStack
 currentStack sv = getStack sv (svTracePos sv)
 
-cfaAtFrame :: SourceView -> Int -> I.CFA
+cfaAtFrame :: SourceView c a -> Int -> I.CFA
 cfaAtFrame sv frame = C.specGetCFA (svSpec sv) pid mmeth
-    where (pid, mmeth) = currentStack sv !! frame
+    where (pid, mmeth) = snd $ currentStack sv !! frame
 
 -- Access arbitrary location in the trace 
 
-getCFA :: SourceView -> Int -> I.CFA
+getCFA :: SourceView c a -> Int -> I.CFA
 getCFA sv pos = C.specGetCFA (svSpec sv) pid mmeth
     where (pid, mmeth) = snd $ head $ getStack sv pos
 
-getLoc :: SourceView -> Int -> I.Loc
+getLoc :: SourceView c a -> Int -> I.Loc
 getLoc sv pos = fLoc $ fst $ head $ getStack sv pos
 
-getLocLabel :: SourceView -> Int -> I.LocLabel
+getLocLabel :: SourceView c a -> Int -> I.LocLabel
 getLocLabel sv pos = I.cfaLocLabel (getLoc sv pos) (getCFA sv pos)
 
-getStore :: SourceView -> Int -> Store
+getStore :: SourceView c a -> Int -> Store
 getStore sv pos = teStore $ svTrace sv !! pos
 
-getStack :: SourceView -> Int -> PStack
+getStack :: SourceView c a -> Int -> PStack
 getStack sv pos = teStack $ svTrace sv !! pos
 
 -- Execute one CFA transition
@@ -640,13 +645,79 @@ microstep' :: SourceView c a -> (I.Loc, I.TranLabel) -> Maybe (Store, PStack)
 microstep' sv (to, TranCall scope)         = Just (currentStore sv, (Frame scope to) : currentStack sv)
 microstep' sv (to, TranReturn)             = Just (currentStore sv, tail $ currentStack sv)
 microstep' sv (to, TranNop)                = Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
-microstep' sv (to, TranStat (SAssume e))   = case eval e of
+microstep' sv (to, TranStat (SAssume e))   = case storeEval (currentStore sv) e of
                                                   BoolVal True -> Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
                                                   _            -> Nothing
 microstep' sv (to, TranStat (SAssign l r)) = Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
-                                             where store' = storeSet (currentStore sv) l (eval r)
+                                             where store' = storeSet (currentStore sv) l (storeEval (currentStore sv) r)
 
 resolveTran :: SourceView c a -> (I.Loc, I.TranLabel) -> IO (SourceView c a)
 resolveTran sv (_, TranStat (SAssume e))   = resolveExpr sv e
 resolveTran sv (_, TranStat (SAssign l r)) = resolveExpr sv r
 resolveTran sv _                           = return sv
+
+-- Actions taken upon reaching a delay location
+completeTransition :: RSourceView c a -> IO ()
+completeTransition ref = do
+    sv <- readIORef ref
+    -- update PC and PID variables
+    let pc = currentLoc sv
+        (p, mmeth) = snd $ head $ currentStack sv
+        pid = p ++ (maybeToList mmeth)
+        sv' = setPC pid pc $ setPID pid sv
+    writeIORef ref sv'
+    -- abstract final state
+    trans <- modelAbstractTransition (svModel sv') (currentStore sv')
+    -- add transition
+    modelSelectTransition (svModel sv') trans
+    modelSelectState (svModel sv') (tranTo trans)
+
+setPID :: I.PID -> SourceView c a -> SourceView c a
+setPID pid sv = modifyCurrentStore sv $ (storeSetScalar mkPIDVarName (I.EnumVal $ mkPIDEnumeratorName pid))
+    
+setPC :: I.PID -> I.Loc -> SourceView c a -> SourceView c a
+setPC pid pcloc sv = modifyCurrentStore sv $ (storeSetScalar (mkPCVarName pid) (I.EnumVal $ mkPCEnum pid pcloc))
+
+-- Evaluate expression written in terms of variables in the original input spec.
+evalStr :: Store -> PFrame -> String -> Either String I.Val
+evalStr store (frame, (pid, mmeth)) str = do
+    -- Apply all transformations that the input spec goes through to the expression:
+    -- 1. parse
+    expr <- parse detexpr "" tsl str
+    let ?spec = inspec
+    let (scope,iid) = case fScope frame of
+                            ScopeMethod   _ meth -> let (iid, mname) = itreeParseName $ name meth
+                                                        tm = itreeTemplate iid
+                                                        meth = fromJust $ find (== mname . methName) $ tmAllMethod tm
+                                                    in (ScopeMethod tm meth, iid)
+                            ScopeProcess  _ proc -> let (iid, pname) = itreeParseName $ name meth
+                                                        tm = itreeTemplate iid
+                                                        proc = fromJust $ find (== pname . procName) $ tmAllProcess tm
+                                                    in (ScopeProcess tm proc, iid)
+                            ScopeTemplate _      -> (ScopeTop, [])
+    -- 2. validate
+    validateExpr scope expr
+    let ?scope = scope in when (not exprNoSideEffects expr) $ throwError "Expression has side effects"
+    -- 3. flatten
+    let flatexpr = exprFlatten iid scope expr
+    -- 4. simplify
+    let ?spec = flatspec 
+    let (ss, simpexpr) = let ?uniq = newUniq
+                             ?scope = fScope frame
+                         in exprSimplify flatexpr
+    when (ss /= []) $ throwError "Expression too complex"
+    -- 5. inline
+    let lmap = case fScope frame of
+                    ScopeMethod  _ meth -> methodLMap pid meth
+                    ScopeProcess _ proc -> procLMap proc
+                    ScopeTemplate       -> M.empty
+    let ctx = CFACtx { ctxPID     = []
+                     , ctxStack   = [(fScope frame, error "evalStr: return", Nothing, NameMap)]
+                     , ctxCFA     = error "evalStr: CFA undefined"
+                     , ctxBrkLocs = []
+                     , ctxGNMap   = globalNMap
+                     , ctxLastVar = 0
+                     , ctxVar     = []}
+        iexpr = evalState (exprToIExprDet simpexpr) ctx
+    -- 6. evaluate
+    return $ storeEval store iexpr
