@@ -120,11 +120,9 @@ stateCategory :: (Rel c v a s, ?m::c) => Model c a b -> a -> IO StateCategory
 stateCategory model rel = 
     case find ((==contRelName) . fst) (mStateRels model) of
          Nothing        -> return StateBoth
-         Just (_, cont) -> if rel `leq` cont
-                              then return StateControllable
-                              else if rel `leq` nt cont
-                                      then return StateUncontrollable
-                                      else return StateBoth
+         Just (_, cont) -> if' (rel `leq` cont) (return StateControllable) $
+                           if' (rel `leq` nt cont) (return StateUncontrollable) $
+                           return StateBoth
 
 data Transition a b = Transition {
     tranFrom          :: State a b,
