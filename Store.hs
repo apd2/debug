@@ -1,7 +1,12 @@
 module Store (Store(..),
+              storeUnion,
+              storeUnions,
+              storeProject,
+              storeNonDet,
               storeEval,
               storeEvalEnum,
-              storeTrue) where
+              storeEvalBool,
+              storeSet) where
 
 import IExpr
 
@@ -11,8 +16,22 @@ Store = SStruct [(String, Store)] -- name/value pairs (used for structs and for 
       | SArr    [Store]           -- array assignment
       | SVal    (Maybe I.Val)     -- scalar
 
-storeTrue = SVal $ Just $ BoolVal True
+-- shallow union of stores
+storeUnion :: Store -> Store -> Store
+storeUnion (SStruct entries1) (SStruct entries2) = SStruct $ entries1 ++ entries2
 
+storeUnions :: [Store] -> Store
+storeUnions stores = foldl' (\s1 s2 -> storeUnion s1 s2) (SStruct []) stores
+
+storeNonDet :: I.Type -> Store
+storeNonDet (I.Struct fs) = SStruct $ map (\I.Field n t -> (n, storeNonDet t)) fs
+storeNonDet (Array t sz)  = SArr $ replicate sz $ storeNonDet t
+
+-- project store on a subset of variables
+storeProject :: Store -> [String] -> Store
+storeProject (SStruct entries) names = SStruct $ filter (\(n,_) -> elem n names) entries
+
+-- Expression evaluation over stores
 storeTryEval :: Store -> I.Expr -> Maybe Store
 storeTryEval (SStruct fs) (EVar name)       = fmap snd $ find (==name . fst) fs
 storeTryEval _            (EVar _)          = Nothing
@@ -41,6 +60,12 @@ storeTryEvalInt s e = case storeTryEvalScalar s e of
                            Just (UIntVal _ i) -> Just i
                            _                  -> Nothing
 
+storeTryEvalBool :: Store -> I.Expr -> Maybe Bool
+storeTryEvalBool s e = case storeTryEvalScalar s e of
+                           Just (BoolVal b) -> Just b
+                           _                -> Nothing
+
+
 storeTryEvalEnum :: Store -> I.Expr -> Maybe String
 storeTryEvalEnum s e = case storeTryEvalScalar s e of
                            Just (EnumVal s) -> Just s
@@ -60,6 +85,16 @@ storeEval :: Store -> I.Expr -> Store
 storeEval store e = case storeTryEval store e of
                          Nothing -> error "storeEval: invalid expression"
                          Just s  -> s
+
+storeEvalScalar :: Store -> I.Expr -> I.Val
+storeEvalScalar s e = case storeTryEvalScalar s e of
+                           Just v -> return v
+                           _      -> error "storeEvalScalar: invalid expression"
+
+storeEvalBool :: Store -> I.Expr -> Bool
+storeEvalBool store e = case storeTryEvalBool store e of
+                             Nothing -> error "storeEvalBool: invalid expression"
+                             Just b  -> b
 
 storeEvalInt :: Store -> I.Expr -> Integer
 storeEvalInt store e = case storeTryEvalInt store e of

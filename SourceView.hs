@@ -15,6 +15,10 @@ import qualified CFA      as I
 -- Data structures
 --------------------------------------------------------------
 
+data AbsVar = AVarPred Predicate        -- predicate variable
+            | AVarVar  String           -- unabstracted variable
+            | AVarEnum String [I.Val]   -- variable with several interesting values
+
 -- process stack, including uncontrollable and controllable task stacks
 data PStack = [(I.Frame, (I.PID, Maybe String))]
 
@@ -28,6 +32,7 @@ type Trace = [TraceEntry]
 data SourceView c a = SourceView {
     svModel        :: D.RModel a Store
     svSpec         :: C.Spec,
+    svAbsVars      :: M.Map String AbsVar,
     svState        :: D.State a Store,            -- current state set via view callback
     svTmp          :: Store,                      -- temporary variables store
     svTranPID      :: Maybe I.PID,                -- set by transitionSelected, restricts enabled processes to PID
@@ -56,17 +61,21 @@ data SourceView c a = SourceView {
 
     -- Source window
     svSourceView   :: G.SourceView,
-    svSourceTag    :: G.TextTag                  -- tag to mark current selection current selection
+    svSourceTag    :: G.TextTag,                  -- tag to mark current selection current selection
+
+    -- Resolve view
+    svResolveStore :: G.TreeStore I.Expr          -- tmp variables in the scope of the current expression
 }
 
 --------------------------------------------------------------
 -- View callbacks
 --------------------------------------------------------------
 
-sourceViewNew :: (D.Rel c v a s) => C.Spec -> D.RModel c a Store -> IO (D.View a Store)
-sourceViewNew spec model = do
+sourceViewNew :: (D.Rel c v a s) => C.Spec -> [AbsVar] -> D.RModel c a Store -> IO (D.View a Store)
+sourceViewNew spec avars model = do
     ref = newIORef $ SourceView { svModel        = model
                                 , svSpec         = C.specInlineWireAlways spec
+                                , svAbsVars      = M.fromList $ map (\v -> (show v, v)) avars
                                 , svState        = error "SourceView: state undefined"
                                 , svTmp          = error "SourceView: svTmp undefined"
                                 , svTranPID      = Nothing,
@@ -127,13 +136,15 @@ sourceViewNew spec model = do
     src <- sourceWindowCreate ref
     panelsAppend hpanes src "Source Code"
 
-    -- stack, watch on the right
+    -- stack, watch, resolve on the right
     vpanes <- panefPanelsNew (liftM G.toPaned $ G.vPanedNew)
     panelsAppend hpanes vpanes ""
     stack <- stackViewCreate ref
     watch <- watchCreate ref
+    resolve <- resolveViewCreate ref
     panelsAppend vpanes stack "Stack"
     panelsAppend vpanes watch "Watch"
+    panelsAppend vpanes resolve "Resolve non-determinism"
 
     let cb = D.ViewEvents { D.evtStateSelected      = sourceViewStateSelected      ref 
                           , D.evtTransitionSelected = sourceViewTransitionSelected ref
@@ -260,12 +271,18 @@ stackViewCreate ref = do
     view <- G.treeViewNew
     G.widgetShow view
     store <- G.listStoreNew []
+
+    col <- G.treeViewColumnNew
+    G.treeViewColumnSetTitle col "Stack frames"
+
     rend <- G.cellRendererTextNew
-    G.cellLayoutPackStart view rend True
-    G.cellLayoutSetAttributeFunc view rend store $ 
+    G.cellLayoutPackStart col rend True
+    G.cellLayoutSetAttributeFunc col rend store $ 
         (\iter -> idx <- G.listStoreIterToIndex iter
                   frame <- G.listStoreGetValue store idx
                   set rend [cellTextMarkup := sname $ fScope frame)
+    G.treeViewAppendColumn view col
+
     modifyIORef ref (\sv -> sv{svStackView = view, svStackStore = store, svStackFrame = 0})
     G.treeViewSetModel view store
     G.on view rowActivated (stackViewFrameSelected ref)
@@ -396,9 +413,13 @@ watchCreate ref = do
     G.boxPackStart vbox view G.PackGrow 0
 
     store <- G.treeStoreNew [Nothing]
+
+    namecol <- G.treeViewColumnNew
+    G.treeViewColumnSetTitle namecol "Watch expression"
+
     exprend <- G.cellRendererTextNew
-    G.cellLayoutPackStart view exprend True
-    G.cellLayoutSetAttributeFunc view exprend store $ 
+    G.cellLayoutPackStart namecol exprend False
+    G.cellLayoutSetAttributeFunc namecol exprend store $ 
         (\iter -> idx  <- G.listStoreIterToIndex iter
                   mexp <- G.listStoreGetValue store idx
                   set exprend [ cellTextEditable := True
@@ -406,10 +427,14 @@ watchCreate ref = do
                                                        Nothing  -> "<i>Add watch</i>"
                                                        Just exp -> exp])
     G.on exprend G.edited (\_ _ -> watchUpdate ref)
+    G.treeViewAppendColumn view namecol
+
+    valcol <- G.treeViewColumnNew
+    G.treeViewColumnSetTitle valcol "Value"
 
     valrend <- G.cellRendererTextNew
-    G.cellLayoutPackStart view valrend True
-    G.cellLayoutSetAttributeFunc view valrend store $ 
+    G.cellLayoutPackStart valcol valrend True
+    G.cellLayoutSetAttributeFunc valcol valrend store $ 
         (\iter -> sv <- readIORef ref
                   idx  <- G.listStoreIterToIndex iter
                   mexp <- G.listStoreGetValue store idx
@@ -418,6 +443,7 @@ watchCreate ref = do
                                                       Just exp -> case storeEvalStr (currentStore sv) (currentStack sv !! svStackFrame sv) exp of
                                                                        Left e  -> e
                                                                        Right v -> show v])
+    G.treeViewAppendColumn view valcol
 
     G.on view G.keyPressEvent (do key <- eventKeyVal
                                   when (key == "Delete") $ liftIO $ watchDelete ref)
@@ -499,7 +525,7 @@ commandButtonsUpdate ref = do
     let lab = currentLocLabel sv
         en = case lab of
                   LInst _      -> True
-                  LPause _ _ c -> storeEval (currentStore sv) c == storeTrue
+                  LPause _ _ c -> storeEvalBool (currentStore sv) c == True
                   LFinal _ _   -> True
     G.widgetSetSensitive (svStepButton sv) en
     G.widgetSetSensitive (svRunButton sv) en
@@ -508,6 +534,155 @@ commandButtonsDisable ref
     -- disable command buttons
     G.widgetSetSensitive (svStepButton sv) False
     G.widgetSetSensitive (svRunButton sv) False
+
+-- Resolve --
+
+resolveViewCreate :: RSourceView c a -> IO G.Widget
+resolveViewCreate ref = do
+
+    view <- G.treeViewNew
+    G.widgetShow view
+    store <- G.treeStoreNew []
+
+    -- Variable name column
+    namecol <- G.treeViewColumnNew
+    G.treeViewColumnSetTitle namecol "Variables"
+
+    namerend <- G.cellRendererTextNew
+    G.cellLayoutPackStart namecol namerend False
+    G.cellLayoutSetAttributeFunc namecol namerend store $ 
+        (\iter -> sv <- readIORef ref
+                  path <- G.treeModelGetPath store iter
+                  exp <- G.treeStoreGetValue store path
+                  let hl = isNothing $ storeEval (currentStore sv) exp
+                  set namerend [cellTextMarkup := if hl 
+                                                     then "<span background=\"red\">" ++ show exp ++ "</span>" 
+                                                     else show exp])
+    G.treeViewAppendColumn view namecol
+
+    -- Variable assignment column
+    valcol <- G.treeViewColumnNew
+    G.treeViewColumnSetTitle valcol "Value"
+
+    textrend <- G.cellRendererTextNew
+    G.cellLayoutPackStart valcol textrend True
+    G.cellLayoutSetAttributeFunc valcol textrend store $ 
+        (\iter -> sv <- readIORef ref
+                  path <- G.treeModelGetPath store iter
+                  exp <- G.treeStoreGetValue store path
+                  set textrend [ cellVisible := isTypeInt exp
+                                 cellTextEditable := True
+                                 cellText := show $ storeEval (currentStore sv) exp])
+    G.on textrend G.edited (textAsnChanged ref)
+
+    combrend <- G.cellRendererComboNew
+    G.cellLayoutPackStart valcol combrend True
+    G.cellLayoutSetAttributeFunc valcol combrend store $ 
+        (\iter -> sv <- readIORef ref
+                  path <- G.treeModelGetPath store iter
+                  exp <- G.treeStoreGetValue store path
+                  set combrend [ cellVisible := isTypeScalar exp && not (isTypeInt exp)
+                                 cellComboTextModel := (textModel $ typ exp, G.makeColumnIdString 0)
+                                 cellTextEditable := True
+                                 cellText := show $ storeEval (currentStore sv) exp])
+    G.on combrend G.edited (textAsnChanged ref) 
+
+    G.treeViewAppendColumn view valcol
+    modifyIORef ref (\sv -> sv {svResolveStore = store})
+    return $ G.toWidget view
+
+comboTextModel :: I.Type -> G.ListStore String
+comboTextModel I.Bool     = G.listStoreNew ["*", "True", "False"]
+comboTextModel (I.Enum n) = G.listStoreNew ("*": enumEnums $ getEnumeration n)
+
+textAsnChanged :: RSourceView c a -> TreePath -> String -> IO ()
+textAsnChanged ref path valstr = do
+    sv <- readIORef ref
+    exp <- G.treeStoreGetValue (svResolveStore sv) path
+    val = if valstr == "*"
+             then SVal Nothing
+             else case I.parseVal (typ exp) val of
+                       Left e  -> do showMessage ref G.MessageError e
+                                     return $ SVal Nothing
+                       Right v -> SVal $ Just v
+    writeIORef ref $ updateCurrentStore sv (\store -> storeSet store exp val)
+    resolveViewUpdate ref
+
+resolveViewUpdate :: RSourceView c a -> IO ()
+resolveViewUpdate ref = do
+    sv <- readIORef ref
+    let -- collect tmp variables from all transitions from the current location
+        trans = map snd $ Graph.lsuc (currentCFA sv) (currencLoc sv)
+        exprs = map (mkTree . I.Evar)
+                $ filter (== I.VarTmp . I.varCat)
+                $ S.toList $ S.fromList $
+                $ concatMap (\t -> case t of
+                                        TranStat (SAssume e)   -> I.exprVars e
+                                        TranStat (SAssign _ e) -> I.exprVars e
+                                        _                      -> []) 
+                $ trans
+        -- expand expression into a tree of scalars
+        mkTree exp = Node { rootLabel = exp
+                          , subForest = map mkTree 
+                                        $ case typ exp of
+                                               I.Struct fs  -> map (\(Field n t) -> I.EField exp n) fs
+                                               I.Array t sz -> map (\i -> I.EIndex exp i) [0..sz-1]
+                                               _            -> []
+                          }
+    let store = svResolveStore sv
+    G.treeStoreClear store
+    G.treeStoreInsertForest store [] 0 exprs
+
+
+resolveViewDisable :: RSourceView c a -> IO ()
+resolveViewDisable ref = do
+    sv <- readIORef ref
+    G.treeStoreClear $ svResolveStore sv
+
+--------------------------------------------------------------
+-- Abstraction/concretisation
+--------------------------------------------------------------
+
+abstractTransition :: RSourceView c a -> State a Store -> Store -> IO (Transition a Store)
+abstractTransition ref from to =
+    SourceView{..} <- readIORef ref
+    model <- readIORef $ svModel sv
+    let tranFrom = from
+        -- compute untracked and label predicates over to
+        tranUntracked = conj $ map (evalAbsVar sv to) D.mUntrackedVars
+        tranAbstractLabel = conj $ map (evalAbsVar sv to) D.mLabelVars
+        -- project to state on tmp variables
+        tranConcreteLabel = Just $ storeProject to (map I.varName $ C.specTmpVars svSpec)
+        tranTo = D.State { sAbstract = conj $ map (evalAbsVar sv to . (\(n,t,(i,_)) -> (n,t,i))) D.mStateVars
+                         , sConcrete = Just $ storeProject to (map I.varName $ C.specVar svSpec)}
+    return $ Transition{..}     
+
+
+evalAbsVar :: SourceView c a -> Store -> (String, Type, [Int]) -> a
+evalAbsVar sv store (name, _, is) = evalAbsVar' store (svAbsVars M.! name) is
+
+evalAbsVar' :: Store -> AbsVar -> [Int] -> a
+evalAbsVar' store (AVarPred p) is = 
+    if storeEvalBool store (predToExpr p)
+       then eqConst (D.idxToVS is) 1
+       else eqConst (D.idxToVS is) 0
+
+evalAbsVar' store (AVarVar name) is = 
+   eqConst (D.idxToVS is) $ scalarToInt $ storeEvalScalar store (I.EVar name)
+
+evalAbsVar' store (AVarEnum name vals) is =
+    case findIndex (==v) vals of
+         Just i  -> eqConst vs i
+         Nothing -> conj $ map (nt $ eqConst vs i) [0..length vals -1]
+    where v  = storeEvalScalar store (I.EVar name)
+          vs = D.idxToVS is
+
+scalarToInt :: I.Val -> Int
+scalarToInt (I.BoolVal True)  = 1
+scalarToInt (I.BoolVal False) = 0
+scalarToInt (I.UIntVal i)     = i
+scalarToInt (I.SIntVal i)     = i
+scalarToInt (I.EnumVal s)     = fromJust $ findIndex (== s) $ enumEnums $ getEnumerator s
 
 
 --------------------------------------------------------------
@@ -538,6 +713,12 @@ stackFromStore' s pid methname = stack' ++ stack
                                              Just name -> stackFromStore' s pid (Just name)
                         _            -> []
 
+storeGetLoc :: Store -> I.PID -> Maybe String -> I.Loc
+storeGetLoc store pid methname = pcEnumToLoc pc
+    where pcvar = mkPCVar $ pid ++ maybeToList methname
+          pc    = storeEvalEnum s pcvar
+
+
 getTag :: Store -> String
 getTag s = storeEvalEnum s mkTagVar
 
@@ -549,7 +730,7 @@ isProcEnabled sv pid =
     in case svTranPID sv of
             Just pid' -> pid' == pid
             _         -> case cfaLocLabel (fLoc frame) cfa of
-                              LPause _ _ cond -> storeEval store cond == storeTrue
+                              LPause _ _ cond -> storeEvalBool store cond == True
                               _               -> True
 
 -- update all displays
@@ -560,6 +741,7 @@ updateDisplays ref = do
     traceViewUpdate      ref
     watchUpdate          ref
     sourceWindowUpdate   ref
+    resolveViewUpdate    ref
 
 -- Reset all components
 reset :: RSourceView c a -> IO ()
@@ -584,13 +766,7 @@ disable ref = do
     stackViewDisable ref
     traceViewDisable ref
     watchDisable ref
-
-
-storeGetLoc :: Store -> I.PID -> Maybe String -> I.Loc
-storeGetLoc store pid methname = pcEnumToLoc pc
-    where pcvar = mkPCVar $ pid ++ maybeToList methname
-          pc    = storeEvalEnum s pcvar
-
+    resolveViewDisable ref
 
 -- Access current location in the trace 
 
@@ -605,6 +781,8 @@ currentLocLabel sv = getLocLabel sv (svTracePos sv)
 
 currentStore :: SourceView c a -> Store
 currentStore sv = getStore sv (svTracePos sv)
+
+updateCurrentStore :: SourceView c a -> (Store -> Store) -> SourceView c a
 
 currentStack :: SourceView c a -> PStack
 currentStack sv = getStack sv (svTracePos sv)
@@ -640,26 +818,20 @@ microstep ref = do
     sv <- readIORef ref
     -- Try all transitions from the current location; choose the first successful one
     let transitions = Graph.lsuc (currentCFA sv) (currencLoc sv)
-    sv' <- foldM resolveTran sv transitions
-    case mapMaybe (microstep' sv') transitions of
+    case mapMaybe (microstep' sv) transitions of
          []                      -> return False
-         (Just (store, stack)):_ -> do writeIORef ref $ traceAppend sv' store stack
+         (Just (store, stack)):_ -> do writeIORef ref $ traceAppend sv store stack
                                        return True
 
 microstep' :: SourceView c a -> (I.Loc, I.TranLabel) -> Maybe (Store, PStack)
 microstep' sv (to, TranCall scope)         = Just (currentStore sv, (Frame scope to) : currentStack sv)
 microstep' sv (to, TranReturn)             = Just (currentStore sv, tail $ currentStack sv)
 microstep' sv (to, TranNop)                = Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
-microstep' sv (to, TranStat (SAssume e))   = if storeEval (currentStore sv) e == storeTrue
+microstep' sv (to, TranStat (SAssume e))   = if storeEvalBool (currentStore sv) e == True
                                                   then Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
                                                   else Nothing
 microstep' sv (to, TranStat (SAssign l r)) = Just (store', (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
                                              where store' = storeSet (currentStore sv) l (storeEval (currentStore sv) r)
-
-resolveTran :: SourceView c a -> (I.Loc, I.TranLabel) -> IO (SourceView c a)
-resolveTran sv (_, TranStat (SAssume e))   = resolveExpr sv e
-resolveTran sv (_, TranStat (SAssign l r)) = resolveExpr sv r
-resolveTran sv _                           = return sv
 
 -- Actions taken upon reaching a delay location
 completeTransition :: RSourceView c a -> IO ()
@@ -672,7 +844,8 @@ completeTransition ref = do
         sv' = setPC pid pc $ setPID pid sv
     writeIORef ref sv'
     -- abstract final state
-    trans <- modelAbstractTransition (svModel sv') (currentStore sv')
+    model <- readIORef $ svModel sv'
+    let trans = abstractTransition model (svState sv') (currentStore sv')
     -- add transition
     modelSelectTransition (svModel sv') trans
     modelSelectState (svModel sv') (tranTo trans)
@@ -717,7 +890,7 @@ evalStr store (frame, (pid, mmeth)) str = do
                     ScopeProcess _ proc -> procLMap proc
                     ScopeTemplate       -> M.empty
     let ctx = CFACtx { ctxPID     = []
-                     , ctxStack   = [(fScope frame, error "evalStr: return", Nothing, NameMap)]
+                     , ctxStack   = [(fScope frame, error "evalStr: return", Nothing, lmap)]
                      , ctxCFA     = error "evalStr: CFA undefined"
                      , ctxBrkLocs = []
                      , ctxGNMap   = globalNMap
@@ -727,6 +900,24 @@ evalStr store (frame, (pid, mmeth)) str = do
     -- 6. evaluate
     return $ storeEval store iexpr
 
-emptyTmpStore :: SourceView c a -> Store
 
+-- Create a store with all tmp variables assigned to Nothing
+emptyTmpStore :: SourceView c a -> Store
+emptyTmpStore sv = 
+    storeUnions $ map (\v -> SStruct [varName v, storeNonDet $ varType v])
+                $ C.specTmpVars $ svSpec sv
+
+-- Create a store with all tmp variables assigned according to their values 
+-- in the transition
 tranTmpStore :: SourceView c a -> D.Transition a Store -> Store
+tranTmpStore sv tran = 
+    storeUnions $ map (\v -> SStruct [(varName v, storeEval tstore (I.EVar $ I.varName v))])
+                $ C.specTmpVars $ svSpec sv
+    where tstore = D.tranConcreteLabel tran
+
+-- Message boxes
+showMessage :: RModel c a b -> G.MessageType -> String -> IO ()
+showMessage ref mtype mtext = do
+    dialog <- messageDialogNew Nothing [DialogModal] mtype ButtonsOk mtext
+    onResponse dialog (\_ -> widgetDestroy dialog)
+    windowPresent dialog

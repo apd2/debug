@@ -185,29 +185,23 @@ modelCtx :: RModel c a b -> IO c
 modelCtx ref = (liftM mCtx) $ readIORef ref
 
 modelStateVars :: RModel c a b -> IO [(String, Type, ([Int],[Int]))]
-modelStateVars ref = (liftM mStateVars) $ readIORef ref
+modelStateVars ref = getIORef mStateVars ref
 
 modelUntrackedVars :: RModel c a b -> IO [(String, Type, [Int])]
-modelUntrackedVars ref = (liftM mUntrackedVars) $ readIORef ref
+modelUntrackedVars ref = getIORef mUntrackedVars ref
 
 modelLabelVars :: RModel c a b -> IO [(String, Type, [Int])]
-modelLabelVars ref = (liftM mLabelVars) $ readIORef ref
+modelLabelVars ref = getIORef mLabelVars ref
 
 modelTransRels :: RModel c a b -> IO [(String, a)]
-modelTransRels ref = (liftM mTransRels) $ readIORef ref
+modelTransRels ref = getIORef mTransRels ref
 
 modelStateRels :: RModel c a b -> IO [(String, a)]
-modelStateRels ref = (liftM mStateRels) $ readIORef ref
+modelStateRels ref = getIORef mStateRels ref
 
 -- TODO: implement proper selection of transition relation to debug
 modelActiveTransRel :: RModel c a b -> IO a
-modelActiveTransRel ref = (liftM (snd . head . mTransRels)) $ readIORef ref
-
--- Abstraction/concretisation
-modelAbstractTransition :: RModel c a b -> State a b -> b -> Transition a b
-modelAbstractTransition ref from label = 
-
-modelAbstractState :: RModel c a b -> b -> State a b
+modelActiveTransRel ref = getIORef (snd . head . mTransRels) ref
 
 -- Actions
 modelSelectTransition :: RModel c a b -> Transition a b -> IO ()
