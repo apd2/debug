@@ -152,18 +152,21 @@ tranRel model t =  (sAbstract $ tranFrom t)
 
 -- Debugger state
 data Model c a b = Model {
-    mCtx           :: c,
+    -- Static part --
+
+    mCtx                  :: c,
 
     -- Abstract variable sections
-    mStateVars     :: [(String, Type, ([Int],[Int]))],
-    mUntrackedVars :: [(String, Type, [Int])],
-    mLabelVars     :: [(String, Type, [Int])],
+    mStateVars            :: [(String, Type, ([Int],[Int]))],
+    mUntrackedVars        :: [(String, Type, [Int])],
+    mLabelVars            :: [(String, Type, [Int])],
 
     -- State and transition relations being debugged
-    mStateRels     :: [(String, a)],
-    mTransRels     :: [(String, a)],
+    mStateRels            :: [(String, a)],
+    mTransRels            :: [(String, a)],
 
-    mViews         :: [View a b]
+    -- Dynamic part --
+    mViews                :: [View a b]
 }
 
 mStateV, mNextV, mUntrackedV, mLabelV :: (Rel c v a s, ?m::c) => Model c a b -> v

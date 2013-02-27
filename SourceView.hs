@@ -651,7 +651,7 @@ abstractTransition ref from to =
         -- compute untracked and label predicates over to
         tranUntracked = conj $ map (evalAbsVar sv to) D.mUntrackedVars
         tranAbstractLabel = conj $ map (evalAbsVar sv to) D.mLabelVars
-        -- project to state on tmp variables
+        -- project "to" state on "tmp" variables
         tranConcreteLabel = Just $ storeProject to (map I.varName $ C.specTmpVars svSpec)
         tranTo = D.State { sAbstract = conj $ map (evalAbsVar sv to . (\(n,t,(i,_)) -> (n,t,i))) D.mStateVars
                          , sConcrete = Just $ storeProject to (map I.varName $ C.specVar svSpec)}
