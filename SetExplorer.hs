@@ -14,6 +14,7 @@ import Data.IORef
 import Data.Bits
 import Data.Maybe
 import Data.List
+import Data.Tuple.Select
 import Control.Monad
 import qualified Data.Set        as S
 import qualified Graphics.UI.Gtk as G
@@ -93,7 +94,7 @@ setExplorerNew ctx sections cb = do
     --G.spinButtonSetIncrements spin 1 (-1)
 
     -- don't show the spin button if there is only one variable
-    if length (concatMap trd3 sections) > 1
+    if length (concatMap sel3 sections) > 1
        then do G.boxPackStart vbox spin G.PackNatural 0
                G.widgetShow spin
        else return ()
@@ -111,7 +112,7 @@ setExplorerNew ctx sections cb = do
     G.boxPackStart vbox w G.PackGrow 0
 
     (_, stores) <- foldM (\(offset,ss) s -> do store <- createSection ref panels s offset
-                                               return (offset + length (trd3 s), ss++[store])) 
+                                               return (offset + length (sel3 s), ss++[store])) 
                          (0,[]) sections
     modifyIORef ref $ (\se -> se {seStores = stores})
 
@@ -244,7 +245,7 @@ createSection ref panels section offset = do
     win <- G.scrolledWindowNew (Just adjh) (Just adjv)
 
     G.widgetShow win
-    panelsAppend panels (G.toWidget win) (fst3 section)
+    panelsAppend panels (G.toWidget win) (sel1 section)
 
     --G.boxPackStart vbox frame G.PackNatural 0
 
@@ -252,12 +253,12 @@ createSection ref panels section offset = do
     let entries = map (\(n,d,i) -> VarEntry { varName              = n
                                             , varType              = d
                                             , varIndices           = i
-                                            , varMustChoose        = snd3 section
+                                            , varMustChoose        = sel2 section
                                             , varUserSelectionText = "*"
                                             , varAssignment        = b
                                             , varEnabled           = True
                                             , varChanged           = False })
-                      $ trd3 section
+                      $ sel3 section
     store <- G.listStoreNew entries
 
     -- list view

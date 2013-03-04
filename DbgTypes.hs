@@ -33,6 +33,7 @@ module DbgTypes(Rel,
 import qualified Graphics.UI.Gtk as G 
 import Data.IORef
 import Data.List
+import Data.Tuple.Select
 import Control.Monad
 
 import Util
@@ -170,10 +171,10 @@ data Model c a b = Model {
 }
 
 mStateV, mNextV, mUntrackedV, mLabelV :: (Rel c v a s, ?m::c) => Model c a b -> v
-mStateV     = vconcat . map varAtIndex . concatMap (fst . trd3) . mStateVars
-mNextV      = vconcat . map varAtIndex . concatMap (snd . trd3) . mStateVars
-mUntrackedV = vconcat . map varAtIndex . concatMap trd3         . mUntrackedVars
-mLabelV     = vconcat . map varAtIndex . concatMap trd3         . mLabelVars
+mStateV     = vconcat . map varAtIndex . concatMap (fst . sel3) . mStateVars
+mNextV      = vconcat . map varAtIndex . concatMap (snd . sel3) . mStateVars
+mUntrackedV = vconcat . map varAtIndex . concatMap sel3         . mUntrackedVars
+mLabelV     = vconcat . map varAtIndex . concatMap sel3         . mLabelVars
 
 
 type RModel c a b = IORef (Model c a b)

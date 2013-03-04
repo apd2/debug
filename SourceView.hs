@@ -15,10 +15,6 @@ import qualified CFA      as I
 -- Data structures
 --------------------------------------------------------------
 
-data AbsVar = AVarPred Predicate        -- predicate variable
-            | AVarVar  String           -- unabstracted variable
-            | AVarEnum String [I.Val]   -- variable with several interesting values
-
 -- process stack, including uncontrollable and controllable task stacks
 data PStack = [(I.Frame, (I.PID, Maybe String))]
 
@@ -655,7 +651,7 @@ abstractTransition ref from to =
         tranConcreteLabel = Just $ storeProject to (map I.varName $ C.specTmpVars svSpec)
         tranTo = D.State { sAbstract = conj $ map (evalAbsVar sv to . (\(n,t,(i,_)) -> (n,t,i))) D.mStateVars
                          , sConcrete = Just $ storeProject to (map I.varName $ C.specVar svSpec)}
-    return $ Transition{..}     
+    return $ Transition{..}
 
 
 evalAbsVar :: SourceView c a -> Store -> (String, Type, [Int]) -> a

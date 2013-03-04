@@ -5,6 +5,7 @@ module GraphView(graphViewNew) where
 import Data.IORef
 import Data.List
 import Data.Maybe
+import Data.Tuple.Select
 import Data.Bits
 import Control.Monad
 
@@ -144,7 +145,7 @@ getState :: GraphView c a b -> G.Node -> D.State a b
 getState gv id = fromJust $ G.lab (gvGraph gv) id
 
 findEdge :: GraphView c a b -> Int -> Maybe (Edge a b)
-findEdge gv id = fmap trd3 $ find ((==id) . eId . trd3) $ G.labEdges $ gvGraph gv
+findEdge gv id = fmap sel3 $ find ((==id) . eId . sel3) $ G.labEdges $ gvGraph gv
 
 findTransition :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b -> G.Node -> G.Node -> D.Transition a b -> Maybe GEdgeId
 findTransition gv fromid toid tran = 
@@ -282,6 +283,6 @@ transitionLabel rmodel rel = do
     let support = supportIndices rel
         asn     = fromJust $ oneSat (vconcat $ map varAtIndex support) rel
     lvars <- D.modelLabelVars rmodel
-    let supvars = filter (any (\idx -> elem idx support) . trd3) lvars
+    let supvars = filter (any (\idx -> elem idx support) . sel3) lvars
         vals = map (\(_,t,ind) -> D.valStrFromInt t $ boolArrToBitsBe $ extract (D.idxToVS ind) asn) supvars
-    return $ intercalate "," $ map (\(var,val) -> fst3 var ++ "=" ++ val) $ zip supvars vals
+    return $ intercalate "," $ map (\(var,val) -> sel1 var ++ "=" ++ val) $ zip supvars vals
