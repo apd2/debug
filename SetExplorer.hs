@@ -11,14 +11,11 @@ module SetExplorer(RSetExplorer,
 
 import Safe
 import Data.IORef
-import Data.Bits
 import Data.Maybe
 import Data.List
 import Data.Tuple.Select
 import Control.Monad
-import qualified Data.Set        as S
 import qualified Graphics.UI.Gtk as G
-import Debug.Trace
 
 import IDE
 import Util hiding (trace)
@@ -73,7 +70,7 @@ instance Eq (VarEntry a) where
 varVar :: (D.Rel c v a s, ?m::c) => VarEntry a -> v
 varVar = D.idxToVS . varIndices
 
-type Section = (String, Bool, [(String, D.Type, [Int])])
+type Section = (String, Bool, [D.ModelVar])
 
 ----------------------------------------------------------
 -- External interface
@@ -116,8 +113,8 @@ setExplorerNew ctx sections cb = do
                          (0,[]) sections
     modifyIORef ref $ (\se -> se {seStores = stores})
 
-    G.afterValueSpinned spin (do idx <- (liftM round) $ G.get spin G.spinButtonValue
-                                 showImplicant ref idx)
+    _ <- G.afterValueSpinned spin (do idx <- (liftM round) $ G.get spin G.spinButtonValue
+                                      showImplicant ref idx)
     return ref
     
 setExplorerSetRelation :: (D.Rel c v a s) => RSetExplorer c a -> a -> IO ()
@@ -147,7 +144,7 @@ setExplorerGetWidget ref = (liftM $ G.toWidget . seVBox) $ readIORef ref
 
 userConstraintSelectionStarted :: (D.Rel c v a s) => RSetExplorer c a -> Int -> G.Widget -> G.TreePath -> IO ()
 userConstraintSelectionStarted ref offset w (num:_) = do
-    se@SetExplorer{..} <- readIORef ref
+    SetExplorer{..} <- readIORef ref
     let ?m = seCtx
     let idx = offset+num
     entries <- storeToList seStores
@@ -188,10 +185,10 @@ entryColor e | not (varEnabled e) = colorDisabled
 
 storeFromList :: [G.ListStore a] -> [a] -> IO()
 storeFromList stores xs = do
-    foldM (\xs store -> do l <- (liftM length) $ G.listStoreToList store
-                           mapIdxM (\x id -> G.listStoreSetValue store id x) (take l xs)
-                           return $ drop l xs)
-          xs stores
+    _ <- foldM (\_xs store -> do l <- (liftM length) $ G.listStoreToList store
+                                 _ <- mapIdxM (\x idx -> G.listStoreSetValue store idx x) (take l _xs)
+                                 return $ drop l _xs)
+               xs stores
     return ()
 
 storeToList :: [G.ListStore a] -> IO [a]
@@ -250,14 +247,14 @@ createSection ref panels section offset = do
     --G.boxPackStart vbox frame G.PackNatural 0
 
     -- list store
-    let entries = map (\(n,d,i) -> VarEntry { varName              = n
-                                            , varType              = d
-                                            , varIndices           = i
-                                            , varMustChoose        = sel2 section
-                                            , varUserSelectionText = "*"
-                                            , varAssignment        = b
-                                            , varEnabled           = True
-                                            , varChanged           = False })
+    let entries = map (\D.ModelVar{..} -> VarEntry { varName              = mvarName
+                                                   , varType              = mvarType
+                                                   , varIndices           = mvarIdx
+                                                   , varMustChoose        = sel2 section
+                                                   , varUserSelectionText = "*"
+                                                   , varAssignment        = b
+                                                   , varEnabled           = True
+                                                   , varChanged           = False })
                       $ sel3 section
     store <- G.listStoreNew entries
 
@@ -270,11 +267,11 @@ createSection ref panels section offset = do
         addColumn title renderers = do
             col <- G.treeViewColumnNew
             G.treeViewColumnSetTitle col title
-            mapM (\(w,func) -> do let rend = G.castToCellRenderer w
-                                  G.cellLayoutPackStart col rend False
-                                  G.cellLayoutSetAttributeFunc col rend store func)
+            _ <- mapM (\(w,func) -> do let rend = G.castToCellRenderer w
+                                       G.cellLayoutPackStart col rend False
+                                       G.cellLayoutSetAttributeFunc col rend store func)
                  renderers
-            G.treeViewAppendColumn view col
+            _ <- G.treeViewAppendColumn view col
             return ()
 
     let nodeFromIter iter = do
@@ -337,9 +334,9 @@ createSection ref panels section offset = do
                            G.cellTextForegroundColor G.:= entryColor e]        
     addColumn "Value" [(G.toObject valRend,valAttrFunc)]
 
-    G.on constrComboRend G.editingStarted (userConstraintSelectionStarted ref offset)
-    G.on constrTextRend  G.edited         (userConstraintChanged          ref offset)
-    G.on constrComboRend G.edited         (userConstraintChanged          ref offset) 
+    _ <- G.on constrComboRend G.editingStarted (userConstraintSelectionStarted ref offset)
+    _ <- G.on constrTextRend  G.edited         (userConstraintChanged          ref offset)
+    _ <- G.on constrComboRend G.edited         (userConstraintChanged          ref offset) 
 
     G.treeViewSetHeadersVisible view True --(offset == 0)
     selection <- G.treeViewGetSelection view

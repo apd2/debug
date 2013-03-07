@@ -7,9 +7,9 @@ import Util
 import qualified DbgTypes as D
 import Store
 import NS
-import qualified CFASpec  as C
-import qualified IExpr    as I
-import qualified CFA      as I
+import qualified ISpec  as I
+import qualified IExpr  as I
+import qualified CFA    as I
 
 --------------------------------------------------------------
 -- Data structures
@@ -649,13 +649,13 @@ abstractTransition ref from to =
         tranAbstractLabel = conj $ map (evalAbsVar sv to) D.mLabelVars
         -- project "to" state on "tmp" variables
         tranConcreteLabel = Just $ storeProject to (map I.varName $ C.specTmpVars svSpec)
-        tranTo = D.State { sAbstract = conj $ map (evalAbsVar sv to . (\(n,t,(i,_)) -> (n,t,i))) D.mStateVars
+        tranTo = D.State { sAbstract = conj $ map (evalAbsVar sv to) D.mCurStateVars
                          , sConcrete = Just $ storeProject to (map I.varName $ C.specVar svSpec)}
     return $ Transition{..}
 
 
-evalAbsVar :: SourceView c a -> Store -> (String, Type, [Int]) -> a
-evalAbsVar sv store (name, _, is) = evalAbsVar' store (svAbsVars M.! name) is
+evalAbsVar :: SourceView c a -> Store -> ModelVar -> a
+evalAbsVar sv store ModelVar{..} = evalAbsVar' store (svAbsVars M.! mvarName) mvarIdx
 
 evalAbsVar' :: Store -> AbsVar -> [Int] -> a
 evalAbsVar' store (AVarPred p) is = 
@@ -678,8 +678,28 @@ scalarToInt (I.BoolVal True)  = 1
 scalarToInt (I.BoolVal False) = 0
 scalarToInt (I.UIntVal i)     = i
 scalarToInt (I.SIntVal i)     = i
-scalarToInt (I.EnumVal s)     = fromJust $ findIndex (== s) $ enumEnums $ getEnumerator s
+scalarToInt (I.EnumVal s)     = enumToInt s
 
+--concretise :: ([I.Formula]) -> [I.Var] -> Either Store [Int]
+--concretise fs vs = 
+--    let vnames = map I.varName vs
+--    in case getModel fs of
+--            Nothing -> 
+--    return $ SStruct $ filter (\(n,s) -> elem n vnames) asns
+
+-- Input: relation describing a set of abstract states
+-- Output: a single concrete state or Nothing if a 
+-- satisfying assignment could not be found
+concretiseState :: a -> Maybe (D.State a Store)
+concretiseState rel = do
+    -- Find one satisfying assignment of rel
+    asn <- oneSatVal rel (mCurStateVars model)
+
+    -- Try to concretise this assignment
+
+    -- Remove unsat core from rel 
+
+    -- If rel is empty, return Nothing; otherwise repeat
 
 --------------------------------------------------------------
 -- Private helpers

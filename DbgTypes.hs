@@ -11,8 +11,11 @@ module DbgTypes(Rel,
                 Transition(..),
                 tranTo',
                 tranRel,
+                ModelVar(..),
                 Model(..),
                 RModel,
+                mCurStateVars,
+                mNextStateVars,
                 mStateV, 
                 mNextV, 
                 mUntrackedV, 
@@ -20,6 +23,7 @@ module DbgTypes(Rel,
                 contRelName,
                 idxToVS,
                 valStrFromInt,
+                oneSatVal,
                 modelCtx,
                 modelStateVars,
                 modelLabelVars,
@@ -33,7 +37,6 @@ module DbgTypes(Rel,
 import qualified Graphics.UI.Gtk as G 
 import Data.IORef
 import Data.List
-import Data.Tuple.Select
 import Control.Monad
 
 import Util
@@ -77,10 +80,10 @@ data Type = Bool
           | Enum [String]
 
 instance Show Type where
-    show Bool      = "bool"
-    show (SInt i)  = "sint<" ++ show i ++ ">"
-    show (UInt i)  = "uint<" ++ show i ++ ">"
-    show (Enum es) = "enum"
+    show Bool     = "bool"
+    show (SInt i) = "sint<" ++ show i ++ ">"
+    show (UInt i) = "uint<" ++ show i ++ ">"
+    show (Enum _) = "enum"
 
 valStrFromInt :: Type -> Integer -> String
 valStrFromInt Bool      0                                = "false"
@@ -142,25 +145,29 @@ instance (?m::c, L.Boolean c a, Eq b) => Eq (Transition a b) where
 
 -- Project next state to current state vars
 tranTo' :: (Rel c v a s, ?m::c) => Model c a b -> Transition a b -> a
-tranTo' model t = swap (mNextV model) (mStateV model) (sAbstract $ tranTo t)
+tranTo' model tr = swap (mNextV model) (mStateV model) (sAbstract $ tranTo tr)
 
 -- Conjunction of state, next, label, and untracked relations
 tranRel :: (Rel c v a s, ?m::c) => Model c a b -> Transition a b -> a
-tranRel model t =  (sAbstract $ tranFrom t) 
-                .& (tranTo' model t)
-                .& (tranUntracked t)
-                .& (tranAbstractLabel t)
+tranRel model tr = (sAbstract $ tranFrom tr) 
+                .& (tranTo' model tr)
+                .& (tranUntracked tr)
+                .& (tranAbstractLabel tr)
+
+data ModelVar = ModelVar { mvarName :: String
+                         , mvarType :: Type
+                         , mvarIdx  ::[Int]
+                         }
 
 -- Debugger state
 data Model c a b = Model {
     -- Static part --
-
     mCtx                  :: c,
 
     -- Abstract variable sections
     mStateVars            :: [(String, Type, ([Int],[Int]))],
-    mUntrackedVars        :: [(String, Type, [Int])],
-    mLabelVars            :: [(String, Type, [Int])],
+    mUntrackedVars        :: [ModelVar],
+    mLabelVars            :: [ModelVar],
 
     -- State and transition relations being debugged
     mStateRels            :: [(String, a)],
@@ -170,11 +177,17 @@ data Model c a b = Model {
     mViews                :: [View a b]
 }
 
+mCurStateVars :: Model c a b -> [ModelVar]
+mCurStateVars = map (\(n,tp,(i,_)) -> ModelVar n tp i) . mStateVars
+
+mNextStateVars :: Model c a b -> [ModelVar]
+mNextStateVars = map (\(n,tp,(_,i)) -> ModelVar n tp i) . mStateVars
+
 mStateV, mNextV, mUntrackedV, mLabelV :: (Rel c v a s, ?m::c) => Model c a b -> v
-mStateV     = vconcat . map varAtIndex . concatMap (fst . sel3) . mStateVars
-mNextV      = vconcat . map varAtIndex . concatMap (snd . sel3) . mStateVars
-mUntrackedV = vconcat . map varAtIndex . concatMap sel3         . mUntrackedVars
-mLabelV     = vconcat . map varAtIndex . concatMap sel3         . mLabelVars
+mStateV     = vconcat . map varAtIndex . concatMap mvarIdx . mCurStateVars
+mNextV      = vconcat . map varAtIndex . concatMap mvarIdx . mNextStateVars
+mUntrackedV = vconcat . map varAtIndex . concatMap mvarIdx . mUntrackedVars
+mLabelV     = vconcat . map varAtIndex . concatMap mvarIdx . mLabelVars
 
 
 type RModel c a b = IORef (Model c a b)
@@ -191,10 +204,10 @@ modelCtx ref = (liftM mCtx) $ readIORef ref
 modelStateVars :: RModel c a b -> IO [(String, Type, ([Int],[Int]))]
 modelStateVars ref = getIORef mStateVars ref
 
-modelUntrackedVars :: RModel c a b -> IO [(String, Type, [Int])]
+modelUntrackedVars :: RModel c a b -> IO [ModelVar]
 modelUntrackedVars ref = getIORef mUntrackedVars ref
 
-modelLabelVars :: RModel c a b -> IO [(String, Type, [Int])]
+modelLabelVars :: RModel c a b -> IO [ModelVar]
 modelLabelVars ref = getIORef mLabelVars ref
 
 modelTransRels :: RModel c a b -> IO [(String, a)]
@@ -211,14 +224,25 @@ modelActiveTransRel ref = getIORef (snd . head . mTransRels) ref
 modelSelectTransition :: RModel c a b -> Transition a b -> IO ()
 modelSelectTransition ref tran = do
    views <- modelViews ref
-   mapM (\v -> (evtTransitionSelected $ viewCB v) tran) views
+   _ <- mapM (\v -> (evtTransitionSelected $ viewCB v) tran) views
    return ()
 
 modelSelectState :: RModel c a b -> Maybe (State a b) -> IO ()
 modelSelectState ref mrel = do
    views <- modelViews ref
-   mapM (\v -> (evtStateSelected $ viewCB v) mrel) views
+   _ <- mapM (\v -> (evtStateSelected $ viewCB v) mrel) views
    return ()
+
+-- Utils
+
+-- Find satisfying assignment and return valuation of variables 
+-- in support of rel
+oneSatVal :: (Rel c v a s, ?m::c) => a -> [ModelVar] -> Maybe [(ModelVar, Integer)]
+oneSatVal rel vars = do
+    let support = supportIndices rel
+    asn <- satOne rel
+    let supvars = filter (any (\idx -> elem idx support) . mvarIdx) vars
+    return $ map (\v -> (v, boolArrToBitsBe $ extract (idxToVS (mvarIdx v)) asn)) supvars
 
 ----------------------------------------------------------
 -- Private functions

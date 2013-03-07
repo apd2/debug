@@ -5,12 +5,9 @@ module VarView(RVarView,
 
 import qualified Graphics.UI.Gtk as G
 import Data.IORef
-import Control.Monad
 
-import Util
 import qualified DbgTypes        as D
 import qualified IDE             as D
---import MultiSetExplorer
 import SetExplorer
 import Implicit
 
@@ -26,22 +23,18 @@ type RVarView c a b = IORef (VarView c a b)
 --------------------------------------------------------------
 
 varViewNew :: (D.Rel c v a s) => D.RModel c a b -> IO (D.View a b)
-varViewNew model = do
-    ctx <- D.modelCtx model
-    let ?m = ctx
+varViewNew rmodel = do
+    model <- readIORef rmodel
+    let ?m = D.mCtx model
     -- Set explorer for choosing transition variables
-    stateSection     <- (liftM $ map (mapTrd3 fst)) $ D.modelStateVars model
-    untrackedSection <- D.modelUntrackedVars model
-    labelSection     <- D.modelLabelVars     model
-    nextSection      <- (liftM $ map (mapTrd3 snd)) $ D.modelStateVars model
-    let sections = [ ("State Variables",      True,  stateSection)
-                   , ("Untracked Variables",  False, untrackedSection)
-                   , ("Label Variables",      False, labelSection)
-                   , ("Next-state Variables", True,  nextSection)
+    let sections = [ ("State Variables",      True,  D.mCurStateVars   model)
+                   , ("Untracked Variables",  False, D.mUntrackedVars  model)
+                   , ("Label Variables",      False, D.mLabelVars      model)
+                   , ("Next-state Variables", True,  D.mNextStateVars  model)
                    ]
-    explorer         <- setExplorerNew ctx sections (SetExplorerEvents {evtValueChanged = return ()})
+    explorer         <- setExplorerNew ?m sections (SetExplorerEvents {evtValueChanged = return ()})
     w                <- setExplorerGetWidget explorer
-    ref <- newIORef $ VarView { vvModel    = model 
+    ref <- newIORef $ VarView { vvModel    = rmodel
                               , vvExplorer = explorer
                               }
     -- Top-level vbox
@@ -56,13 +49,13 @@ varViewNew model = do
     G.boxPackStart vbox bbox G.PackNatural 0
 
     resetbutton <- G.buttonNewFromStock G.stockClear
-    G.on resetbutton G.buttonActivated (setExplorerReset explorer)
+    _ <- G.on resetbutton G.buttonActivated (setExplorerReset explorer)
     G.widgetShow resetbutton
     G.boxPackStart bbox resetbutton G.PackNatural 10
 
     runbutton <- G.buttonNewFromStock G.stockApply
     G.widgetShow runbutton
-    G.on runbutton G.buttonActivated (executeTransition ref)
+    _ <- G.on runbutton G.buttonActivated (executeTransition ref)
     G.boxPackStart bbox runbutton G.PackNatural 0
 
     let cb = D.ViewEvents { D.evtStateSelected      = varViewStateSelected      ref 
@@ -89,7 +82,7 @@ varViewStateSelected ref mstate = do
 
 varViewTransitionSelected :: (D.Rel c v a s) => RVarView c a b -> D.Transition a b -> IO ()
 varViewTransitionSelected ref tran = do
-    vv@VarView{..} <- readIORef ref
+    VarView{..} <- readIORef ref
     model <- readIORef vvModel
     let ?m = D.mCtx model
     setExplorerSetRelation vvExplorer (D.tranRel model tran)

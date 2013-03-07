@@ -7,7 +7,6 @@ module MultiSetExplorer(RMultiSetExplorer,
                         multiSetExplorerGetVarAssignment,
                         multiSetExplorerGetWidget) where
 
-import qualified Data.Set        as S
 import qualified Graphics.UI.Gtk as G
 import Data.IORef
 import Data.Tuple.Select
@@ -48,7 +47,7 @@ multiSetExplorerNew ctx sections cb = do
 
     -- pack section widgets in the vbox
     widgets <- mapM setExplorerGetWidget explorers
-    mapM (\w -> G.boxPackStart vbox w G.PackNatural 0) widgets
+    _ <- mapM (\w -> G.boxPackStart vbox w G.PackNatural 0) widgets
 
     writeIORef ref $ MultiSetExplorer { mseCtx       = ctx
                                       , mseCB        = cb
@@ -69,7 +68,7 @@ multiSetExplorerSetRelation ref rel = do
 multiSetExplorerReset :: (D.Rel c v a s) => RMultiSetExplorer c a -> IO ()
 multiSetExplorerReset ref = do
     MultiSetExplorer{..} <- readIORef ref
-    mapM setExplorerReset mseExplorers
+    _ <- mapM setExplorerReset mseExplorers
     return ()
 
 multiSetExplorerGetVarAssignment :: (D.Rel c v a s) => RMultiSetExplorer c a -> IO [(String, [(String, a)])]
@@ -104,7 +103,7 @@ asnChanged ref idx = do
 -- other sections
 projectSect :: (D.Rel c v a s, ?m::c) => MultiSetExplorer c a -> a -> Int -> a
 projectSect MultiSetExplorer{..} rel sect = project ids rel
-    where ids = concatMap sel3 $ sel3 $ mseSections !! sect
+    where ids = concatMap D.mvarIdx $ sel3 $ mseSections !! sect
 
 childConstr :: (D.Rel c v a s, ?m::c) => RSetExplorer c a -> IO a
 childConstr ref = do
