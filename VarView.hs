@@ -10,6 +10,8 @@ import qualified DbgTypes        as D
 import qualified IDE             as D
 import SetExplorer
 import Implicit
+import DbgConcretise
+import DbgAbstract
 
 data VarView c a b = VarView {
     vvModel    :: D.RModel c a b,

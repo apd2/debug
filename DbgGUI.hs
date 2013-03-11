@@ -3,13 +3,11 @@
 module DbgGUI(debugGUI) where
 
 import qualified Graphics.UI.Gtk as G
-import Control.Concurrent
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.IORef
 import Data.List
 import Data.Maybe
-import System.Glib.MainLoop
 
 import Util
 import DbgTypes
@@ -42,14 +40,14 @@ dbgGetIDE :: RDebugger a b -> IO RIDE
 dbgGetIDE ref = (liftM dbgIDE) $ readIORef ref
 
 dbgGetView :: RDebugger a b -> Int -> IO (DbgView a b)
-dbgGetView ref id = do
+dbgGetView ref idx = do
     dbg <- readIORef ref
-    return $ dbgViews dbg !! id
+    return $ dbgViews dbg !! idx
 
 dbgSetView :: RDebugger a b -> Int -> DbgView a b -> IO ()
-dbgSetView ref id view = do
+dbgSetView ref idx view = do
     dbg <- readIORef ref
-    writeIORef ref $ dbg {dbgViews = (take id (dbgViews dbg)) ++ [view] ++ drop (id+1) (dbgViews dbg)}
+    writeIORef ref $ dbg {dbgViews = (take idx (dbgViews dbg)) ++ [view] ++ drop (idx+1) (dbgViews dbg)}
 
 -- List of available views
 viewFactories :: (Rel c v a s, Vals b) => [(RModel c a b -> IO (View a b), Bool)]
@@ -65,13 +63,13 @@ debugGUI extraFactories model = do
     rmodel <- newIORef model
 
     -- Initialize GTK+ engine
-    G.initGUI 
+    _ <- G.initGUI 
 
     -- main window
     wmain <- G.windowNew
     G.widgetSetSizeRequest wmain dbgDefaultWidth dbgDefaultHeight
     G.windowMaximize wmain
-    G.on wmain G.deleteEvent (do {liftIO G.mainQuit; return True})
+    _ <- G.on wmain G.deleteEvent (do {liftIO G.mainQuit; return True})
 
     -- use the same icon for all debugger windows
     icon <- G.pixbufNewFromXPMData ladyBugIcon
@@ -107,16 +105,16 @@ debugGUI extraFactories model = do
     views <- mapM (\f -> (fst f) rmodel) factories
     modifyIORef rmodel (\m -> m{mViews = views})
 
-    dviews <- mapIdxM (\v id -> do mitem <- G.checkMenuItemNewWithLabel (viewName v)
-                                   G.menuShellAppend mview mitem
-                                   G.on mitem G.checkMenuItemToggled (dbgViewToggle ref id mitem)
-                                   G.widgetShow mitem                                 
-                                   w <- viewGetWidget v
-                                   panel <- framePanelNew w (viewName v) (dbgViewHideCB ref id)
-                                   return $ DbgView { dbgViewView     = v
-                                                    , dbgViewPanel    = panel
-                                                    , dbgViewVisible  = False
-                                                    , dbgViewMenuItem = mitem})
+    dviews <- mapIdxM (\v idx -> do mitem <- G.checkMenuItemNewWithLabel (viewName v)
+                                    G.menuShellAppend mview mitem
+                                    _ <- G.on mitem G.checkMenuItemToggled (dbgViewToggle ref idx mitem)
+                                    G.widgetShow mitem                                 
+                                    w <- viewGetWidget v
+                                    panel <- framePanelNew w (viewName v) (dbgViewHideCB ref idx)
+                                    return $ DbgView { dbgViewView     = v
+                                                     , dbgViewPanel    = panel
+                                                     , dbgViewVisible  = False
+                                                     , dbgViewMenuItem = mitem})
                       views
 
     dbg <- readIORef ref
@@ -124,7 +122,7 @@ debugGUI extraFactories model = do
 
     G.widgetShowAll wmain
 
-    mapM (\(v,s) -> G.checkMenuItemSetActive (dbgViewMenuItem v) s)
+    _ <- mapM (\(v,s) -> G.checkMenuItemSetActive (dbgViewMenuItem v) s)
          $ zip dviews (map snd factories)
 
     let initst = fmap ((\rel -> State rel Nothing) . fromJust . oneCube (mStateV model) . snd) 
@@ -136,19 +134,19 @@ debugGUI extraFactories model = do
 
 
 dbgViewToggle :: RDebugger a b -> Int -> G.CheckMenuItem -> IO ()
-dbgViewToggle ref id item = do
+dbgViewToggle ref idx item = do
     active <- G.checkMenuItemGetActive item
-    view <- dbgGetView ref id
+    view <- dbgGetView ref idx
     if active && (not $ dbgViewVisible view)
-       then dbgViewShow ref id
+       then dbgViewShow ref idx
        else if (not active) && (dbgViewVisible view)
-               then dbgViewHide ref id
+               then dbgViewHide ref idx
                else return ()
 
 
 dbgViewShow :: RDebugger a b -> Int  -> IO ()
-dbgViewShow ref id = do
-    view <- dbgGetView ref id
+dbgViewShow ref idx = do
+    view <- dbgGetView ref idx
     ide  <- dbgGetIDE ref
     let align = viewDefAlign $ dbgViewView view
         panel = dbgViewPanel view
@@ -157,23 +155,23 @@ dbgViewShow ref id = do
          AlignCenter -> ideAddCenter ide panel
          AlignRight  -> ideAddRight  ide panel
          AlignBottom -> ideAddBottom ide panel
-    dbgSetView ref id $ view {dbgViewVisible = True}
+    dbgSetView ref idx $ view {dbgViewVisible = True}
     viewShow $ dbgViewView view
 
 
 dbgViewHide :: RDebugger a b -> Int  -> IO ()
-dbgViewHide ref id = do
-    view <- dbgGetView ref id
+dbgViewHide ref idx = do
+    view <- dbgGetView ref idx
     viewHide $ dbgViewView view
     ide  <- dbgGetIDE ref
     let panel = dbgViewPanel view
     ideRemove ide panel
-    dbgSetView ref id $ view {dbgViewVisible = False}
+    dbgSetView ref idx $ view {dbgViewVisible = False}
 
 -- Callback triggered by a view when it wants to hide itself.
 -- Simply toggle the menu item to unchecked state.  Do the actual
 -- deletion in the event handler.
 dbgViewHideCB :: RDebugger a b -> Int -> IO ()
-dbgViewHideCB ref id = do
-    view <- dbgGetView ref id
+dbgViewHideCB ref idx = do
+    view <- dbgGetView ref idx
     G.checkMenuItemSetActive (dbgViewMenuItem view) False

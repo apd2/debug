@@ -235,7 +235,7 @@ modelSelectState ref mrel = do
 
 -- Utils
 
--- Find satisfying assignment and return valuation of variables 
+-- Find satisfying assignment and return valuation of variables
 -- in support of rel
 oneSatVal :: (Rel c v a s, ?m::c) => a -> [ModelVar] -> Maybe [(ModelVar, Integer)]
 oneSatVal rel vars = do

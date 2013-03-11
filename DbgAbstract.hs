@@ -1,31 +1,58 @@
-module DbgAbstract () where
+{-# LANGUAGE ImplicitParams, RecordWildCards #-}
 
-abstractTransition :: RSourceView c a -> State a Store -> Store -> IO (Transition a Store)
-abstractTransition ref from to =
-    SourceView{..} <- readIORef ref
-    model <- readIORef $ svModel sv
-    let tranFrom = from
+module DbgAbstract (abstractState,
+                    abstractUntracked,
+                    abstractLabel,
+                    abstractTransition) where
+
+import qualified Data.Map as M
+
+import Util
+import qualified DbgTypes as D
+import IExpr
+import ISpec
+import IVar
+import Predicate
+import Store
+import qualified Implicit as Imp
+
+abstractRel :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?absvars::M.Map String AbsVar) => [D.ModelVar] -> Store -> a
+abstractRel vars store = Imp.conj $ map (evalAbsVar store) vars
+
+abstractState :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a b, ?absvars::M.Map String AbsVar) => Store -> D.State a Store
+abstractState store = D.State { D.sAbstract = abstractRel (D.mCurStateVars ?model) store
+                              , D.sConcrete = Just $ storeProject store $ map varName $ specStateVar ?spec
+                              }
+
+abstractUntracked :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a b, ?absvars::M.Map String AbsVar) => Store -> a
+abstractUntracked = abstractRel (D.mUntrackedVars ?model)
+
+abstractLabel :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a b, ?absvars::M.Map String AbsVar) => Store -> a
+abstractLabel = abstractRel (D.mLabelVars ?model)
+
+abstractTransition :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a b, ?absvars::M.Map String AbsVar) => D.State a Store -> Store -> D.Transition a Store
+abstractTransition from to = D.Transition {
+        tranFrom = from,
         -- compute untracked and label predicates over to
-        tranUntracked = conj $ map (evalAbsVar sv to) D.mUntrackedVars
-        tranAbstractLabel = conj $ map (evalAbsVar sv to) D.mLabelVars
+        tranUntracked     = abstractUntracked $ fromJustMsg "abstractTransition: no concrete state" $ D.sConcrete from,
+        tranAbstractLabel = abstractLabel     to,
         -- project "to" state on "tmp" variables
-        tranConcreteLabel = Just $ storeProject to (map I.varName $ C.specTmpVars svSpec)
-        tranTo = D.State { sAbstract = conj $ map (evalAbsVar sv to) D.mCurStateVars
-                         , sConcrete = Just $ storeProject to (map I.varName $ C.specVar svSpec)}
-    return $ Transition{..}
+        tranConcreteLabel = Just $ storeProject to (map varName $ specTmpVar ?spec),
+        tranTo            = abstractState to
+    }
 
 
-evalAbsVar :: SourceView c a -> Store -> ModelVar -> a
-evalAbsVar sv store ModelVar{..} = evalAbsVar' store (svAbsVars M.! mvarName) mvarIdx
+evalAbsVar :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?absvars::M.Map String AbsVar) => Store -> D.ModelVar -> a
+evalAbsVar store D.ModelVar{..} = evalAbsVar' store (?absvars M.! mvarName) mvarIdx
 
-evalAbsVar' :: Store -> AbsVar -> [Int] -> a
+evalAbsVar' :: (D.Rel c v a s, ?spec::Spec, ?m::c) => Store -> AbsVar -> [Int] -> a
 evalAbsVar' store (AVarPred p) is = 
     if storeEvalBool store (predToExpr p)
-       then eqConst (D.idxToVS is) 1
-       else eqConst (D.idxToVS is) 0
+       then Imp.eqConst (D.idxToVS is) (1::Int)
+       else Imp.eqConst (D.idxToVS is) (0::Int)
 
 evalAbsVar' store (AVarTerm term) is = 
-   eqConst (D.idxToVS is) $ scalarToInt $ storeEvalScalar store (I.termToExpr term)
+   Imp.eqConst (D.idxToVS is) $ scalarToInt $ storeEvalScalar store (termToExpr term)
 
 --evalAbsVar' store (AVarEnum name vals) is =
 --    case findIndex (==v) vals of
@@ -34,10 +61,9 @@ evalAbsVar' store (AVarTerm term) is =
 --    where v  = storeEvalScalar store (I.EVar name)
 --          vs = D.idxToVS is
 
-scalarToInt :: I.Val -> Int
-scalarToInt (I.BoolVal True)  = 1
-scalarToInt (I.BoolVal False) = 0
-scalarToInt (I.UIntVal i)     = i
-scalarToInt (I.SIntVal i)     = i
-scalarToInt (I.EnumVal s)     = enumToInt s
-
+scalarToInt :: (?spec::Spec) => Val -> Integer
+scalarToInt (BoolVal True)  = 1
+scalarToInt (BoolVal False) = 0
+scalarToInt (UIntVal _ i)   = i
+scalarToInt (SIntVal _ i)   = i
+scalarToInt (EnumVal   s)   = fromIntegral $ enumToInt s
