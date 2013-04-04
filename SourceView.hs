@@ -15,6 +15,7 @@ import Control.Monad.State
 import Control.Monad.Error
 import System.IO.Error
 import Text.Parsec
+import Data.Hashable
 
 import Name
 import Pos
@@ -56,47 +57,52 @@ data TraceEntry = TraceEntry {
 type Trace = [TraceEntry]
 
 data SourceView c a = SourceView {
-    svModel        :: D.RModel c a Store,
-    svSpec         :: Spec,
-    svInputSpec    :: Front.Spec,
-    svFlatSpec     :: Front.Spec,
-    svAbsVars      :: M.Map String AbsVar,
-    svState        :: D.State a Store,            -- current state set via view callback
-    svTmp          :: Store,                      -- temporary variables store
-    svTranPID      :: Maybe PID,                  -- set by transitionSelected, restricts enabled processes to PID
+    svModel          :: D.RModel c a Store,
+    svSpec           :: Spec,
+    svInputSpec      :: Front.Spec,
+    svFlatSpec       :: Front.Spec,
+    svAbsVars        :: M.Map String AbsVar,
+    svState          :: D.State a Store,            -- current state set via view callback
+    svTmp            :: Store,                      -- temporary variables store
+    svTranPID        :: Maybe PID,                  -- set by transitionSelected, restricts enabled processes to PID
 
     -- Command buttons
-    svStepButton   :: G.ToolButton,
-    svRunButton    :: G.ToolButton,
+    svStepButton     :: G.ToolButton,
+    svRunButton      :: G.ToolButton,
 
     -- Trace
-    svTrace        :: Trace,                      -- steps from the current state
-    svTracePos     :: Int,                        -- current position in the trace
-    svTraceCombo   :: G.ComboBox,                 -- trace combo box
-    svTraceStore   :: G.ListStore Int,            -- indices in the trace that correspond to visible locations
-    svTraceUndo    :: G.ToolButton,               -- back button
-    svTraceRedo    :: G.ToolButton,               -- forward button
+    svTrace          :: Trace,                      -- steps from the current state
+    svTracePos       :: Int,                        -- current position in the trace
+    svTraceCombo     :: G.ComboBox,                 -- trace combo box
+    svTraceStore     :: G.ListStore Int,            -- indices in the trace that correspond to visible locations
+    svTraceUndo      :: G.ToolButton,               -- back button
+    svTraceRedo      :: G.ToolButton,               -- forward button
 
     -- Process selector
-    svPID          :: PID,                        -- PID set in the process selection menu
-    svProcessCombo :: G.ComboBox,                 -- process selection combo box
-    svProcessStore :: G.TreeStore (PID, Bool),    -- tree store that backs the process selector
+    svPID            :: PID,                        -- PID set in the process selection menu
+    svProcessCombo   :: G.ComboBox,                 -- process selection combo box
+    svProcessStore   :: G.TreeStore (PID, Bool),    -- tree store that backs the process selector
 
     -- Stack view
-    svStackView    :: G.TreeView,                 -- stack view
-    svStackStore   :: G.ListStore Frame,          -- store containing list of stack frames
-    svStackFrame   :: Int,                        -- selected stack frame (0 = top)
+    svStackView      :: G.TreeView,                 -- stack view
+    svStackStore     :: G.ListStore Frame,          -- store containing list of stack frames
+    svStackFrame     :: Int,                        -- selected stack frame (0 = top)
 
     -- Watch
-    svWatchView    :: G.TreeView,
-    svWatchStore   :: G.ListStore (Maybe String), -- store containing watch expressions
+    svWatchView      :: G.TreeView,
+    svWatchStore     :: G.ListStore (Maybe String), -- store containing watch expressions
 
     -- Source window
-    svSourceView   :: G.TextView,
-    svSourceTag    :: G.TextTag,                  -- tag to mark current selection current selection
+    svSourceView     :: G.TextView,
+    svSourceTag      :: G.TextTag,                  -- tag to mark current selection current selection
 
     -- Resolve view
-    svResolveStore :: G.TreeStore Expr          -- tmp variables in the scope of the current expression
+    svResolveStore   :: G.TreeStore Expr,           -- tmp variables in the scope of the current expression
+
+    -- Action selector
+    svActSelectText  :: G.TextView,                 -- user-edited controllable action
+    svActSelectBExit :: G.Button,                   -- exit magic block button
+    svActSelectBAdd  :: G.Button                    -- perform controllable action button
 }
 
 type RSourceView c a = IORef (SourceView c a)
@@ -107,33 +113,36 @@ type RSourceView c a = IORef (SourceView c a)
 
 sourceViewNew :: (D.Rel c v a s) => Front.Spec -> Front.Spec -> Spec -> [AbsVar] -> D.RModel c a Store -> IO (D.View a Store)
 sourceViewNew inspec flatspec spec avars model = do
-    ref <- newIORef $ SourceView { svModel        = model
-                                 , svInputSpec    = inspec
-                                 , svFlatSpec     = flatspec
-                                 , svSpec         = specInlineWireAlways spec
-                                 , svAbsVars      = M.fromList $ map (\v -> (show v, v)) avars
-                                 , svState        = error "SourceView: state undefined"
-                                 , svTmp          = error "SourceView: svTmp undefined"
-                                 , svTranPID      = Nothing
-                                 , svStepButton   = error "SourceView: svStepButton undefined"
-                                 , svRunButton    = error "SourceView: svRunButton undefined"
-                                 , svTrace        = []
-                                 , svTracePos     = 0
-                                 , svTraceCombo   = error "SourceView: svTraceCombo undefined"
-                                 , svTraceStore   = error "SourceView: svTraceStore undefined"
-                                 , svTraceUndo    = error "SourceView: svTraceUndo undefined"
-                                 , svTraceRedo    = error "SourceView: svTraceRedo undefined"
-                                 , svPID          = error "SourceView: PID undefined"
-                                 , svProcessCombo = error "SourceView: svProcessCombo undefined"
-                                 , svProcessStore = error "SourceView: svProcessStore undefined"
-                                 , svStackView    = error "SourceView: svStackView undefined"
-                                 , svStackStore   = error "SourceView: svStackStore undefined"
-                                 , svStackFrame   = error "SourceView: svStackFrame undefined"
-                                 , svWatchView    = error "SourceView: scWatchView undefined"
-                                 , svWatchStore   = error "SourceView: svWatchStore undefined"
-                                 , svSourceView   = error "SourceView: svSourceView undefined"
-                                 , svSourceTag    = error "SourceView: svSourceTag undefined"
-                                 , svResolveStore = error "SourceView: svResolveStore undefined"
+    ref <- newIORef $ SourceView { svModel          = model
+                                 , svInputSpec      = inspec
+                                 , svFlatSpec       = flatspec
+                                 , svSpec           = specInlineWireAlways spec
+                                 , svAbsVars        = M.fromList $ map (\v -> (show v, v)) avars
+                                 , svState          = error "SourceView: svState undefined"
+                                 , svTmp            = error "SourceView: svTmp undefined"
+                                 , svTranPID        = Nothing
+                                 , svStepButton     = error "SourceView: svStepButton undefined"
+                                 , svRunButton      = error "SourceView: svRunButton undefined"
+                                 , svTrace          = []
+                                 , svTracePos       = 0
+                                 , svTraceCombo     = error "SourceView: svTraceCombo undefined"
+                                 , svTraceStore     = error "SourceView: svTraceStore undefined"
+                                 , svTraceUndo      = error "SourceView: svTraceUndo undefined"
+                                 , svTraceRedo      = error "SourceView: svTraceRedo undefined"
+                                 , svPID            = error "SourceView: PID undefined"
+                                 , svProcessCombo   = error "SourceView: svProcessCombo undefined"
+                                 , svProcessStore   = error "SourceView: svProcessStore undefined"
+                                 , svStackView      = error "SourceView: svStackView undefined"
+                                 , svStackStore     = error "SourceView: svStackStore undefined"
+                                 , svStackFrame     = error "SourceView: svStackFrame undefined"
+                                 , svWatchView      = error "SourceView: scWatchView undefined"
+                                 , svWatchStore     = error "SourceView: svWatchStore undefined"
+                                 , svSourceView     = error "SourceView: svSourceView undefined"
+                                 , svSourceTag      = error "SourceView: svSourceTag undefined"
+                                 , svResolveStore   = error "SourceView: svResolveStore undefined"
+                                 , svActSelectText  = error "SourceView: svActSelectText undefined"
+                                 , svActSelectBExit = error "SourceView: svActSelectBExit undefined"
+                                 , svActSelectBAdd  = error "SourceView: svActSelectBAdd undefined"
                                  }
 
     vbox <- G.vBoxNew False 0
@@ -693,6 +702,69 @@ resolveViewDisable ref = do
     sv <- readIORef ref
     G.treeStoreClear $ svResolveStore sv
 
+-- Controllable action selector --
+
+actionSelectorCreate :: RSourceView c a -> IO G.Widget
+actionSelectorCreate ref = do
+    vbox <- G.vBoxNew False 0
+    G.widgetShow vbox
+
+    -- Text view for specifying controllable action
+    tview <- G.textViewNew
+    G.textViewSetEditable tview True
+    G.widgetShow tview
+    G.boxPackStart vbox tview G.PackGrow    
+
+    bbox <- G.hButtonBoxNew
+    G.widgetShow bbox
+    G.boxPackStart vbox bbox G.PackNatural
+
+    -- Exit magic block button
+    bexit <- G.buttonNewWithLabel "Exit Magic Block"
+    widgetShow bexit
+    G.containerAdd bbox bexit
+    _ <- G.on bexit G.buttonActivated (actionSelectorExit ref)
+
+    -- Add transition button
+    badd <- G.buttonNewWithLabel "Perform controllable action"
+    widgetShow badd
+    G.containerAdd bbox badd
+    _ <- G.on badd G.buttonActivated (actionSelectorRun ref)
+
+    modifyIORef ref (\sv -> sv { svActSelectText  = tview
+                               , svActSelectBExit = bexit
+                               , svActSelectBAdd  = badd})
+    actionSelectorDisable ref
+    return $ G.toWidget vbox
+
+actionSelectorRun :: RSourceView c a -> IO ()
+actionSelectorRun ref = do
+    SourceView{..} <- readIORef ref
+    buf <- G.textViewGetBuffer svActSelectText
+    text <- G.get tview G.textBufferText
+    let fname = hash text
+        fpath = "/tmp/" ++ fname
+    case compileControllableAction svInputSpec svFlatSpec svPID (fScope $ currentFrame sv) text fpath of
+         Left e    -> showMessage ref G.MessageError e
+         Right cfa -> do writeFile fpath text
+                         runControllableCFA ref cfa fname
+
+runControllableCFA :: RSourceView c a -> CFA -> String -> IO Bool
+runControllableCFA ref cfa tname = do
+    -- Push controllable cfa on the stack
+    modifyIORef ref (\sv -> let stack = currentStack sv
+                                stack' = (FrameInteractive (fScope $ head stack) cfaInitLoc cfa) : stack
+                            in traceAppend sv (currentStore sv) stack')
+    updateDisplays ref
+
+actionSelectorUpdate :: RSourceView c a -> IO ()
+
+actionSelectorDisable :: RSourceView c a -> IO ()
+
+
+
+
+
 --------------------------------------------------------------
 -- Private helpers
 --------------------------------------------------------------
@@ -702,8 +774,6 @@ resolveViewDisable ref = do
 stackFromStore :: SourceView c a -> Store -> PID -> Stack
 stackFromStore sv s pid = stackFromStore' sv s pid Nothing
 
--- Returns extended version of the stack with PID and task name 
--- attached to each frame
 stackFromStore' :: SourceView c a -> Store -> PID -> Maybe String -> Stack
 stackFromStore' sv s pid methname = stack' ++ stack
     where cfa   = specGetCFA (svSpec sv) pid methname
@@ -721,11 +791,22 @@ stackFromStore' sv s pid methname = stack' ++ stack
                                              Just nam -> stackFromStore' sv s pid (Just nam)
                         _            -> []
 
+-- Extract the last controllable or uncontrollable task call 
+-- from the stack or return Nothing if the stack does not 
+-- contain a task call
+stackTask :: Stack -> Int -> Maybe Method
+stackTask stack frame = stackTask' $ drop frame stack
+
+stackTask' :: Stack -> Maybe Method
+stackTask' []                            = Nothing
+stackTask' (Frame (ScopeMethod _ m) _):_ | methCat m == Task Controllable   = Just m
+                                         | methCat m == Task Uncontrollable = Just m
+stackTask' _:st                          = stackTask' st
+
 storeGetLoc :: Store -> PID -> Maybe String -> Loc
 storeGetLoc s pid methname = pcEnumToLoc pc
     where pcvar = mkPCVar $ pid ++ maybeToList methname
           pc    = storeEvalEnum s pcvar
-
 
 getTag :: Store -> String
 getTag s = storeEvalEnum s mkTagVar
@@ -733,13 +814,23 @@ getTag s = storeEvalEnum s mkTagVar
 isProcEnabled :: SourceView c a -> PID -> Bool
 isProcEnabled sv pid = 
     let store = fromJust $ D.sConcrete $ svState sv
-        frame = head $ stackFromStore' sv store pid Nothing
-        cfa = specGetCFA (svSpec sv) pid (fmap sname $ frameMethod frame)
+        stack = stackFromStore sv store pid
+        frame = head stack
+        cfa   = stackGetCFA sv pid stack
+        label = cfaLocLabel (fLoc frame) cfa
     in case svTranPID sv of
             Just pid' -> pid' == pid
-            _         -> case cfaLocLabel (fLoc frame) cfa of
-                              LPause _ _ cond -> storeEvalBool store cond == True
-                              _               -> True
+            _         -> -- In a controllable state, the process is enabled if it is
+                         -- currently inside a magic block
+                         -- In an uncontrollable state, the process is enabled if its
+                         -- pause condition holds
+                         if currentControllable sv
+                            then case label of
+                                      LPause _ _ cond -> cond == mkMagicDoneCond
+                                      _               -> False
+                            else case label of
+                                      LPause _ _ cond -> storeEvalBool store cond == True
+                                      _               -> True
 
 -- update all displays
 updateDisplays :: RSourceView c a -> IO ()
@@ -750,6 +841,7 @@ updateDisplays ref = do
     watchUpdate          ref
     sourceWindowUpdate   ref
     resolveViewUpdate    ref
+    actionSelectorUpdate ref
 
 -- Reset all components
 reset :: RSourceView c a -> IO ()
@@ -768,12 +860,13 @@ disable ref = do
     -- disable process selector
     processSelectorDisable ref
     -- disable other displays
-    commandButtonsDisable ref
-    sourceWindowDisable ref
-    stackViewDisable ref
-    traceViewDisable ref
-    watchDisable ref
-    resolveViewDisable ref
+    commandButtonsDisable  ref
+    sourceWindowDisable    ref
+    stackViewDisable       ref
+    traceViewDisable       ref
+    watchDisable           ref
+    resolveViewDisable     ref
+    actionSelectorDisable  ref
 
 -- Access current location in the trace 
 
@@ -802,15 +895,23 @@ modifyCurrentStore sv f = modifyStore sv (svTracePos sv) f
 currentStack :: SourceView c a -> Stack
 currentStack sv = getStack sv (svTracePos sv)
 
+currentControllable :: SourceView c a -> Bool
+currentControllable sv = storeEvalBool (currentStore sv) (EVar mkContVarName)
+
 cfaAtFrame :: SourceView c a -> Int -> CFA
-cfaAtFrame sv frame = specGetCFA (svSpec sv) (svPID sv) mmeth
-    where mmeth = fmap sname $ frameMethod $ currentStack sv !! frame
+cfaAtFrame sv frame = stackGetCFA sv (svPID sv) (drop frame $ currentStack sv)
 
 -- Access arbitrary location in the trace 
 
 getCFA :: SourceView c a -> Int -> CFA
-getCFA sv p = specGetCFA (svSpec sv) (svPID sv) mmeth
-    where mmeth = fmap sname $ frameMethod $ head $ getStack sv p
+getCFA sv p = stackGetCFA sv (svPID sv) (getStack sv p)
+
+stackGetCFA :: SourceView c a -> PID -> Stack -> CFA
+stackGetCFA sv pid (FrameStatic (ScopeMethod _ m) _):_ | methCat m == Task Controllable   = specGetCFA (svSpec sv) pid (Just m)
+                                                       | methCat m == Task Uncontrollable = specGetCFA (svSpec sv) pid (Just m) 
+stackGetCFA sv pid (FrameInteractive _ _ cfa):_                                           = cfa
+stackGetCFA sv pid _:stack                                                                = stackGetCFA sv pid stack
+        
 
 getLoc :: SourceView c a -> Int -> Loc
 getLoc sv p = fLoc $ head $ getStack sv p
@@ -860,7 +961,7 @@ completeTransition ref = do
         ?m       = D.mCtx model
     -- update PC and PID variables
     let pc = currentLoc sv
-        mmeth = fmap sname $ frameMethod $ head $ currentStack sv
+        mmeth = fmap sname $ stackTask (currentStack sv) 0
         pid = svPID sv ++ (maybeToList mmeth)
         sv' = setPC pid pc $ setPID pid sv
     writeIORef ref sv'
@@ -884,17 +985,7 @@ storeEvalStr inspec flatspec store pid sc str = do
     expr <- case parse Parse.detexpr "" str of
                  Left  e  -> Left $ show e
                  Right ex -> Right ex
-    let ?spec = inspec
-    let (scope,iid) = case sc of
-                           Front.ScopeMethod   _ meth -> let (i, mname) = Front.itreeParseName $ name meth
-                                                             tm = Front.itreeTemplate i
-                                                             meth' = fromJust $ find ((== mname) . Front.methName) $ Front.tmAllMethod tm
-                                                         in (Front.ScopeMethod tm meth', i)
-                           Front.ScopeProcess  _ proc -> let (i, pname) = Front.itreeParseName $ name proc
-                                                             tm = Front.itreeTemplate i
-                                                             proc' = fromJust $ find ((== pname) . Front.procName) $ Front.tmAllProcess tm
-                                                         in (Front.ScopeProcess tm proc', i)
-                           Front.ScopeTemplate _      -> (Front.ScopeTop, [])
+    let (scope, iid) = flatScopeToScope inspec sc
     -- 2. validate
     Front.validateExpr scope expr
     let ?scope = scope in when (not $ Front.exprNoSideEffects expr) $ throwError "Expression has side effects"
@@ -907,10 +998,7 @@ storeEvalStr inspec flatspec store pid sc str = do
                          in Front.exprSimplify flatexpr
     when (not $ null ss) $ throwError "Expression too complex"
     -- 5. inline
-    let lmap = case sc of
-                    Front.ScopeMethod   _ meth -> methodLMap pid meth
-                    Front.ScopeProcess  _ proc -> procLMap proc
-                    Front.ScopeTemplate _      -> M.empty
+    let lmap = scopeLMap sc
     let ctx = CFACtx { ctxPID     = []
                      , ctxStack   = [(sc, error "evalStr: return", Nothing, lmap)]
                      , ctxCFA     = error "evalStr: CFA undefined"
@@ -922,6 +1010,85 @@ storeEvalStr inspec flatspec store pid sc str = do
     -- 6. evaluate
     return $ storeEval store iexpr
 
+compileControllableAction :: Front.Spec -> Front.Spec -> PID -> Front.Scope -> String -> FilePath -> Either String CFA
+compileControllableAction inspec flatspec pid sc str fname = do
+    -- Apply all transformations that the input spec goes through to the statement:
+    -- 1. parse
+    stat <- liftM (sSeq nopos)
+            $ case parse Parse.statements fname str of
+                   Left  e  -> Left $ show e
+                   Right st -> Right st
+    let (scope,iid) = flatScopeToScope sc
+    -- 2. validate
+    Front.validateStat scope stat
+    let ?spec = inspec in validateControllableStat scope stat
+    -- 3. flatten
+    let flatstat = Front.statFlatten iid scope stat
+    -- 4. simplify
+    let ?spec = flatspec
+    let (ss, simpstat) = let ?uniq = newUniq
+                             ?scope = sc
+                         in Front.statSimplify flatstat
+    -- add return after the statement to pop FrameInteractive off the stack
+    simpstat' = Front.sSeq nopos [simpstat, SReturn nopos Nothing]
+    -- 5. inline
+    let ctx = CFACtx { ctxPID     = []
+                     , ctxStack   = []
+                     , ctxCFA     = I.newCFA sc simpstat I.true
+                     , ctxBrkLocs = []
+                     , ctxGNMap   = globalNMap
+                     , ctxLastVar = 0
+                     , ctxVar     = []}
+        ctx' = let ?procs =[] in execState (do -- create final state and make it the return location
+                                               retloc <- ctxInsLocLab (I.LFinal I.ActNone [])
+                                               ctxPushScope sc retloc Nothing (scopeLMap sc)
+                                               procStatToCFA simpstat' I.cfaInitLoc) ctx
+    assert (null $ ctxVar ctx') (pos stat) "Cannot perform non-deterministic controllable action"
+    -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
+    let cfa   = ctxCFA ctx'
+        reach = cfaReachInst cfa cfaInitLoc
+        cfa'  = cfaPrune cfa (S.insert cfaInitLoc reach)
+    assert (cfa==cfa') (pos stat) "Controllable action must be an instantaneous statement"
+    return cfa'
+    
+-- Check whether statement specifies a valid controllable action:
+-- * Function, procedure, and controllable task calls only
+-- * No fork statements
+-- * No variable declarations
+-- * No pause or stop statements
+-- * No assert or assume
+-- * No magic blocks
+validateControllableStat :: (?spec::Front.Spec) => Scope -> Statement -> Either String ()
+validateControllableStat sc stat = do
+    _ <- mapM (\(p,(_,m)) -> do assert (methCat m /= Task Uncontrollable) p "Uncontrollable task invocations are not allowed inside controllable actions"
+                                assert (methCat m /= Task Invisible)      p "Invisible task invocations are not allowed inside controllable actions")
+         $ statCallees sc stat
+    _ <- mapStatM (\st -> case st of
+                               SVarDecl p _ -> err p "Variable declarations are not allowed inside controllable actions"
+                               SReturn  p _ -> err p "Return statements are not allowed inside controllable actions"
+                               SPar     p _ -> err p "Fork statements are not allowed inside controllable actions"
+                               SPause   p   -> err p "Pause statements are not allowed inside controllable actions"
+                               SWait    p _ -> err p "Wait statements are not allowed inside controllable actions"
+                               SStop    p   -> err p "Stop statements are not allowed inside controllable actions"
+                               SAssert  p _ -> err p "Assertions are not allowed inside controllable actions"
+                               SAssume  p _ -> err p "Assume statements are not allowed inside controllable actions"
+                               SMagic   p _ -> err p "Magic blocks are not allowed inside controllable actions"
+                               _            -> return st) stat
+    return ()
+
+flatScopeToScope :: Front.Spec -> Scope -> (Scope, IID)
+flatScopeToScope inspec sc = 
+    let ?spec = inspec in
+    case sc of
+         Front.ScopeMethod   _ meth -> let (i, mname) = Front.itreeParseName $ name meth
+                                           tm = Front.itreeTemplate i
+                                           meth' = fromJust $ find ((== mname) . Front.methName) $ Front.tmAllMethod tm
+                                       in (Front.ScopeMethod tm meth', i)
+         Front.ScopeProcess  _ proc -> let (i, pname) = Front.itreeParseName $ name proc
+                                           tm = Front.itreeTemplate i
+                                           proc' = fromJust $ find ((== pname) . Front.procName) $ Front.tmAllProcess tm
+                                       in (Front.ScopeProcess tm proc', i)
+         Front.ScopeTemplate _      -> (Front.ScopeTop, [])
 
 -- Create a store with all tmp variables assigned according to their values 
 -- in the transition
