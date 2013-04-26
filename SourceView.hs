@@ -34,16 +34,19 @@ import Inline
 import Predicate
 import Store
 
-import qualified NS           as Front
-import qualified Method       as Front
-import qualified Process      as Front
-import qualified InstTree     as Front
-import qualified TemplateOps  as Front
-import qualified ExprInline   as Front
-import qualified Spec         as Front
-import qualified ExprFlatten  as Front
-import qualified ExprOps      as Front
-import qualified ExprValidate as Front
+import qualified NS              as Front
+import qualified Method          as Front
+import qualified Process         as Front
+import qualified InstTree        as Front
+import qualified TemplateOps     as Front
+import qualified ExprInline      as Front
+import qualified Spec            as Front
+import qualified ExprFlatten     as Front
+import qualified ExprOps         as Front
+import qualified ExprValidate    as Front
+import qualified Statement       as Front
+import qualified StatementOps    as Front
+import qualified StatementInline as Front
 
 --------------------------------------------------------------
 -- Data structures
@@ -721,13 +724,13 @@ actionSelectorCreate ref = do
 
     -- Exit magic block button
     bexit <- G.buttonNewWithLabel "Exit Magic Block"
-    widgetShow bexit
+    G.widgetShow bexit
     G.containerAdd bbox bexit
     _ <- G.on bexit G.buttonActivated (actionSelectorExit ref)
 
     -- Add transition button
     badd <- G.buttonNewWithLabel "Perform controllable action"
-    widgetShow badd
+    G.widgetShow badd
     G.containerAdd bbox badd
     _ <- G.on badd G.buttonActivated (actionSelectorRun ref)
 
@@ -739,18 +742,25 @@ actionSelectorCreate ref = do
 
 actionSelectorRun :: RSourceView c a -> IO ()
 actionSelectorRun ref = do
-    SourceView{..} <- readIORef ref
+    sv@SourceView{..} <- readIORef ref
     buf <- G.textViewGetBuffer svActSelectText
-    text <- G.get tview G.textBufferText
+    text <- G.get buf G.textBufferText
     let fname = hash text
         fpath = "/tmp/" ++ fname
-    case compileControllableAction svInputSpec svFlatSpec svPID (fScope $ currentFrame sv) text fpath of
+    case compileControllableAction svInputSpec svFlatSpec svPID (fScope $ head $ currentStack sv) text fpath of
          Left e    -> showMessage ref G.MessageError e
          Right cfa -> do writeFile fpath text
-                         runControllableCFA ref cfa fname
+                         runControllableCFA ref cfa
 
-runControllableCFA :: RSourceView c a -> CFA -> String -> IO Bool
-runControllableCFA ref cfa tname = do
+actionSelectorExit :: RSourceView c a -> IO ()
+actionSelectorExit ref = do
+    modifyIORef ref (\sv -> modifyCurrentStore sv (\st0 -> let st1 = storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)
+                                                               st2 = storeSet st1 mkContVar  (Just $ SVal $ BoolVal False)
+                                                           in st2))
+    completeTransition ref
+
+runControllableCFA :: RSourceView c a -> CFA -> IO ()
+runControllableCFA ref cfa = do
     -- Push controllable cfa on the stack
     modifyIORef ref (\sv -> let stack = currentStack sv
                                 stack' = (FrameInteractive (fScope $ head stack) cfaInitLoc cfa) : stack
@@ -758,16 +768,32 @@ runControllableCFA ref cfa tname = do
     updateDisplays ref
 
 actionSelectorUpdate :: RSourceView c a -> IO ()
+actionSelectorUpdate ref = do
+    sv <- readIORef ref
+    if currentControllable sv && (isWaitForMagicLabel $ currentLocLabel sv)
+       then actionSelectorEnable ref
+       else actionSelectorDisable ref
 
 actionSelectorDisable :: RSourceView c a -> IO ()
+actionSelectorDisable ref = do
+    SourceView{..} <- readIORef ref
+    G.widgetSetSensitive svActSelectBExit False
+    G.widgetSetSensitive svActSelectBAdd  False
 
-
-
+actionSelectorEnable :: RSourceView c a -> IO ()
+actionSelectorEnable ref = do
+    SourceView{..} <- readIORef ref
+    G.widgetSetSensitive svActSelectBExit True
+    G.widgetSetSensitive svActSelectBAdd  True
 
 
 --------------------------------------------------------------
 -- Private helpers
 --------------------------------------------------------------
+
+isWaitForMagicLabel :: LocLabel -> Bool
+isWaitForMagicLabel (LPause _ _ e) = isWaitForMagic e
+isWaitForMagicLabel _              = False
 
 -- Given a snapshot of the store at a pause location, compute
 -- process stack.
@@ -794,14 +820,16 @@ stackFromStore' sv s pid methname = stack' ++ stack
 -- Extract the last controllable or uncontrollable task call 
 -- from the stack or return Nothing if the stack does not 
 -- contain a task call
-stackTask :: Stack -> Int -> Maybe Method
+stackTask :: Stack -> Int -> Maybe Front.Method
 stackTask stack frame = stackTask' $ drop frame stack
 
-stackTask' :: Stack -> Maybe Method
-stackTask' []                            = Nothing
-stackTask' (Frame (ScopeMethod _ m) _):_ | methCat m == Task Controllable   = Just m
-                                         | methCat m == Task Uncontrollable = Just m
-stackTask' _:st                          = stackTask' st
+stackTask' :: Stack -> Maybe Front.Method
+stackTask' []      = Nothing
+stackTask' (fr:st) = case fScope fr of
+                          Front.ScopeMethod _ m -> if Front.methCat m == Task Front.Uncontrollable 
+                                                      then Just m
+                                                      else stackTask' st
+                          _               -> stackTask' st
 
 storeGetLoc :: Store -> PID -> Maybe String -> Loc
 storeGetLoc s pid methname = pcEnumToLoc pc
@@ -907,10 +935,10 @@ getCFA :: SourceView c a -> Int -> CFA
 getCFA sv p = stackGetCFA sv (svPID sv) (getStack sv p)
 
 stackGetCFA :: SourceView c a -> PID -> Stack -> CFA
-stackGetCFA sv pid (FrameStatic (ScopeMethod _ m) _):_ | methCat m == Task Controllable   = specGetCFA (svSpec sv) pid (Just m)
-                                                       | methCat m == Task Uncontrollable = specGetCFA (svSpec sv) pid (Just m) 
-stackGetCFA sv pid (FrameInteractive _ _ cfa):_                                           = cfa
-stackGetCFA sv pid _:stack                                                                = stackGetCFA sv pid stack
+stackGetCFA sv pid ((FrameStatic (Front.ScopeMethod _ m) _):_) | Front.methCat m == Task Front.Controllable   = specGetCFA (svSpec sv) pid (Just m)
+                                                               | Front.methCat m == Task Front.Uncontrollable = specGetCFA (svSpec sv) pid (Just m) 
+stackGetCFA sv pid ((FrameInteractive _ _ cfa):_)                                                             = cfa
+stackGetCFA sv pid (_:stack)                                                                                  = stackGetCFA sv pid stack
         
 
 getLoc :: SourceView c a -> Int -> Loc
@@ -941,7 +969,7 @@ microstep ref = do
 
 microstep' :: SourceView c a -> (Loc, TranLabel) -> Maybe (Store, Stack)
 microstep' sv (to, TranCall meth)          = let ?spec = svFlatSpec sv
-                                             in Just (currentStore sv, (Frame (Front.ScopeMethod tmMain meth) to) : currentStack sv)
+                                             in Just (currentStore sv, (FrameStatic (Front.ScopeMethod tmMain meth) to) : currentStack sv)
 microstep' sv (_ , TranReturn)             = Just (currentStore sv, tail $ currentStack sv)
 microstep' sv (to, TranNop)                = Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
 microstep' sv (to, TranStat (SAssume e))   = if storeEvalBool (currentStore sv) e == True
@@ -993,13 +1021,12 @@ storeEvalStr inspec flatspec store pid sc str = do
     let flatexpr = Front.exprFlatten iid scope expr
     -- 4. simplify
     let ?spec = flatspec
-    let (ss, simpexpr) = let ?uniq = newUniq
-                             ?scope = sc
-                         in Front.exprSimplify flatexpr
+    let (ss, simpexpr) = let ?scope = sc
+                         in evalState (Front.exprSimplify flatexpr) 0
     when (not $ null ss) $ throwError "Expression too complex"
     -- 5. inline
-    let lmap = scopeLMap sc
-    let ctx = CFACtx { ctxPID     = []
+    let lmap = scopeLMap pid sc
+    let ctx = CFACtx { ctxPID     = pid
                      , ctxStack   = [(sc, error "evalStr: return", Nothing, lmap)]
                      , ctxCFA     = error "evalStr: CFA undefined"
                      , ctxBrkLocs = []
@@ -1014,7 +1041,7 @@ compileControllableAction :: Front.Spec -> Front.Spec -> PID -> Front.Scope -> S
 compileControllableAction inspec flatspec pid sc str fname = do
     -- Apply all transformations that the input spec goes through to the statement:
     -- 1. parse
-    stat <- liftM (sSeq nopos)
+    stat <- liftM (Front.sSeq nopos)
             $ case parse Parse.statements fname str of
                    Left  e  -> Left $ show e
                    Right st -> Right st
@@ -1026,13 +1053,13 @@ compileControllableAction inspec flatspec pid sc str fname = do
     let flatstat = Front.statFlatten iid scope stat
     -- 4. simplify
     let ?spec = flatspec
-    let (ss, simpstat) = let ?uniq = newUniq
-                             ?scope = sc
-                         in Front.statSimplify flatstat
+    let ((ss, simpstat), (_, vars)) = let ?scope = sc
+                                      in runState (Front.statSimplify flatstat) 0
+    assert (null vars) (pos stat) "Statement too complex"
     -- add return after the statement to pop FrameInteractive off the stack
-    simpstat' = Front.sSeq nopos [simpstat, SReturn nopos Nothing]
+    let simpstat' = Front.sSeq nopos [simpstat, SReturn nopos Nothing]
     -- 5. inline
-    let ctx = CFACtx { ctxPID     = []
+    let ctx = CFACtx { ctxPID     = pid
                      , ctxStack   = []
                      , ctxCFA     = I.newCFA sc simpstat I.true
                      , ctxBrkLocs = []
@@ -1041,7 +1068,7 @@ compileControllableAction inspec flatspec pid sc str fname = do
                      , ctxVar     = []}
         ctx' = let ?procs =[] in execState (do -- create final state and make it the return location
                                                retloc <- ctxInsLocLab (I.LFinal I.ActNone [])
-                                               ctxPushScope sc retloc Nothing (scopeLMap sc)
+                                               ctxPushScope sc retloc Nothing (scopeLMap pid sc)
                                                procStatToCFA simpstat' I.cfaInitLoc) ctx
     assert (null $ ctxVar ctx') (pos stat) "Cannot perform non-deterministic controllable action"
     -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
