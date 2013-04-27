@@ -7,6 +7,7 @@ import Data.List
 import Data.Tree
 import Data.String.Utils
 import qualified Data.Map                   as M
+import qualified Data.Set                   as S
 import Data.IORef
 import qualified Data.Graph.Inductive.Graph as Graph
 import qualified Graphics.UI.Gtk            as G
@@ -189,20 +190,27 @@ sourceViewNew inspec flatspec spec avars model = do
     w <- D.panelsGetWidget hpanes
     G.boxPackStart vbox w G.PackGrow 0
 
-    -- source window on the left
+    -- source window and controllable action selector on the left
+    lvpanes  <- D.panedPanelsNew (liftM G.toPaned $ G.vPanedNew)
+    wlvpanes <- D.panelsGetWidget lvpanes
+    D.panelsAppend hpanes wlvpanes ""
+
     src <- sourceWindowCreate ref
-    D.panelsAppend hpanes src "Source Code"
+    D.panelsAppend lvpanes src "Source Code"
+
+    act <- actionSelectorCreate ref
+    D.panelsAppend lvpanes act "Controllable action"
 
     -- stack, watch, resolve on the right
-    vpanes <- D.panedPanelsNew (liftM G.toPaned $ G.vPanedNew)
-    wvpanes <- D.panelsGetWidget vpanes
-    D.panelsAppend hpanes wvpanes ""
+    rvpanes <- D.panedPanelsNew (liftM G.toPaned $ G.vPanedNew)
+    wrvpanes <- D.panelsGetWidget rvpanes
+    D.panelsAppend hpanes wrvpanes ""
     stack <- stackViewCreate ref
     watch <- watchCreate ref
     resolve <- resolveViewCreate ref
-    D.panelsAppend vpanes stack "Stack"
-    D.panelsAppend vpanes watch "Watch"
-    D.panelsAppend vpanes resolve "Resolve non-determinism"
+    D.panelsAppend rvpanes stack "Stack"
+    D.panelsAppend rvpanes watch "Watch"
+    D.panelsAppend rvpanes resolve "Resolve non-determinism"
 
     let cb = D.ViewEvents { D.evtStateSelected      = sourceViewStateSelected      ref 
                           , D.evtTransitionSelected = sourceViewTransitionSelected ref
@@ -707,7 +715,7 @@ resolveViewDisable ref = do
 
 -- Controllable action selector --
 
-actionSelectorCreate :: RSourceView c a -> IO G.Widget
+actionSelectorCreate :: (D.Rel c v a s) => RSourceView c a -> IO G.Widget
 actionSelectorCreate ref = do
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox
@@ -716,11 +724,11 @@ actionSelectorCreate ref = do
     tview <- G.textViewNew
     G.textViewSetEditable tview True
     G.widgetShow tview
-    G.boxPackStart vbox tview G.PackGrow    
+    G.boxPackStart vbox tview G.PackGrow 0
 
     bbox <- G.hButtonBoxNew
     G.widgetShow bbox
-    G.boxPackStart vbox bbox G.PackNatural
+    G.boxPackStart vbox bbox G.PackNatural 0
 
     -- Exit magic block button
     bexit <- G.buttonNewWithLabel "Exit Magic Block"
@@ -746,13 +754,13 @@ actionSelectorRun ref = do
     buf <- G.textViewGetBuffer svActSelectText
     text <- G.get buf G.textBufferText
     let fname = hash text
-        fpath = "/tmp/" ++ fname
+        fpath = "/tmp/" ++ show fname
     case compileControllableAction svInputSpec svFlatSpec svPID (fScope $ head $ currentStack sv) text fpath of
          Left e    -> showMessage ref G.MessageError e
          Right cfa -> do writeFile fpath text
                          runControllableCFA ref cfa
 
-actionSelectorExit :: RSourceView c a -> IO ()
+actionSelectorExit :: (D.Rel c v a s) => RSourceView c a -> IO ()
 actionSelectorExit ref = do
     modifyIORef ref (\sv -> modifyCurrentStore sv (\st0 -> let st1 = storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)
                                                                st2 = storeSet st1 mkContVar  (Just $ SVal $ BoolVal False)
@@ -826,7 +834,7 @@ stackTask stack frame = stackTask' $ drop frame stack
 stackTask' :: Stack -> Maybe Front.Method
 stackTask' []      = Nothing
 stackTask' (fr:st) = case fScope fr of
-                          Front.ScopeMethod _ m -> if Front.methCat m == Task Front.Uncontrollable 
+                          Front.ScopeMethod _ m -> if Front.methCat m == Front.Task Front.Uncontrollable 
                                                       then Just m
                                                       else stackTask' st
                           _               -> stackTask' st
@@ -845,7 +853,7 @@ isProcEnabled sv pid =
         stack = stackFromStore sv store pid
         frame = head stack
         cfa   = stackGetCFA sv pid stack
-        label = cfaLocLabel (fLoc frame) cfa
+        lab   = cfaLocLabel (fLoc frame) cfa
     in case svTranPID sv of
             Just pid' -> pid' == pid
             _         -> -- In a controllable state, the process is enabled if it is
@@ -853,10 +861,10 @@ isProcEnabled sv pid =
                          -- In an uncontrollable state, the process is enabled if its
                          -- pause condition holds
                          if currentControllable sv
-                            then case label of
+                            then case lab of
                                       LPause _ _ cond -> cond == mkMagicDoneCond
                                       _               -> False
-                            else case label of
+                            else case lab of
                                       LPause _ _ cond -> storeEvalBool store cond == True
                                       _               -> True
 
@@ -935,10 +943,10 @@ getCFA :: SourceView c a -> Int -> CFA
 getCFA sv p = stackGetCFA sv (svPID sv) (getStack sv p)
 
 stackGetCFA :: SourceView c a -> PID -> Stack -> CFA
-stackGetCFA sv pid ((FrameStatic (Front.ScopeMethod _ m) _):_) | Front.methCat m == Task Front.Controllable   = specGetCFA (svSpec sv) pid (Just m)
-                                                               | Front.methCat m == Task Front.Uncontrollable = specGetCFA (svSpec sv) pid (Just m) 
-stackGetCFA sv pid ((FrameInteractive _ _ cfa):_)                                                             = cfa
-stackGetCFA sv pid (_:stack)                                                                                  = stackGetCFA sv pid stack
+stackGetCFA sv pid ((FrameStatic (Front.ScopeMethod _ m) _):_) | Front.methCat m == Front.Task Front.Controllable   = specGetCFA (svSpec sv) pid (Just $ sname m)
+                                                               | Front.methCat m == Front.Task Front.Uncontrollable = specGetCFA (svSpec sv) pid (Just $ sname m) 
+stackGetCFA _  _   ((FrameInteractive _ _ cfa):_)                                                                   = cfa
+stackGetCFA sv pid (_:stack)                                                                                        = stackGetCFA sv pid stack
         
 
 getLoc :: SourceView c a -> Int -> Loc
@@ -1015,14 +1023,16 @@ storeEvalStr inspec flatspec store pid sc str = do
                  Right ex -> Right ex
     let (scope, iid) = flatScopeToScope inspec sc
     -- 2. validate
+    let ?spec  = inspec
     Front.validateExpr scope expr
-    let ?scope = scope in when (not $ Front.exprNoSideEffects expr) $ throwError "Expression has side effects"
+    let ?scope = scope
+        in when (not $ Front.exprNoSideEffects expr) $ throwError "Expression has side effects"
     -- 3. flatten
     let flatexpr = Front.exprFlatten iid scope expr
     -- 4. simplify
     let ?spec = flatspec
     let (ss, simpexpr) = let ?scope = sc
-                         in evalState (Front.exprSimplify flatexpr) 0
+                         in evalState (Front.exprSimplify flatexpr) (0,[])
     when (not $ null ss) $ throwError "Expression too complex"
     -- 5. inline
     let lmap = scopeLMap pid sc
@@ -1045,37 +1055,38 @@ compileControllableAction inspec flatspec pid sc str fname = do
             $ case parse Parse.statements fname str of
                    Left  e  -> Left $ show e
                    Right st -> Right st
-    let (scope,iid) = flatScopeToScope sc
+    let (scope,iid) = flatScopeToScope inspec sc
     -- 2. validate
+    let ?spec = inspec
     Front.validateStat scope stat
-    let ?spec = inspec in validateControllableStat scope stat
+    validateControllableStat scope stat
     -- 3. flatten
     let flatstat = Front.statFlatten iid scope stat
     -- 4. simplify
     let ?spec = flatspec
-    let ((ss, simpstat), (_, vars)) = let ?scope = sc
-                                      in runState (Front.statSimplify flatstat) 0
+    let (simpstat, (_, vars)) = let ?scope = sc
+                                in runState (Front.statSimplify flatstat) (0,[])
     assert (null vars) (pos stat) "Statement too complex"
     -- add return after the statement to pop FrameInteractive off the stack
-    let simpstat' = Front.sSeq nopos [simpstat, SReturn nopos Nothing]
+    let simpstat' = Front.sSeq nopos [simpstat, Front.SReturn nopos Nothing]
     -- 5. inline
     let ctx = CFACtx { ctxPID     = pid
                      , ctxStack   = []
-                     , ctxCFA     = I.newCFA sc simpstat I.true
+                     , ctxCFA     = newCFA sc simpstat true
                      , ctxBrkLocs = []
                      , ctxGNMap   = globalNMap
                      , ctxLastVar = 0
                      , ctxVar     = []}
         ctx' = let ?procs =[] in execState (do -- create final state and make it the return location
-                                               retloc <- ctxInsLocLab (I.LFinal I.ActNone [])
+                                               retloc <- ctxInsLocLab (LFinal ActNone [])
                                                ctxPushScope sc retloc Nothing (scopeLMap pid sc)
-                                               procStatToCFA simpstat' I.cfaInitLoc) ctx
+                                               Front.procStatToCFA True simpstat' cfaInitLoc) ctx
     assert (null $ ctxVar ctx') (pos stat) "Cannot perform non-deterministic controllable action"
     -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
     let cfa   = ctxCFA ctx'
         reach = cfaReachInst cfa cfaInitLoc
         cfa'  = cfaPrune cfa (S.insert cfaInitLoc reach)
-    assert (cfa==cfa') (pos stat) "Controllable action must be an instantaneous statement"
+    assert (Graph.noNodes cfa == Graph.noNodes cfa') (pos stat) "Controllable action must be an instantaneous statement"
     return cfa'
     
 -- Check whether statement specifies a valid controllable action:
@@ -1085,25 +1096,25 @@ compileControllableAction inspec flatspec pid sc str fname = do
 -- * No pause or stop statements
 -- * No assert or assume
 -- * No magic blocks
-validateControllableStat :: (?spec::Front.Spec) => Scope -> Statement -> Either String ()
+validateControllableStat :: (?spec::Front.Spec) => Front.Scope -> Front.Statement -> Either String ()
 validateControllableStat sc stat = do
-    _ <- mapM (\(p,(_,m)) -> do assert (methCat m /= Task Uncontrollable) p "Uncontrollable task invocations are not allowed inside controllable actions"
-                                assert (methCat m /= Task Invisible)      p "Invisible task invocations are not allowed inside controllable actions")
-         $ statCallees sc stat
-    _ <- mapStatM (\st -> case st of
-                               SVarDecl p _ -> err p "Variable declarations are not allowed inside controllable actions"
-                               SReturn  p _ -> err p "Return statements are not allowed inside controllable actions"
-                               SPar     p _ -> err p "Fork statements are not allowed inside controllable actions"
-                               SPause   p   -> err p "Pause statements are not allowed inside controllable actions"
-                               SWait    p _ -> err p "Wait statements are not allowed inside controllable actions"
-                               SStop    p   -> err p "Stop statements are not allowed inside controllable actions"
-                               SAssert  p _ -> err p "Assertions are not allowed inside controllable actions"
-                               SAssume  p _ -> err p "Assume statements are not allowed inside controllable actions"
-                               SMagic   p _ -> err p "Magic blocks are not allowed inside controllable actions"
-                               _            -> return st) stat
+    _ <- mapM (\(p,(_,m)) -> do assert (Front.methCat m /= Front.Task Front.Uncontrollable) p "Uncontrollable task invocations are not allowed inside controllable actions"
+                                assert (Front.methCat m /= Front.Task Front.Invisible)      p "Invisible task invocations are not allowed inside controllable actions")
+         $ Front.statCallees sc stat
+    _ <- Front.mapStatM (\_ st -> case st of
+                                       Front.SVarDecl p _ -> err p "Variable declarations are not allowed inside controllable actions"
+                                       Front.SReturn  p _ -> err p "Return statements are not allowed inside controllable actions"
+                                       Front.SPar     p _ -> err p "Fork statements are not allowed inside controllable actions"
+                                       Front.SPause   p   -> err p "Pause statements are not allowed inside controllable actions"
+                                       Front.SWait    p _ -> err p "Wait statements are not allowed inside controllable actions"
+                                       Front.SStop    p   -> err p "Stop statements are not allowed inside controllable actions"
+                                       Front.SAssert  p _ -> err p "Assertions are not allowed inside controllable actions"
+                                       Front.SAssume  p _ -> err p "Assume statements are not allowed inside controllable actions"
+                                       Front.SMagic   p _ -> err p "Magic blocks are not allowed inside controllable actions"
+                                       _                  -> return st) sc stat
     return ()
 
-flatScopeToScope :: Front.Spec -> Scope -> (Scope, IID)
+flatScopeToScope :: Front.Spec -> Front.Scope -> (Front.Scope, Front.IID)
 flatScopeToScope inspec sc = 
     let ?spec = inspec in
     case sc of
