@@ -19,18 +19,18 @@ import qualified Implicit as Imp
 abstractRel :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?absvars::M.Map String AbsVar) => [D.ModelVar] -> Store -> a
 abstractRel vars store = Imp.conj $ map (evalAbsVar store) vars
 
-abstractState :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a b, ?absvars::M.Map String AbsVar) => Store -> D.State a Store
+abstractState :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => Store -> D.State a Store
 abstractState store = D.State { D.sAbstract = abstractRel (D.mCurStateVars ?model) store
                               , D.sConcrete = Just $ storeProject store $ map varName $ specStateVar ?spec
                               }
 
-abstractUntracked :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a b, ?absvars::M.Map String AbsVar) => Store -> a
+abstractUntracked :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => Store -> a
 abstractUntracked = abstractRel (D.mUntrackedVars ?model)
 
-abstractLabel :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a b, ?absvars::M.Map String AbsVar) => Store -> a
+abstractLabel :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => Store -> a
 abstractLabel = abstractRel (D.mLabelVars ?model)
 
-abstractTransition :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a b, ?absvars::M.Map String AbsVar) => D.State a Store -> Store -> D.Transition a Store
+abstractTransition :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => D.State a Store -> Store -> D.Transition a Store
 abstractTransition from to = D.Transition {
         tranFrom = from,
         -- compute untracked and label predicates over to

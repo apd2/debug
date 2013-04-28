@@ -27,6 +27,7 @@ import qualified DbgTypes    as D
 import qualified IDE         as D
 import qualified DbgAbstract as D
 import ISpec
+import TranSpec
 import IExpr
 import IVar
 import IType
@@ -34,6 +35,8 @@ import CFA
 import Inline
 import Predicate
 import Store
+import SMTSolver
+import TSLAbsGame
 
 import qualified NS              as Front
 import qualified Method          as Front
@@ -53,12 +56,15 @@ import qualified StatementInline as Front
 -- Data structures
 --------------------------------------------------------------
 
+instance D.Vals Store
+
 data TraceEntry = TraceEntry {
     teStack :: Stack,
     teStore :: Store
 }
 
 type Trace = [TraceEntry]
+
 
 data SourceView c a = SourceView {
     svModel          :: D.RModel c a Store,
@@ -115,13 +121,26 @@ type RSourceView c a = IORef (SourceView c a)
 -- View callbacks
 --------------------------------------------------------------
 
-sourceViewNew :: (D.Rel c v a s) => Front.Spec -> Front.Spec -> Spec -> [AbsVar] -> D.RModel c a Store -> IO (D.View a Store)
-sourceViewNew inspec flatspec spec avars model = do
-    ref <- newIORef $ SourceView { svModel          = model
+sourceViewNew :: (D.Rel c v a s) => Front.Spec -> Front.Spec -> Spec -> [AbsVar] -> SMTSolver -> D.RModel c a Store -> IO (D.View a Store)
+sourceViewNew inspec flatspec spec avars solver rmodel = do
+    let absvars = M.fromList $ map (\v -> (show v, v)) avars
+    -- HACK: create an initial state
+    model <- readIORef rmodel
+    let ?spec    = spec
+        ?absvars = absvars
+        ?model   = model
+        ?m       = D.mCtx model
+    initstore <- case smtGetModel solver [let ?pred = [] in bexprToFormula $ snd $ tsInit $ specTran spec] of
+                      Just (Right store) -> return store                      
+                      _                  -> fail "Unsatisfiable initial condition"
+    D.modelSelectState rmodel (Just $ D.abstractState initstore)
+    -- END HACK
+
+    ref <- newIORef $ SourceView { svModel          = rmodel
                                  , svInputSpec      = inspec
                                  , svFlatSpec       = flatspec
                                  , svSpec           = specInlineWireAlways spec
-                                 , svAbsVars        = M.fromList $ map (\v -> (show v, v)) avars
+                                 , svAbsVars        = absvars
                                  , svState          = error "SourceView: svState undefined"
                                  , svTmp            = error "SourceView: svTmp undefined"
                                  , svTranPID        = Nothing
