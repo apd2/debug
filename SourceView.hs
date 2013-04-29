@@ -319,6 +319,14 @@ processSelectorCreate ref = do
                      G.set rend [G.cellTextMarkup G.:= Just $ "<span weight=" ++ if en then "bold" else "normal" ++ ">" ++ last pid ++ "</span>"])
     writeIORef ref sv {svProcessCombo = combo, svProcessStore = store}
     _ <- G.on combo G.changed (processSelectorChanged ref)
+    processSelectorInit ref
+   
+    -- select the first process by default 
+    iter <- G.treeModelGetIter store [0]
+    G.comboBoxSetActiveIter combo (fromJust iter)
+    (pid, _) <- G.treeStoreGetValue store [0]
+    modifyIORef ref (\_sv -> _sv{svPID = pid})
+
     return $ G.toWidget combo
 
 processSelectorChanged :: RSourceView c a -> IO ()
@@ -328,8 +336,20 @@ processSelectorChanged ref = do
     when (isJust miter) $ 
         do path <- G.treeModelGetPath (svProcessStore sv) (fromJust miter)
            (pid, _) <- G.treeStoreGetValue (svProcessStore sv) path
+           putStrLn $ "setting PID to " ++ show pid
            modifyIORef ref (\_sv -> _sv{svPID = pid})
            reset ref
+
+processSelectorInit :: RSourceView c a -> IO ()
+processSelectorInit ref = do
+    sv <- readIORef ref
+    let store = svProcessStore sv
+        pidtree = map (procTree []) (specProc $ svSpec sv)
+                  where procTree parpid p = Node { rootLabel = (pid, isProcEnabled sv pid)
+                                                 , subForest = map (procTree pid) (procChildren p)}
+                                            where pid = parpid ++ [procName p]
+    G.treeStoreClear store
+    G.treeStoreInsertForest store [] 0 pidtree 
 
 processSelectorDisable :: RSourceView c a -> IO ()
 processSelectorDisable ref = do
@@ -338,15 +358,7 @@ processSelectorDisable ref = do
 
 processSelectorUpdate :: RSourceView c a -> IO ()
 processSelectorUpdate ref = do
-    sv <- readIORef ref
-    let combo = svProcessCombo sv
-        store = svProcessStore sv
-        pidtree = map (procTree []) (specProc $ svSpec sv)
-                  where procTree parpid p = Node { rootLabel = (pid, isProcEnabled sv pid)
-                                                 , subForest = map (procTree pid) (procChildren p)}
-                                            where pid = parpid ++ [procName p]
-    G.treeStoreClear store
-    G.treeStoreInsertForest store [] 0 pidtree 
+    combo <- getIORef svProcessCombo ref
     G.widgetSetSensitive combo True
 
 

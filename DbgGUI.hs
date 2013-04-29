@@ -101,9 +101,10 @@ debugGUI extraFactories model = do
 
     G.boxPackStart vbox idew G.PackGrow 0
 
-
-    views <- mapM (\f -> (fst f) rmodel) factories
-    modifyIORef rmodel (\m -> m{mViews = views})
+    views <- mapM (\f -> do view <- (fst f) rmodel
+                            modifyIORef rmodel (\m -> m{mViews = mViews m ++ [view]})
+                            return view)
+         factories
 
     dviews <- mapIdxM (\v idx -> do mitem <- G.checkMenuItemNewWithLabel (viewName v)
                                     G.menuShellAppend mview mitem
