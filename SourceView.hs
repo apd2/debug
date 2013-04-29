@@ -9,6 +9,7 @@ import Data.String.Utils
 import qualified Data.Map                   as M
 import qualified Data.Set                   as S
 import Data.IORef
+import Data.Hashable
 import qualified Data.Graph.Inductive.Graph as Graph
 import qualified Graphics.UI.Gtk            as G
 import Control.Monad
@@ -16,10 +17,11 @@ import Control.Monad.State
 import Control.Monad.Error
 import System.IO.Error
 import Text.Parsec
-import Data.Hashable
+import qualified Text.PrettyPrint           as PP
 
 import Name
 import Pos
+import PP
 import qualified Parse
 import Util hiding (name)
 import TSLUtil
@@ -63,8 +65,16 @@ data TraceEntry = TraceEntry {
     teStore :: Store
 }
 
+instance PP TraceEntry where
+    pp (TraceEntry stack _) = pp stack
+
 type Trace = [TraceEntry]
 
+instance PP Trace where
+    pp tr = PP.vcat $ PP.punctuate (PP.char '\n') $ mapIdx (\e i -> pp i PP.<> PP.char ':' PP.$$ pp e) tr
+
+showTrace :: Trace -> String
+showTrace = PP.render . pp
 
 data SourceView c a = SourceView {
     svModel          :: D.RModel c a Store,
@@ -251,9 +261,11 @@ sourceViewStateSelected :: (D.Rel c v a s) => RSourceView c a -> Maybe (D.State 
 sourceViewStateSelected ref Nothing                              = disable ref
 sourceViewStateSelected ref (Just s) | isNothing (D.sConcrete s) = disable ref
                                      | otherwise                 = do
+    putStrLn "sourceViewStateSelected"
     modifyIORef ref (\sv -> sv { svState   = s
                                , svTmp     = SStruct $ M.empty
                                , svTranPID = Nothing})
+    putStrLn "sourceViewStateSelected done"
     reset ref
 
 sourceViewTransitionSelected :: (D.Rel c v a s) => RSourceView c a -> D.Transition a Store -> IO ()
@@ -311,6 +323,7 @@ processSelectorCreate ref = do
     combo <- G.comboBoxNew
     G.widgetShow combo
     store <- G.treeStoreNew []
+    G.comboBoxSetModel combo (Just store)
     rend <- G.cellRendererTextNew
     G.cellLayoutPackStart combo rend True
     G.cellLayoutSetAttributeFunc combo rend store $ 
@@ -319,14 +332,13 @@ processSelectorCreate ref = do
                      G.set rend [G.cellTextMarkup G.:= Just $ "<span weight=" ++ if en then "bold" else "normal" ++ ">" ++ last pid ++ "</span>"])
     writeIORef ref sv {svProcessCombo = combo, svProcessStore = store}
     _ <- G.on combo G.changed (processSelectorChanged ref)
-    processSelectorInit ref
    
     -- select the first process by default 
-    iter <- G.treeModelGetIter store [0]
-    G.comboBoxSetActiveIter combo (fromJust iter)
-    (pid, _) <- G.treeStoreGetValue store [0]
-    modifyIORef ref (\_sv -> _sv{svPID = pid})
-
+--    iter <- G.treeModelGetIter store [0]
+--    G.comboBoxSetActiveIter combo (fromJust iter)
+--    (pid, _) <- G.treeStoreGetValue store [0]
+--    modifyIORef ref (\_sv -> _sv{svPID = pid})
+--
     return $ G.toWidget combo
 
 processSelectorChanged :: RSourceView c a -> IO ()
@@ -340,27 +352,23 @@ processSelectorChanged ref = do
            modifyIORef ref (\_sv -> _sv{svPID = pid})
            reset ref
 
-processSelectorInit :: RSourceView c a -> IO ()
-processSelectorInit ref = do
+processSelectorUpdate :: RSourceView c a -> IO ()
+processSelectorUpdate ref = do
     sv <- readIORef ref
     let store = svProcessStore sv
+        combo = svProcessCombo sv
         pidtree = map (procTree []) (specProc $ svSpec sv)
                   where procTree parpid p = Node { rootLabel = (pid, isProcEnabled sv pid)
                                                  , subForest = map (procTree pid) (procChildren p)}
                                             where pid = parpid ++ [procName p]
     G.treeStoreClear store
     G.treeStoreInsertForest store [] 0 pidtree 
+    G.widgetSetSensitive combo True
 
 processSelectorDisable :: RSourceView c a -> IO ()
 processSelectorDisable ref = do
     combo <- getIORef svProcessCombo ref
     G.widgetSetSensitive combo False
-
-processSelectorUpdate :: RSourceView c a -> IO ()
-processSelectorUpdate ref = do
-    combo <- getIORef svProcessCombo ref
-    G.widgetSetSensitive combo True
-
 
 -- Stack --
 stackViewCreate :: RSourceView c a -> IO G.Widget
@@ -370,7 +378,7 @@ stackViewCreate ref = do
     store <- G.listStoreNew []
 
     col <- G.treeViewColumnNew
-    G.treeViewColumnSetTitle col "Stack frames"
+    G.treeViewColumnSetTitle col "Stack"
 
     rend <- G.cellRendererTextNew
     G.cellLayoutPackStart col rend True
@@ -606,8 +614,8 @@ sourceSetPos sv (from, to) = do
        G.textViewSetBuffer (svSourceView sv) buf
        istart <- G.textBufferGetStartIter buf
        iend <- G.textBufferGetEndIter buf
-       ifrom <- G.textBufferGetIterAtLineOffset buf (sourceLine from) (sourceColumn from)
-       ito <- G.textBufferGetIterAtLineOffset buf (sourceLine to) (sourceColumn to)
+       ifrom <- G.textBufferGetIterAtLineOffset buf (sourceLine from - 1) (sourceColumn from - 1)
+       ito <- G.textBufferGetIterAtLineOffset buf (sourceLine to - 1) (sourceColumn to - 1)
        G.textBufferRemoveTag buf (svSourceTag sv) istart iend
        G.textBufferApplyTag buf (svSourceTag sv) ifrom ito
        _ <- G.textViewScrollToIter (svSourceView sv) ifrom 0.5 Nothing
@@ -913,6 +921,9 @@ updateDisplays ref = do
 -- Reset all components
 reset :: RSourceView c a -> IO ()
 reset ref = do
+    -- initialise stack and trace
+???    let tr = [TraceEntry { teStack = []
+???                         , teStore = storeUnion (fromJust $ D.sConcrete $ svState sv) (svTmp sv)}]
     processSelectorUpdate ref
     sv <- readIORef ref
     -- initialise stack and trace
@@ -974,10 +985,11 @@ getCFA :: SourceView c a -> Int -> CFA
 getCFA sv p = stackGetCFA sv (svPID sv) (getStack sv p)
 
 stackGetCFA :: SourceView c a -> PID -> Stack -> CFA
-stackGetCFA sv pid ((FrameStatic (Front.ScopeMethod _ m) _):_) | Front.methCat m == Front.Task Front.Controllable   = specGetCFA (svSpec sv) pid (Just $ sname m)
-                                                               | Front.methCat m == Front.Task Front.Uncontrollable = specGetCFA (svSpec sv) pid (Just $ sname m) 
-stackGetCFA _  _   ((FrameInteractive _ _ cfa):_)                                                                   = cfa
-stackGetCFA sv pid (_:stack)                                                                                        = stackGetCFA sv pid stack
+stackGetCFA sv pid ((FrameStatic (Front.ScopeMethod _ m) _):_)  | Front.methCat m == Front.Task Front.Controllable   = specGetCFA (svSpec sv) pid (Just $ sname m)
+                                                                | Front.methCat m == Front.Task Front.Uncontrollable = specGetCFA (svSpec sv) pid (Just $ sname m) 
+stackGetCFA sv pid ((FrameStatic (Front.ScopeProcess _ _) _):_)                                                      = specGetCFA (svSpec sv) pid Nothing
+stackGetCFA _  _   ((FrameInteractive _ _ cfa):_)                                                                    = cfa
+stackGetCFA sv pid (_:stack)                                                                                         = stackGetCFA sv pid stack
         
 
 getLoc :: SourceView c a -> Int -> Loc
