@@ -114,6 +114,7 @@ data SourceView c a = SourceView {
 
     -- Source window
     svSourceView     :: G.TextView,
+    svSourceBuf      :: G.TextBuffer,
     svSourceTag      :: G.TextTag,                  -- tag to mark current selection current selection
 
     -- Resolve view
@@ -171,6 +172,7 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
                                  , svWatchView      = error "SourceView: scWatchView undefined"
                                  , svWatchStore     = error "SourceView: svWatchStore undefined"
                                  , svSourceView     = error "SourceView: svSourceView undefined"
+                                 , svSourceBuf      = error "SourceView: svSourceBuf undefined"
                                  , svSourceTag      = error "SourceView: svSourceTag undefined"
                                  , svResolveStore   = error "SourceView: svResolveStore undefined"
                                  , svActSelectText  = error "SourceView: svActSelectText undefined"
@@ -329,16 +331,10 @@ processSelectorCreate ref = do
     G.cellLayoutSetAttributeFunc combo rend store $ 
         (\iter -> do path <- G.treeModelGetPath store iter
                      (pid, en) <- G.treeStoreGetValue store path
-                     G.set rend [G.cellTextMarkup G.:= Just $ "<span weight=" ++ if en then "bold" else "normal" ++ ">" ++ last pid ++ "</span>"])
+                     G.set rend [G.cellTextMarkup G.:= Just $ "<span weight=\"" ++ (if en then "bold" else "normal") ++ "\">" ++ last pid ++ "</span>"])
     writeIORef ref sv {svProcessCombo = combo, svProcessStore = store}
     _ <- G.on combo G.changed (processSelectorChanged ref)
-   
-    -- select the first process by default 
---    iter <- G.treeModelGetIter store [0]
---    G.comboBoxSetActiveIter combo (fromJust iter)
---    (pid, _) <- G.treeStoreGetValue store [0]
---    modifyIORef ref (\_sv -> _sv{svPID = pid})
---
+    processSelectorInit ref
     return $ G.toWidget combo
 
 processSelectorChanged :: RSourceView c a -> IO ()
@@ -352,18 +348,34 @@ processSelectorChanged ref = do
            modifyIORef ref (\_sv -> _sv{svPID = pid})
            reset ref
 
+processSelectorInit :: RSourceView c a -> IO ()
+processSelectorInit ref = do
+    sv <- readIORef ref
+    let store = svProcessStore sv
+        combo = svProcessCombo sv
+        pidtree = map (procTree []) (specProc $ svSpec sv)
+                  where procTree parpid p = Node { rootLabel = (pid, False)
+                                                 , subForest = map (procTree pid) (procChildren p)}
+                                            where pid = parpid ++ [procName p]
+    -- build store
+    G.treeStoreClear store
+    G.treeStoreInsertForest store [] 0 pidtree
+
 processSelectorUpdate :: RSourceView c a -> IO ()
 processSelectorUpdate ref = do
     sv <- readIORef ref
     let store = svProcessStore sv
         combo = svProcessCombo sv
-        pidtree = map (procTree []) (specProc $ svSpec sv)
-                  where procTree parpid p = Node { rootLabel = (pid, isProcEnabled sv pid)
-                                                 , subForest = map (procTree pid) (procChildren p)}
-                                            where pid = parpid ++ [procName p]
-    G.treeStoreClear store
-    G.treeStoreInsertForest store [] 0 pidtree 
+    G.treeModelForeach store (\iter -> do sv'      <- readIORef ref
+                                          path     <- G.treeModelGetPath store iter
+                                          (pid, _) <- G.treeStoreGetValue store path
+                                          G.treeStoreSetValue store path (pid, isProcEnabled sv' pid)
+                                          return False)
+    miter <- G.comboBoxGetActiveIter combo
+    when (isNothing miter) $ do miter' <- G.treeModelGetIter store [0]
+                                G.comboBoxSetActiveIter combo (fromJust miter')
     G.widgetSetSensitive combo True
+
 
 processSelectorDisable :: RSourceView c a -> IO ()
 processSelectorDisable ref = do
@@ -440,7 +452,7 @@ traceViewCreate ref = do
                                     ActStat s -> show s
                                     ActExpr e -> show e
                                     _         -> "?"
-                     G.set rend [G.cellTextMarkup G.:= Just $ "<span weight=" ++ if idx == svTracePos sv then "bold" else "normal" ++ ">" ++ txt ++ "</span>"])
+                     G.set rend [G.cellTextMarkup G.:= Just $ "<span weight=\"" ++ (if idx == svTracePos sv then "bold" else "normal") ++ "\">" ++ txt ++ "</span>"])
     _ <- G.on combo G.changed (tracePosChanged ref)
 
     -- redo button
@@ -588,7 +600,13 @@ sourceWindowCreate ref = do
     G.widgetShow view
     tag <- G.textTagNew Nothing
     G.set tag [G.textTagBackground G.:= "grey"]
-    modifyIORef ref (\sv -> sv {svSourceView = view, svSourceTag = tag})
+    buf <- G.textBufferNew Nothing
+    table <- G.textBufferGetTagTable buf
+    G.textTagTableAdd table tag
+    G.textViewSetBuffer view buf
+    modifyIORef ref (\sv -> sv { svSourceView = view
+                               , svSourceBuf  = buf
+                               , svSourceTag  = tag})
     return $ G.toWidget view
 
 
@@ -608,17 +626,16 @@ sourceWindowDisable _ = return ()
 sourceSetPos :: SourceView c a -> Pos -> IO ()
 sourceSetPos sv (from, to) = do
     let fname = sourceName from
+        buf   = svSourceBuf sv
     do src <- readFile fname
-       buf <- G.textBufferNew Nothing
        G.textBufferSetText buf src
-       G.textViewSetBuffer (svSourceView sv) buf
        istart <- G.textBufferGetStartIter buf
        iend <- G.textBufferGetEndIter buf
        ifrom <- G.textBufferGetIterAtLineOffset buf (sourceLine from - 1) (sourceColumn from - 1)
        ito <- G.textBufferGetIterAtLineOffset buf (sourceLine to - 1) (sourceColumn to - 1)
        G.textBufferRemoveTag buf (svSourceTag sv) istart iend
        G.textBufferApplyTag buf (svSourceTag sv) ifrom ito
-       _ <- G.textViewScrollToIter (svSourceView sv) ifrom 0.5 Nothing
+       _ <- G.textViewScrollToIter (svSourceView sv) ifrom 0.4 Nothing
        return ()
     `catchIOError` (\_ -> return ())
 
@@ -921,15 +938,19 @@ updateDisplays ref = do
 -- Reset all components
 reset :: RSourceView c a -> IO ()
 reset ref = do
-    -- initialise stack and trace
-???    let tr = [TraceEntry { teStack = []
-???                         , teStore = storeUnion (fromJust $ D.sConcrete $ svState sv) (svTmp sv)}]
+    -- processSelectorUpdate expects initialised store
+    sv0 <- readIORef ref
+    let store = storeUnion (fromJust $ D.sConcrete $ svState sv0) (svTmp sv0)
+        tr = [TraceEntry { teStack = error "teStack is undefined"
+                         , teStore = store }] 
+    writeIORef ref (sv0 {svTrace = tr, svTracePos = 0, svStackFrame = 0})
     processSelectorUpdate ref
-    sv <- readIORef ref
-    -- initialise stack and trace
-    let tr = [TraceEntry { teStack = stackFromStore sv (fromJust $ D.sConcrete $ svState sv) (svPID sv)
-                         , teStore = storeUnion (fromJust $ D.sConcrete $ svState sv) (svTmp sv)}]
-    writeIORef ref sv{svTrace = tr, svTracePos = 0, svStackFrame = 0}
+    
+    sv1 <- readIORef ref
+    -- initialise trace
+    let tr = [TraceEntry { teStack = stackFromStore sv1 (fromJust $ D.sConcrete $ svState sv1) (svPID sv1)
+                         , teStore = store}]
+    writeIORef ref sv1{svTrace = tr, svTracePos = 0, svStackFrame = 0}
     updateDisplays ref
 
 -- Disable all controls
