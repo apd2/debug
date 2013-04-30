@@ -288,6 +288,7 @@ type RTabbedPanels = IORef TabbedPanels
 tabbedPanelsNew :: IO IDEPanels
 tabbedPanelsNew = do
     nb <- G.notebookNew
+    G.notebookSetScrollable nb True
     G.widgetShow nb
     ref <- newIORef $ TabbedPanels { tpNotebook    = nb
                                    , tpNumChildren = 0

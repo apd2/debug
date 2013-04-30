@@ -598,6 +598,7 @@ sourceWindowCreate :: RSourceView c a -> IO G.Widget
 sourceWindowCreate ref = do
     view <- G.textViewNew
     G.widgetShow view
+    G.textViewSetEditable view False
     tag <- G.textTagNew Nothing
     G.set tag [G.textTagBackground G.:= "grey"]
     buf <- G.textBufferNew Nothing
@@ -783,6 +784,7 @@ actionSelectorCreate ref = do
     G.boxPackStart vbox tview G.PackGrow 0
 
     bbox <- G.hButtonBoxNew
+    G.buttonBoxSetLayout bbox G.ButtonboxStart
     G.widgetShow bbox
     G.boxPackStart vbox bbox G.PackNatural 0
 
