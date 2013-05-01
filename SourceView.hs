@@ -195,6 +195,10 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
     G.containerAdd selitem sel
     G.toolbarInsert tbar selitem (-1)
 
+    sep1 <- G.separatorToolItemNew
+    G.widgetShow sep1
+    G.toolbarInsert tbar sep1 (-1)
+
     -- command buttons
     butstep <- G.toolButtonNewFromStock G.stockGoForward
     _ <- G.onToolButtonClicked butstep (do {_ <- step ref; return ()})
@@ -208,6 +212,10 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
     modifyIORef ref (\sv -> sv { svRunButton  = butrun
                                , svStepButton = butstep
                                })
+
+    sep2 <- G.separatorToolItemNew
+    G.widgetShow sep2
+    G.toolbarInsert tbar sep2 (-1)
 
     -- trace
     tr <- traceViewCreate ref
@@ -346,13 +354,13 @@ processSelectorChanged ref = do
            (pid, _) <- G.treeStoreGetValue (svProcessStore sv) path
            putStrLn $ "setting PID to " ++ show pid
            modifyIORef ref (\_sv -> _sv{svPID = pid})
+           --cfaShow (specGetCFA (svSpec sv) pid Nothing) (pidToName pid)
            reset ref
 
 processSelectorInit :: RSourceView c a -> IO ()
 processSelectorInit ref = do
     sv <- readIORef ref
     let store = svProcessStore sv
-        combo = svProcessCombo sv
         pidtree = map (procTree []) (specProc $ svSpec sv)
                   where procTree parpid p = Node { rootLabel = (pid, False)
                                                  , subForest = map (procTree pid) (procChildren p)}
@@ -425,6 +433,15 @@ stackViewDisable ref = do
     G.listStoreClear $ svStackStore sv
 
 -- Trace --
+
+-- indices of visible states in the trace
+svTraceVisible :: SourceView c a -> [Int]
+svTraceVisible sv = 
+    filter (\i -> case locAct (getLocLabel sv i) of
+                       ActNone -> False
+                       _       -> True)
+    $ [0..length (svTrace sv) - 1]
+
 traceViewCreate :: RSourceView c a -> IO G.Widget
 traceViewCreate ref = do
     hbox <- G.hBoxNew False 0
@@ -434,13 +451,15 @@ traceViewCreate ref = do
     undo <- G.toolButtonNewFromStock G.stockUndo
     G.widgetShow undo
     G.boxPackStart hbox undo G.PackNatural 0
-    _ <- G.onToolButtonClicked undo (do modifyIORef ref (\sv -> traceSetPos sv (svTracePos sv - 1))
+    _ <- G.onToolButtonClicked undo (do modifyIORef ref (\sv -> traceSetPos sv $ last $ filter (< svTracePos sv) $ svTraceVisible sv)
                                         updateDisplays ref)
 
     -- trace
     combo <- G.comboBoxNew
     G.widgetShow combo
+    G.boxPackStart hbox combo G.PackNatural 0
     store <- G.listStoreNew []
+    G.comboBoxSetModel combo (Just store)    
     rend <- G.cellRendererTextNew
     G.cellLayoutPackStart combo rend True
     G.cellLayoutSetAttributeFunc combo rend store $ 
@@ -459,7 +478,7 @@ traceViewCreate ref = do
     redo <- G.toolButtonNewFromStock G.stockRedo
     G.widgetShow redo
     G.boxPackStart hbox redo G.PackNatural 0
-    _ <- G.onToolButtonClicked redo (do modifyIORef ref (\sv -> traceSetPos sv (svTracePos sv + 1))
+    _ <- G.onToolButtonClicked redo (do modifyIORef ref (\sv -> traceSetPos sv $ head $ filter (> svTracePos sv) $ svTraceVisible sv)
                                         updateDisplays ref)
 
     modifyIORef ref $ (\sv -> sv { svTraceStore = store
@@ -476,8 +495,9 @@ tracePosChanged ref = do
     when (isJust miter) $ 
         do let storeidx = G.listStoreIterToIndex $ fromJust miter
            p <- G.listStoreGetValue (svTraceStore sv) storeidx
-           modifyIORef ref (\_sv -> traceSetPos _sv p)
-           updateDisplays ref
+           -- only call updateDisplays if this is not a recursive call from updateDisplays
+           when (p /= svTracePos sv) $ do writeIORef ref (traceSetPos sv p)
+                                          updateDisplays ref
 
 
 traceViewDisable :: RSourceView c a -> IO ()
@@ -491,13 +511,10 @@ traceViewDisable ref = do
 traceViewUpdate :: RSourceView c a -> IO ()
 traceViewUpdate ref = do
     sv <- readIORef ref
+    putStrLn $ "traceViewUpdate:\n" ++ (showTrace $ svTrace sv)
     -- update store
     G.listStoreClear $ svTraceStore sv
-    _ <- mapM (G.listStoreAppend (svTraceStore sv) . snd) 
-         $ filter (\(_,i) -> case locAct $ getLocLabel sv i of
-                                  ActNone -> False
-                                  _       -> True)
-         $ zip (svTrace sv) [0..]
+    _ <- mapM (G.listStoreAppend (svTraceStore sv)) $ svTraceVisible sv
 
     -- set selection
     items <- G.listStoreToList (svTraceStore sv)
@@ -508,6 +525,7 @@ traceViewUpdate ref = do
     -- enable/disable buttons
     G.widgetSetSensitive (svTraceUndo sv) (svTracePos sv /= 0)
     G.widgetSetSensitive (svTraceRedo sv) (svTracePos sv /= length (svTrace sv) - 1)
+    G.widgetSetSensitive (svTraceCombo sv) True
 
 
 traceAppend :: SourceView c a -> Store -> Stack -> SourceView c a
