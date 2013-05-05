@@ -354,7 +354,7 @@ processSelectorChanged ref = do
            (pid, _) <- G.treeStoreGetValue (svProcessStore sv) path
            putStrLn $ "setting PID to " ++ show pid
            modifyIORef ref (\_sv -> _sv{svPID = pid})
-           --cfaShow (specGetCFA (svSpec sv) pid Nothing) (pidToName pid)
+           cfaShow (specGetCFA (svSpec sv) pid Nothing) (pidToName pid)
            reset ref
 
 processSelectorInit :: RSourceView c a -> IO ()
@@ -691,6 +691,7 @@ resolveViewCreate ref = do
     view <- G.treeViewNew
     G.widgetShow view
     store <- G.treeStoreNew []
+    G.treeViewSetModel view store
 
     -- Variable name column
     namecol <- G.treeViewColumnNew
@@ -874,6 +875,17 @@ actionSelectorEnable ref = do
 --------------------------------------------------------------
 -- Private helpers
 --------------------------------------------------------------
+
+-- Assign all unassigned state variables to their default values
+storeExtendDefault :: (?spec::Spec) => Store -> Store
+storeExtendDefault store = foldl' (\st v -> let evar = EVar $ varName v in
+                                            foldl' extendScalar st (exprScalars evar (typ evar)))
+                                  store (specVar ?spec)
+
+extendScalar :: (?spec::Spec) => Store -> Expr -> Store
+extendScalar store e = case storeTryEval store e of
+                            Nothing -> storeSet store e (Just $ SVal $ valDefault e)
+                            _       -> store
 
 isWaitForMagicLabel :: LocLabel -> Bool
 isWaitForMagicLabel (LPause _ _ e) = isWaitForMagic e
