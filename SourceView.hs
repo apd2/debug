@@ -719,29 +719,41 @@ resolveViewCreate ref = do
                      e    <- G.treeStoreGetValue store path
                      G.set textrend [ G.cellVisible      G.:= isTypeInt e
                                     , G.cellTextEditable G.:= True
-                                    , G.cellText         G.:= show $ storeEval (currentStore sv) e])
+                                    , G.cellText         G.:= case storeTryEval (currentStore sv) e of
+                                                                   Nothing -> "*"
+                                                                   Just v  -> show v])
     _ <- G.on textrend G.edited (textAsnChanged ref)
 
     combrend <- G.cellRendererComboNew
     G.cellLayoutPackStart valcol combrend True
     G.cellLayoutSetAttributeFunc valcol combrend store $ 
-        (\iter -> do sv     <- readIORef ref
-                     path   <- G.treeModelGetPath store iter
-                     e      <- G.treeStoreGetValue store path
-                     tmodel <- comboTextModel $ typ e
+        (\iter -> do sv              <- readIORef ref
+                     path            <- G.treeModelGetPath store iter
+                     e               <- G.treeStoreGetValue store path
+                     (tmodel, colid) <- comboTextModel $ typ e
                      G.set combrend [ G.cellVisible        G.:= isTypeScalar e && not (isTypeInt e)
-                                    , G.cellComboTextModel G.:= (tmodel, G.makeColumnIdString 0)
+                                    , G.cellComboTextModel G.:= (tmodel, colid)
                                     , G.cellTextEditable   G.:= True
-                                    , G.cellText           G.:= show $ storeEval (currentStore sv) e])
+                                    , G.cellComboHasEntry  G.:= False
+                                    , G.cellText           G.:= case storeTryEval (currentStore sv) e of
+                                                                     Nothing -> "*"
+                                                                     Just v  -> show v])
     _ <- G.on combrend G.edited (textAsnChanged ref) 
 
     _ <- G.treeViewAppendColumn view valcol
     modifyIORef ref (\sv -> sv {svResolveStore = store})
     return $ G.toWidget view
 
-comboTextModel :: (?spec::Spec) => Type -> IO (G.ListStore String)
-comboTextModel Bool     = G.listStoreNew ["*", "True", "False"]
-comboTextModel (Enum n) = G.listStoreNew ("*": (enumEnums $ getEnumeration n))
+comboTextModel :: (?spec::Spec) => Type -> IO (G.ListStore String, G.ColumnId String String)
+comboTextModel Bool     = do store <- G.listStoreNew ["*", "true", "false"]
+                             let column = G.makeColumnIdString 0
+                             G.customStoreSetColumn store column id
+                             return (store, column)
+
+comboTextModel (Enum n) = do store <- G.listStoreNew ("*": (enumEnums $ getEnumeration n))
+                             let column = G.makeColumnIdString 0
+                             G.customStoreSetColumn store column id
+                             return (store, column)
 
 textAsnChanged :: RSourceView c a -> G.TreePath -> String -> IO ()
 textAsnChanged ref path valstr = do
