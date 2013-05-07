@@ -144,7 +144,7 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
     initstore <- case smtGetModel solver [let ?pred = [] in bexprToFormula $ snd $ tsInit $ specTran spec] of
                       Just (Right store) -> return store                      
                       _                  -> fail "Unsatisfiable initial condition"
-    D.modelSelectState rmodel (Just $ D.abstractState initstore)
+    D.modelSelectState rmodel (Just $ D.abstractState $ storeExtendDefault initstore)
     -- END HACK
 
     ref <- newIORef $ SourceView { svModel          = rmodel
@@ -666,11 +666,21 @@ commandButtonsUpdate ref = do
     sv <- readIORef ref
     -- enable step and run buttons if we are not at a pause location or
     -- if we are in a pause location and the wait condition is true
+    let ?spec = svSpec sv
     let lab = currentLocLabel sv
-        en = case lab of
+        en = -- current process must be enabled and ...
+             case lab of
                   LInst _      -> True
                   LPause _ _ c -> storeEvalBool (currentStore sv) c == True
                   LFinal _ _   -> True
+             && 
+             -- ... non-determinism must be resolved
+             -- (all scalar tmp variables that affect the next transition must be assigned)
+             (all isJust           
+              $ map (storeTryEval (currentStore sv))
+              $ filter isTypeScalar
+              $ concatMap flatten 
+              $ currentTmpExprTree sv)
     G.widgetSetSensitive (svStepButton sv) en
     G.widgetSetSensitive (svRunButton sv) en
 
@@ -767,31 +777,13 @@ textAsnChanged ref path valstr = do
                                       return Nothing
                         Right v -> return $ Just $ SVal v
     writeIORef ref $ modifyCurrentStore sv (\store -> storeSet store e val)
-    resolveViewUpdate ref
+    updateDisplays ref
 
 resolveViewUpdate :: RSourceView c a -> IO ()
 resolveViewUpdate ref = do
     sv <- readIORef ref
-    let ?spec = svSpec sv
-    let -- collect tmp variables from all transitions from the current location
-        trans = map snd $ Graph.lsuc (currentCFA sv) (currentLoc sv)
-        exprs = map (mkTree . EVar . varName)
-                $ filter ((== VarTmp) . varCat)
-                $ nub        
-                $ concatMap (\t -> case t of
-                                        TranStat (SAssume e)   -> exprVars e
-                                        TranStat (SAssign _ e) -> exprVars e
-                                        _                      -> []) 
-                $ trans
-        -- expand expression into a tree of scalars
-        mkTree e = Node { rootLabel = e
-                        , subForest = map mkTree 
-                                      $ case typ e of
-                                             Struct fs  -> map (\(Field n _) -> EField e n) fs
-                                             Array _ sz -> map (EIndex e . EConst . UIntVal 32 . fromIntegral) [0..sz-1]
-                                             _            -> []
-                          }
-    let store = svResolveStore sv
+    let exprs = currentTmpExprTree sv
+        store = svResolveStore sv
     G.treeStoreClear store
     G.treeStoreInsertForest store [] 0 exprs
 
@@ -1038,6 +1030,9 @@ modifyCurrentStore sv f = modifyStore sv (svTracePos sv) f
 currentStack :: SourceView c a -> Stack
 currentStack sv = getStack sv (svTracePos sv)
 
+currentTmpExprTree :: SourceView c a -> Forest Expr
+currentTmpExprTree sv = getTmpExprTree sv (svTracePos sv)
+
 currentControllable :: SourceView c a -> Bool
 currentControllable sv = storeEvalBool (currentStore sv) (EVar mkContVarName)
 
@@ -1069,6 +1064,29 @@ getStore sv p = teStore $ svTrace sv !! p
 getStack :: SourceView c a -> Int -> Stack
 getStack sv p = teStack $ svTrace sv !! p
 
+getTmpExprTree :: SourceView c a -> Int -> Forest Expr
+getTmpExprTree sv p =
+    let ?spec = svSpec sv in
+    let -- collect tmp variables from all transitions from the current location
+        trans = map snd $ Graph.lsuc (getCFA sv p) (getLoc sv p)
+        -- expand expression into a tree of scalars
+        mkTree e = Node { rootLabel = e
+                        , subForest = map mkTree 
+                                      $ case typ e of
+                                             Struct fs  -> map (\(Field n _) -> EField e n) fs
+                                             Array _ sz -> map (EIndex e . EConst . UIntVal 32 . fromIntegral) [0..sz-1]
+                                             _          -> []
+                          }
+    in map (mkTree . EVar . varName)
+       $ filter ((== VarTmp) . varCat)
+       $ nub        
+       $ concatMap (\t -> case t of
+                               TranStat (SAssume e)   -> exprVars e
+                               TranStat (SAssign _ e) -> exprVars e
+                               _                      -> []) 
+       $ trans
+
+
 -- Execute one CFA transition
 -- Returns True if the step was performed successfully and
 -- False otherwise (i.e., the user did not provide values
@@ -1091,8 +1109,11 @@ microstep' sv (to, TranNop)                = Just (currentStore sv, (head $ curr
 microstep' sv (to, TranStat (SAssume e))   = if storeEvalBool (currentStore sv) e == True
                                                 then Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
                                                 else Nothing
-microstep' sv (to, TranStat (SAssign l r)) = Just (store', (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
-                                             where store' = storeSet (currentStore sv) l (storeTryEval (currentStore sv) r)
+microstep' sv (to, TranStat (SAssign l r)) = let rval = storeTryEval (currentStore sv) r
+                                                 store' = storeSet (currentStore sv) l rval
+                                             in case rval of 
+                                                     Nothing -> Nothing
+                                                     _       -> Just (store', (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
 
 -- Actions taken upon reaching a delay location
 completeTransition :: (D.Rel c v a s) => RSourceView c a -> IO ()
