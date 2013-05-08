@@ -32,6 +32,7 @@ labelStyle          =   GC {gcFG = (0, 0, 0),             gcLW=0, gcLS=True}
 transitionStyle     =   GC {gcFG = (0, 40000, 0),         gcLW=2, gcLS=True}
 subsetStyle         =   GC {gcFG = (40000, 40000, 40000), gcLW=1, gcLS=True}
 overlapStyle        =   GC {gcFG = (40000, 40000, 40000), gcLW=2, gcLS=False}
+eqStyle             =   GC {gcFG = (40000, 40000, 40000), gcLW=2, gcLS=True}
 
 controllableStyle   = ( GC {gcFG = (0    ,     0, 40000), gcLW=2, gcLS=True}
                       , GC {gcFG = (0    , 65535, 0),     gcLW=0, gcLS=False})
@@ -47,6 +48,7 @@ bothStyle           = ( GC {gcFG = (0    ,     0, 40000), gcLW=2, gcLS=True}
 data Edge a b = EdgeTransition {eId :: Int, eTran :: D.Transition a b}
               | EdgeSubset     {eId :: Int}
               | EdgeOverlap    {eId :: Int}
+              | EdgeEq         {eId :: Int}
 
 type TrGraph a b = G.Gr (D.State a b) (Edge a b)
 
@@ -202,13 +204,15 @@ createState gv coords s = do
     let rel = D.sAbstract s
         sid = (snd $ G.nodeRange (gvGraph gv)) + 1
         gv' = gv {gvGraph = G.insNode (sid, s) (gvGraph gv)}
-        (subsets, other1)   = partition ((.== t) . (.-> rel) . D.sAbstract . getState gv) (G.nodes $ gvGraph gv)
+        (eqsets, other0)    = partition ((.== rel)           . D.sAbstract . getState gv) (G.nodes $ gvGraph gv)
+        (subsets, other1)   = partition ((.== t) . (.-> rel) . D.sAbstract . getState gv) other0
         (supersets, other2) = partition ((.== t) . (rel .->) . D.sAbstract . getState gv) other1
         overlaps            = filter    ((./= b) . (.& rel)  . D.sAbstract . getState gv) other2
     (ls, as) <- stateStyle gv' sid
     annots <- stateAnnots gv' rel
     graphDrawInsertNode (gvGraphDraw gv') sid annots coords (ls, as)
-    gv1 <- foldM (\_gv sid' -> (liftM snd) $ createSubsetEdge  _gv sid' sid) gv' subsets
+    gv0 <- foldM (\_gv sid' -> (liftM snd) $ createEqEdge      _gv sid  sid') gv' eqsets
+    gv1 <- foldM (\_gv sid' -> (liftM snd) $ createSubsetEdge  _gv sid' sid)  gv0 subsets
     gv2 <- foldM (\_gv sid' -> (liftM snd) $ createSubsetEdge  _gv sid  sid') gv1 supersets
     gv3 <- foldM (\_gv sid' -> (liftM snd) $ createOverlapEdge _gv sid  sid') gv2 overlaps
     return (sid, gv3)
@@ -221,6 +225,10 @@ createTransition gv fromid toid tran = do
 createSubsetEdge :: GraphView c a b -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b)
 createSubsetEdge gv fromid toid = 
     createEdge gv fromid toid EdgeSubset [] subsetStyle EndDiamond True
+
+createEqEdge :: GraphView c a b -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b)
+createEqEdge gv fromid toid = 
+    createEdge gv fromid toid EdgeEq [] eqStyle EndNone True
 
 createOverlapEdge :: GraphView c a b -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b)
 createOverlapEdge gv fromid toid = 

@@ -271,7 +271,7 @@ sourceViewStateSelected :: (D.Rel c v a s) => RSourceView c a -> Maybe (D.State 
 sourceViewStateSelected ref Nothing                              = disable ref
 sourceViewStateSelected ref (Just s) | isNothing (D.sConcrete s) = disable ref
                                      | otherwise                 = do
-    putStrLn "sourceViewStateSelected"
+    putStrLn $ "sourceViewStateSelected: store: " ++ (show $ D.sConcrete s)
     modifyIORef ref (\sv -> sv { svState   = s
                                , svTmp     = SStruct $ M.empty
                                , svTranPID = Nothing})
@@ -299,14 +299,14 @@ step ref = do
     ok <- microstep ref
     if ok
        then do -- did we reach the next statement?
-               action <- getIORef (locAct . currentLocLabel) ref
-               case action of
-                    ActNone -> step ref
-                    _       -> do -- if we reached a pause statement, update PC and PID variables
-                                  lab <- getIORef currentLocLabel ref
-                                  when (isDelayLabel lab) $ completeTransition ref
-                                  updateDisplays ref
-                                  return True 
+               lab <- getIORef currentLocLabel ref
+               let action = locAct lab
+               if (isActNone action) && (not $ isDelayLabel lab)
+                  then step ref
+                  else do -- if we reached a pause statement, update PC and PID variables
+                          when (isDelayLabel lab) $ completeTransition ref
+                          updateDisplays ref
+                          return True 
        else do -- rollback changes
                writeIORef ref backup
                updateDisplays ref
@@ -635,12 +635,20 @@ sourceWindowUpdate ref = do
     let cfa = cfaAtFrame sv (svStackFrame sv)
         loc = fLoc $ (currentStack sv) !! (svStackFrame sv)
     case locAct $ cfaLocLabel loc cfa of
-         ActNone   -> return ()
+         ActNone   -> sourceClearPos sv
          ActExpr e -> sourceSetPos sv $ pos e
          ActStat s -> sourceSetPos sv $ pos s
 
 sourceWindowDisable :: RSourceView c a -> IO ()
 sourceWindowDisable _ = return ()
+
+sourceClearPos :: SourceView c a -> IO ()
+sourceClearPos sv = do
+    let buf   = svSourceBuf sv
+    do istart <- G.textBufferGetStartIter buf
+       iend <- G.textBufferGetEndIter buf
+       G.textBufferRemoveTag buf (svSourceTag sv) istart iend
+    `catchIOError` (\_ -> return ())
 
 sourceSetPos :: SourceView c a -> Pos -> IO ()
 sourceSetPos sv (from, to) = do
@@ -672,7 +680,7 @@ commandButtonsUpdate ref = do
              case lab of
                   LInst _      -> True
                   LPause _ _ c -> storeEvalBool (currentStore sv) c == True
-                  LFinal _ _   -> True
+                  LFinal _ _   -> not $ null $ Graph.lsuc (currentCFA sv) (currentLoc sv)
              && 
              -- ... non-determinism must be resolved
              -- (all scalar tmp variables that affect the next transition must be assigned)
@@ -944,8 +952,9 @@ isProcEnabled sv pid =
     let store = fromJust $ D.sConcrete $ svState sv
         stack = stackFromStore sv store pid
         frame = head stack
+        loc   = fLoc frame
         cfa   = stackGetCFA sv pid stack
-        lab   = cfaLocLabel (fLoc frame) cfa
+        lab   = cfaLocLabel loc cfa
     in case svTranPID sv of
             Just pid' -> pid' == pid
             _         -> -- In a controllable state, the process is enabled if it is
@@ -958,6 +967,7 @@ isProcEnabled sv pid =
                                       _               -> False
                             else case lab of
                                       LPause _ _ cond -> storeEvalBool store cond == True
+                                      LFinal _ _      -> not $ null $ Graph.lsuc cfa loc
                                       _               -> True
 
 -- update all displays
