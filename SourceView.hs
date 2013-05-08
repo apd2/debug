@@ -556,11 +556,13 @@ watchCreate ref = do
         (\iter -> do let idx = G.listStoreIterToIndex iter
                      mexp <- G.listStoreGetValue store idx
                      G.set exprend [ G.cellTextEditable G.:= True
+                                   , G.cellSensitive    G.:= True
                                    , G.cellTextMarkup   G.:= Just 
                                                              $ case mexp of 
                                                                     Nothing -> "<i>Add watch</i>"
                                                                     Just e  -> e])
-    _ <- G.on exprend G.edited (\_ _ -> watchUpdate ref)
+    _ <- G.on exprend G.edited (watchChanged ref)
+    _ <- G.on exprend G.editingStarted (watchEditingStarted ref)
     _ <- G.treeViewAppendColumn view namecol
 
     valcol <- G.treeViewColumnNew
@@ -577,17 +579,39 @@ watchCreate ref = do
                                                                  Nothing  -> ""
                                                                  Just e -> case storeEvalStr svInputSpec svFlatSpec  
                                                                                              (currentStore sv) svPID (fScope $ currentStack sv !! svStackFrame) e of
-                                                                                  Left er -> er
-                                                                                  Right v -> show v])
+                                                                                Left er -> er
+                                                                                Right v -> show v])
     _ <- G.treeViewAppendColumn view valcol
 
     _ <- G.on view G.keyPressEvent (do key <- G.eventKeyVal
                                        when (key == G.keyFromName "Delete") $ liftIO $ watchDelete ref
+                                       when (isJust $ G.keyToChar key)      $ liftIO $ (do (path, _) <- G.treeViewGetCursor view
+                                                                                           G.treeViewSetCursor view path (Just $ (namecol, True)))
                                        return True)
     modifyIORef ref (\sv -> sv{svWatchView = view, svWatchStore = store})
 
     G.treeViewSetModel view store
     return $ G.toWidget view
+
+watchEditingStarted :: RSourceView c a ->  G.Widget -> G.TreePath -> IO ()
+watchEditingStarted ref w path = do
+    let entry = G.castToEntry w
+    store <- getIORef svWatchStore ref
+    val <- G.listStoreGetValue store (head path)
+    when (isNothing val) $ G.entrySetText entry ""
+
+watchChanged :: RSourceView c a -> G.TreePath -> String -> IO ()
+watchChanged ref path val = do
+    store <- getIORef svWatchStore ref
+    G.listStoreSetValue store (head path) (Just val)
+    watchUpdate ref 
+
+--watchStartEdit :: RSourceView c a -> IO ()
+--watchStartEdit ref = do
+--    sv <- readIORef ref
+--    (idx:_, _) <- G.treeViewGetCursor (svWatchView sv)
+--    G.listStoreRemove (svWatchStore sv) idx
+--    watchUpdate ref
 
 watchDelete :: RSourceView c a -> IO ()
 watchDelete ref = do
