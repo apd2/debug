@@ -3,6 +3,7 @@ module IDE(RIDE,
            IDEPanel(..),
            IDEPanels(..),
            panelsAppend,
+           panelCBNull,
            ideNew,
            ideWidget,
            ideAddLeft,
@@ -68,7 +69,7 @@ panelsPrepend :: IDEPanels -> G.Widget -> String -> IO ()
 panelsPrepend panels w n = (panelsInsert panels) (-1) w n
 
 ---------------------------------------------------------------
--- Implementation of IDEPanel base on GTK frame
+-- Implementation of IDEPanel based on GTK frame
 ---------------------------------------------------------------
 
 data FramePanel = FramePanel {

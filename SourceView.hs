@@ -201,11 +201,13 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
 
     -- command buttons
     butstep <- G.toolButtonNewFromStock G.stockGoForward
+    G.set butstep [G.widgetTooltipText G.:= Just "step"]
     _ <- G.onToolButtonClicked butstep (do {_ <- step ref; return ()})
     G.widgetShow butstep
     G.toolbarInsert tbar butstep (-1)
 
-    butrun <- G.toolButtonNewFromStock G.stockMediaPlay
+    butrun <- G.toolButtonNewFromStock G.stockGotoLast
+    G.set butrun [G.widgetTooltipText G.:= Just "run"]
     _ <- G.onToolButtonClicked butrun (run ref)
     G.widgetShow butrun
     G.toolbarInsert tbar butrun (-1)
@@ -394,11 +396,11 @@ processSelectorDisable ref = do
 stackViewCreate :: RSourceView c a -> IO G.Widget
 stackViewCreate ref = do
     view <- G.treeViewNew
+    G.treeViewSetHeadersVisible view False
     G.widgetShow view
     store <- G.listStoreNew []
 
     col <- G.treeViewColumnNew
-    G.treeViewColumnSetTitle col "Stack"
 
     rend <- G.cellRendererTextNew
     G.cellLayoutPackStart col rend True
@@ -411,7 +413,8 @@ stackViewCreate ref = do
     modifyIORef ref (\sv -> sv{svStackView = view, svStackStore = store, svStackFrame = 0})
     G.treeViewSetModel view store
     _ <- G.on view G.rowActivated (stackViewFrameSelected ref)
-    return $ G.toWidget view
+    panel <- D.framePanelNew (G.toWidget view) "Stack" (return ())
+    D.panelGetWidget panel
 
 stackViewFrameSelected :: RSourceView c a -> G.TreePath -> G.TreeViewColumn -> IO ()
 stackViewFrameSelected ref (idx:_) _ = do
@@ -591,7 +594,8 @@ watchCreate ref = do
     modifyIORef ref (\sv -> sv{svWatchView = view, svWatchStore = store})
 
     G.treeViewSetModel view store
-    return $ G.toWidget view
+    panel <- D.framePanelNew (G.toWidget view) "Watch" (return ())
+    D.panelGetWidget panel
 
 watchEditingStarted :: RSourceView c a ->  G.Widget -> G.TreePath -> IO ()
 watchEditingStarted ref w path = do
@@ -605,13 +609,6 @@ watchChanged ref path val = do
     store <- getIORef svWatchStore ref
     G.listStoreSetValue store (head path) (Just val)
     watchUpdate ref 
-
---watchStartEdit :: RSourceView c a -> IO ()
---watchStartEdit ref = do
---    sv <- readIORef ref
---    (idx:_, _) <- G.treeViewGetCursor (svWatchView sv)
---    G.listStoreRemove (svWatchStore sv) idx
---    watchUpdate ref
 
 watchDelete :: RSourceView c a -> IO ()
 watchDelete ref = do
@@ -784,7 +781,8 @@ resolveViewCreate ref = do
 
     _ <- G.treeViewAppendColumn view valcol
     modifyIORef ref (\sv -> sv {svResolveStore = store})
-    return $ G.toWidget view
+    panel <- D.framePanelNew (G.toWidget view) "Resolve non-determinism" (return ())
+    D.panelGetWidget panel
 
 comboTextModel :: (?spec::Spec) => Type -> IO (G.ListStore String, G.ColumnId String String)
 comboTextModel Bool     = do store <- G.listStoreNew ["*", "true", "false"]
@@ -859,7 +857,8 @@ actionSelectorCreate ref = do
                                , svActSelectBExit = bexit
                                , svActSelectBAdd  = badd})
     actionSelectorDisable ref
-    return $ G.toWidget vbox
+    panel <- D.framePanelNew (G.toWidget vbox) "Controllable action" (return ())
+    D.panelGetWidget panel
 
 actionSelectorRun :: RSourceView c a -> IO ()
 actionSelectorRun ref = do
