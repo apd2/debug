@@ -797,6 +797,9 @@ comboTextModel (Enum n) = do store <- G.listStoreNew ("*": (enumEnums $ getEnume
                              let column = G.makeColumnIdString 0
                              G.customStoreSetColumn store column id
                              return (store, column)
+comboTextModel t        = do store <- G.listStoreNew []
+                             let column = G.makeColumnIdString 0
+                             return (store, column)
 
 textAsnChanged :: RSourceView c a -> G.TreePath -> String -> IO ()
 textAsnChanged ref path valstr = do
