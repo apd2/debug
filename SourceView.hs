@@ -356,7 +356,7 @@ processSelectorChanged ref = do
            (pid, _) <- G.treeStoreGetValue (svProcessStore sv) path
            putStrLn $ "setting PID to " ++ show pid
            modifyIORef ref (\_sv -> _sv{svPID = pid})
-           cfaShow (specGetCFA (svSpec sv) pid Nothing) (pidToName pid)
+           --cfaShow (specGetCFA (svSpec sv) pid Nothing) (pidToName pid)
            reset ref
 
 processSelectorInit :: RSourceView c a -> IO ()
@@ -673,6 +673,7 @@ sourceClearPos sv = do
 
 sourceSetPos :: SourceView c a -> Pos -> IO ()
 sourceSetPos sv (from, to) = do
+    putStrLn $ "sourceSetPos " ++ show (from, to)
     let fname = sourceName from
         buf   = svSourceBuf sv
     do src <- readFile fname
@@ -683,7 +684,9 @@ sourceSetPos sv (from, to) = do
        ito <- G.textBufferGetIterAtLineOffset buf (sourceLine to - 1) (sourceColumn to - 1)
        G.textBufferRemoveTag buf (svSourceTag sv) istart iend
        G.textBufferApplyTag buf (svSourceTag sv) ifrom ito
-       _ <- G.textViewScrollToIter (svSourceView sv) ifrom 0.4 Nothing
+       mark <- G.textMarkNew Nothing True
+       G.textBufferAddMark buf mark ifrom
+       _ <- G.textViewScrollToMark (svSourceView sv) mark 0.4 Nothing
        return ()
     `catchIOError` (\_ -> return ())
 
