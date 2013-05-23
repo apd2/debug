@@ -135,17 +135,6 @@ type RSourceView c a = IORef (SourceView c a)
 sourceViewNew :: (D.Rel c v a s) => Front.Spec -> Front.Spec -> Spec -> [AbsVar] -> SMTSolver -> D.RModel c a Store -> IO (D.View a Store)
 sourceViewNew inspec flatspec spec avars solver rmodel = do
     let absvars = M.fromList $ map (\v -> (show v, v)) avars
-    -- HACK: create an initial state
-    model <- readIORef rmodel
-    let ?spec    = spec
-        ?absvars = absvars
-        ?model   = model
-        ?m       = D.mCtx model
-    initstore <- case smtGetModel solver [let ?pred = [] in bexprToFormula $ snd $ tsInit $ specTran spec] of
-                      Just (Right store) -> return store                      
-                      _                  -> fail "Unsatisfiable initial condition"
-    D.modelSelectState rmodel (Just $ D.abstractState $ storeExtendDefault initstore)
-    -- END HACK
 
     ref <- newIORef $ SourceView { svModel          = rmodel
                                  , svInputSpec      = inspec
@@ -259,6 +248,30 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
 
     -- disable everything until we get a state to start from
     disable ref
+
+    -- HACK: create an initial state
+    model <- readIORef rmodel
+    let ?spec    = spec
+        ?absvars = absvars
+        ?model   = model
+        ?m       = D.mCtx model
+    initstore <- liftM storeExtendDefault
+                 $ case smtGetModel solver [let ?pred = [] in bexprToFormula $ snd $ tsInit $ specTran spec] of
+                        Just (Right store) -> return store                      
+                        _                  -> fail "Unsatisfiable initial condition"
+    -- more hack: simulate init transition
+    modifyIORef ref (\sv -> sv { svState      = D.abstractState initstore
+                               , svTmp        = SStruct $ M.empty
+                               , svPID        = ["$init"]
+                               , svTrace      = [TraceEntry { teStack = [FrameStatic (Front.ScopeTemplate (let ?spec = flatspec in tmMain)) (tranFrom $ fst $ tsInit $ specTran ?spec)]
+                                                            , teStore = initstore}]
+                               , svTracePos   = 0
+                               , svStackFrame = 0})
+
+    run ref
+    initstore' <- getIORef currentStore ref
+    --D.modelSelectState rmodel (Just $ D.abstractState initstore') 
+    -- END HACK
 
     return $ D.View { D.viewName      = "Source"
                     , D.viewDefAlign  = D.AlignCenter
@@ -376,15 +389,37 @@ processSelectorUpdate ref = do
     sv <- readIORef ref
     let store = svProcessStore sv
         combo = svProcessCombo sv
-    G.treeModelForeach store (\iter -> do sv'      <- readIORef ref
+    myTreeModelForeach store (\iter -> do sv'      <- readIORef ref
                                           path     <- G.treeModelGetPath store iter
+                                          putStrLn $ "treeModelForeach " ++ show path
                                           (pid, _) <- G.treeStoreGetValue store path
-                                          G.treeStoreSetValue store path (pid, isProcEnabled sv' pid)
-                                          return False)
+                                          let en = isProcEnabled sv' pid
+                                          G.treeStoreSetValue store path (pid, trace ("isProcEnabled " ++ show pid ++ "=" ++ show en) en))
     miter <- G.comboBoxGetActiveIter combo
     when (isNothing miter) $ do miter' <- G.treeModelGetIter store [0]
                                 G.comboBoxSetActiveIter combo (fromJust miter')
     G.widgetSetSensitive combo True
+
+-- GTK's treeModelForeach does not work if the 
+-- function modifies the store
+myTreeModelForeach :: G.TreeModelClass self => self -> (G.TreeIter -> IO ()) -> IO ()
+myTreeModelForeach m f = myTreeModelForeach' m Nothing f
+
+myTreeModelForeach' :: G.TreeModelClass self => self -> Maybe G.TreeIter -> (G.TreeIter -> IO ()) -> IO ()
+myTreeModelForeach' m miter f = do
+    nchildren <- G.treeModelIterNChildren m miter
+    putStrLn $ "myTreeModelForeach': " ++ show nchildren ++ " children"
+    path <- case miter of
+                  Nothing -> return []
+                  Just i  -> G.treeModelGetPath m i
+    _ <- mapM (\i -> do miter' <- G.treeModelGetIter m path
+                        child <- liftM fromJust $ G.treeModelIterNthChild m miter' i
+                        cpath <- G.treeModelGetPath m child
+                        f child
+                        mchild' <- G.treeModelGetIter m cpath
+                        myTreeModelForeach' m mchild' f) 
+         $ [0..nchildren - 1]
+    return ()
 
 
 processSelectorDisable :: RSourceView c a -> IO ()
@@ -792,7 +827,6 @@ comboTextModel Bool     = do store <- G.listStoreNew ["*", "true", "false"]
                              let column = G.makeColumnIdString 0
                              G.customStoreSetColumn store column id
                              return (store, column)
-
 comboTextModel (Enum n) = do store <- G.listStoreNew ("*": (enumEnums $ getEnumeration n))
                              let column = G.makeColumnIdString 0
                              G.customStoreSetColumn store column id
@@ -1084,6 +1118,8 @@ getCFA :: SourceView c a -> Int -> CFA
 getCFA sv p = stackGetCFA sv (svPID sv) (getStack sv p)
 
 stackGetCFA :: SourceView c a -> PID -> Stack -> CFA
+-- HACK
+stackGetCFA sv ["$init"] _                                                                                           = tranCFA $ fst $ tsInit $ specTran (svSpec sv)
 stackGetCFA sv pid ((FrameStatic (Front.ScopeMethod _ m) _):_)  | Front.methCat m == Front.Task Front.Controllable   = specGetCFA (svSpec sv) pid (Just $ sname m)
                                                                 | Front.methCat m == Front.Task Front.Uncontrollable = specGetCFA (svSpec sv) pid (Just $ sname m) 
 stackGetCFA sv pid ((FrameStatic (Front.ScopeProcess _ _) _):_)                                                      = specGetCFA (svSpec sv) pid Nothing
