@@ -116,13 +116,17 @@ data SourceView c a = SourceView {
     svSourceView     :: G.TextView,
     svSourceBuf      :: G.TextBuffer,
     svSourceTag      :: G.TextTag,                  -- tag to mark current selection current selection
+    svFileLab        :: G.Label,                    -- Status labels: file name
+    svContTog        :: G.ToggleButton,             --                controllable/uncontrollable state
+    svContLab        :: G.Label,                    --
+    svInprogLab      :: G.Label,                    --                transition in progress
 
     -- Resolve view
     svResolveStore   :: G.TreeStore Expr,           -- tmp variables in the scope of the current expression
 
     -- Action selector
     svActSelectText  :: G.TextView,                 -- user-edited controllable action
-    svActSelectBExit :: G.Button,                   -- exit magic block button
+    --svActSelectBExit :: G.Button,                   -- exit magic block button
     svActSelectBAdd  :: G.Button                    -- perform controllable action button
 }
 
@@ -163,9 +167,13 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
                                  , svSourceView     = error "SourceView: svSourceView undefined"
                                  , svSourceBuf      = error "SourceView: svSourceBuf undefined"
                                  , svSourceTag      = error "SourceView: svSourceTag undefined"
+                                 , svFileLab        = error "SourceView: svFileLab undefined"
+                                 , svContTog        = error "SourceView: svContTog undefined"
+                                 , svContLab        = error "SourceViewL svContLab undefined"
+                                 , svInprogLab      = error "SourceView: svInprogLab undefined"
                                  , svResolveStore   = error "SourceView: svResolveStore undefined"
                                  , svActSelectText  = error "SourceView: svActSelectText undefined"
-                                 , svActSelectBExit = error "SourceView: svActSelectBExit undefined"
+                                 --, svActSelectBExit = error "SourceView: svActSelectBExit undefined"
                                  , svActSelectBAdd  = error "SourceView: svActSelectBAdd undefined"
                                  }
 
@@ -200,6 +208,7 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
     _ <- G.onToolButtonClicked butrun (run ref)
     G.widgetShow butrun
     G.toolbarInsert tbar butrun (-1)
+
     modifyIORef ref (\sv -> sv { svRunButton  = butrun
                                , svStepButton = butstep
                                })
@@ -270,7 +279,7 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
 
     run ref
     initstore' <- getIORef currentStore ref
-    --D.modelSelectState rmodel (Just $ D.abstractState initstore') 
+    D.modelSelectState rmodel (Just $ D.abstractState initstore') 
     -- END HACK
 
     return $ D.View { D.viewName      = "Source"
@@ -296,9 +305,11 @@ sourceViewStateSelected ref (Just s) | isNothing (D.sConcrete s) = disable ref
 sourceViewTransitionSelected :: (D.Rel c v a s) => RSourceView c a -> D.Transition a Store -> IO ()
 sourceViewTransitionSelected ref tran | isNothing (D.sConcrete $ D.tranFrom tran) = disable ref
                                       | otherwise                                 = do
+    putStrLn "sourceViewTransitionSelected"
     modifyIORef ref (\sv -> sv { svState   = D.tranFrom tran
                                , svTmp     = tranTmpStore sv tran
                                , svTranPID = Just $ parsePIDEnumerator $ storeEvalEnum (fromJust $ D.sConcrete $ D.tranTo tran) mkPIDVar})
+    putStrLn "sourceViewTransitionSelected done"
     reset ref
 
 --------------------------------------------------------------
@@ -345,8 +356,14 @@ run ref = do
 processSelectorCreate :: RSourceView c a -> IO G.Widget
 processSelectorCreate ref = do
     sv <- readIORef ref
+    hbox <- G.hBoxNew False 0
+    G.widgetShow hbox
+    lab <- G.labelNew $ Just "Select process: "
+    G.widgetShow lab
+    G.boxPackStart hbox lab G.PackNatural 0
     combo <- G.comboBoxNew
     G.widgetShow combo
+    G.boxPackStart hbox combo G.PackNatural 0
     store <- G.treeStoreNew []
     G.comboBoxSetModel combo (Just store)
     rend <- G.cellRendererTextNew
@@ -358,7 +375,7 @@ processSelectorCreate ref = do
     writeIORef ref sv {svProcessCombo = combo, svProcessStore = store}
     _ <- G.on combo G.changed (processSelectorChanged ref)
     processSelectorInit ref
-    return $ G.toWidget combo
+    return $ G.toWidget hbox
 
 processSelectorChanged :: RSourceView c a -> IO ()
 processSelectorChanged ref = do
@@ -391,10 +408,9 @@ processSelectorUpdate ref = do
         combo = svProcessCombo sv
     myTreeModelForeach store (\iter -> do sv'      <- readIORef ref
                                           path     <- G.treeModelGetPath store iter
-                                          putStrLn $ "treeModelForeach " ++ show path
                                           (pid, _) <- G.treeStoreGetValue store path
                                           let en = isProcEnabled sv' pid
-                                          G.treeStoreSetValue store path (pid, trace ("isProcEnabled " ++ show pid ++ "=" ++ show en) en))
+                                          G.treeStoreSetValue store path (pid, en))
     miter <- G.comboBoxGetActiveIter combo
     when (isNothing miter) $ do miter' <- G.treeModelGetIter store [0]
                                 G.comboBoxSetActiveIter combo (fromJust miter')
@@ -408,7 +424,6 @@ myTreeModelForeach m f = myTreeModelForeach' m Nothing f
 myTreeModelForeach' :: G.TreeModelClass self => self -> Maybe G.TreeIter -> (G.TreeIter -> IO ()) -> IO ()
 myTreeModelForeach' m miter f = do
     nchildren <- G.treeModelIterNChildren m miter
-    putStrLn $ "myTreeModelForeach': " ++ show nchildren ++ " children"
     path <- case miter of
                   Nothing -> return []
                   Just i  -> G.treeModelGetPath m i
@@ -668,10 +683,14 @@ watchDisable _ = return ()
 
 
 -- Source --
-sourceWindowCreate :: RSourceView c a -> IO G.Widget
+sourceWindowCreate :: (D.Rel c v a s) => RSourceView c a -> IO G.Widget
 sourceWindowCreate ref = do
+    vbox <- G.vBoxNew False 0
+    G.widgetShow vbox
+    -- Source widow at the top
     view <- G.textViewNew
     G.widgetShow view
+    G.boxPackStart vbox view G.PackGrow 0
     G.textViewSetEditable view False
     tag <- G.textTagNew Nothing
     G.set tag [G.textTagBackground G.:= "grey"]
@@ -679,11 +698,43 @@ sourceWindowCreate ref = do
     table <- G.textBufferGetTagTable buf
     G.textTagTableAdd table tag
     G.textViewSetBuffer view buf
+    -- Status bar at the bottom
+    sbar <- G.hBoxNew True 0
+    G.widgetShow sbar
+    G.boxPackStart vbox sbar G.PackNatural 0
+    -- file name label
+    lfile <- G.labelNew Nothing
+    G.widgetShow lfile
+    G.boxPackStart sbar lfile G.PackGrow 0
+    -- cont/ucont switcher
+    bcont <- G.toggleButtonNew
+    G.widgetShow bcont
+    G.boxPackStart sbar bcont G.PackGrow 0
+    lcont <- G.labelNew Nothing
+    G.widgetShow lcont
+    G.containerAdd bcont lcont
+    _ <- G.on bcont G.toggled (contToggled ref)
+    -- transition-in-progress label
+    lprog <- G.labelNew Nothing
+    G.widgetShow lprog
+    G.boxPackStart sbar lprog G.PackGrow 0
+   
     modifyIORef ref (\sv -> sv { svSourceView = view
                                , svSourceBuf  = buf
-                               , svSourceTag  = tag})
-    return $ G.toWidget view
+                               , svSourceTag  = tag
+                               , svFileLab    = lfile
+                               , svContTog    = bcont
+                               , svContLab    = lcont
+                               , svInprogLab  = lprog})
+    return $ G.toWidget vbox
 
+contToggled :: (D.Rel c v a s) => RSourceView c a -> IO ()
+contToggled ref = do
+    putStrLn "contToggled"
+    sv <- readIORef ref
+    c <- G.toggleButtonGetActive (svContTog sv)
+    when (c && (not $ currentControllable sv)) $ actionSelectorEnter ref
+    when (not c && currentControllable sv)     $ actionSelectorExit  ref
 
 sourceWindowUpdate :: RSourceView c a -> IO ()
 sourceWindowUpdate ref = do
@@ -691,12 +742,30 @@ sourceWindowUpdate ref = do
     let cfa = cfaAtFrame sv (svStackFrame sv)
         loc = fLoc $ (currentStack sv) !! (svStackFrame sv)
     case locAct $ cfaLocLabel loc cfa of
-         ActNone   -> sourceClearPos sv
-         ActExpr e -> sourceSetPos sv $ pos e
-         ActStat s -> sourceSetPos sv $ pos s
+         ActNone   -> do sourceClearPos sv
+                         G.labelSetText (svFileLab sv) ""
+         ActExpr e -> do sourceSetPos sv $ pos e
+                         G.labelSetText (svFileLab sv) (sourceName $ fst $ pos e)
+         ActStat s -> do sourceSetPos sv $ pos s
+                         G.labelSetText (svFileLab sv) (sourceName $ fst $ pos s)
+    if currentControllable sv
+       then do G.toggleButtonSetActive (svContTog sv) True
+               G.labelSetMarkup (svContLab sv) "<span color=\"green\"> CONTROLLABLE </span>"
+       else do G.toggleButtonSetActive (svContTog sv) False
+               G.labelSetMarkup (svContLab sv) "<span color=\"blue\">  UNCONTROLLABLE </span>"
+
+    G.labelSetMarkup (svInprogLab sv) $ if' (svTracePos sv == 0) "<span weight=\"bold\">PAUSE</span>" ""
+
+    G.widgetSetSensitive (svContTog sv) $ (currentControllable sv) ||
+                                          ((not $ currentControllable sv) && svTracePos sv == 0 && currentMagic sv)
 
 sourceWindowDisable :: RSourceView c a -> IO ()
-sourceWindowDisable _ = return ()
+sourceWindowDisable ref = do
+    sv <- readIORef ref
+    G.labelSetText       (svFileLab sv)   ""
+    G.labelSetText       (svInprogLab sv) ""
+    G.labelSetText       (svContLab sv)   ""
+    G.widgetSetSensitive (svContTog sv)   False
 
 sourceClearPos :: SourceView c a -> IO ()
 sourceClearPos sv = do
@@ -881,11 +950,11 @@ actionSelectorCreate ref = do
     G.widgetShow bbox
     G.boxPackStart vbox bbox G.PackNatural 0
 
-    -- Exit magic block button
-    bexit <- G.buttonNewWithLabel "Exit Magic Block"
-    G.widgetShow bexit
-    G.containerAdd bbox bexit
-    _ <- G.on bexit G.buttonActivated (actionSelectorExit ref)
+    ---- Exit magic block button
+    --bexit <- G.buttonNewWithLabel "Exit Magic Block"
+    --G.widgetShow bexit
+    --G.containerAdd bbox bexit
+    --_ <- G.on bexit G.buttonActivated (actionSelectorExit ref)
 
     -- Add transition button
     badd <- G.buttonNewWithLabel "Perform controllable action"
@@ -894,7 +963,7 @@ actionSelectorCreate ref = do
     _ <- G.on badd G.buttonActivated (actionSelectorRun ref)
 
     modifyIORef ref (\sv -> sv { svActSelectText  = tview
-                               , svActSelectBExit = bexit
+                               --, svActSelectBExit = bexit
                                , svActSelectBAdd  = badd})
     actionSelectorDisable ref
     panel <- D.framePanelNew (G.toWidget vbox) "Controllable action" (return ())
@@ -919,6 +988,14 @@ actionSelectorExit ref = do
                                                            in st2))
     completeTransition ref
 
+actionSelectorEnter :: (D.Rel c v a s) => RSourceView c a -> IO ()
+actionSelectorEnter ref = do
+    sv0 <- readIORef ref
+    let sv1 = modifyCurrentStore sv0 (\st0 -> storeSet st0 mkContVar (Just $ SVal $ BoolVal True))
+        sv2 = setPID pidIdle sv1
+    writeIORef ref sv2
+    makeTransition ref
+
 runControllableCFA :: RSourceView c a -> CFA -> IO ()
 runControllableCFA ref cfa = do
     -- Push controllable cfa on the stack
@@ -930,6 +1007,10 @@ runControllableCFA ref cfa = do
 actionSelectorUpdate :: RSourceView c a -> IO ()
 actionSelectorUpdate ref = do
     sv <- readIORef ref
+    putStrLn $ "actionSelectorUpdate: controllable=" ++ 
+               (show $ currentControllable sv) ++ 
+               " waitformagic=" ++ 
+               (show $ isWaitForMagicLabel $ currentLocLabel sv)
     if currentControllable sv && (isWaitForMagicLabel $ currentLocLabel sv)
        then actionSelectorEnable ref
        else actionSelectorDisable ref
@@ -937,13 +1018,13 @@ actionSelectorUpdate ref = do
 actionSelectorDisable :: RSourceView c a -> IO ()
 actionSelectorDisable ref = do
     SourceView{..} <- readIORef ref
-    G.widgetSetSensitive svActSelectBExit False
+    --G.widgetSetSensitive svActSelectBExit False
     G.widgetSetSensitive svActSelectBAdd  False
 
 actionSelectorEnable :: RSourceView c a -> IO ()
 actionSelectorEnable ref = do
     SourceView{..} <- readIORef ref
-    G.widgetSetSensitive svActSelectBExit True
+    --G.widgetSetSensitive svActSelectBExit True
     G.widgetSetSensitive svActSelectBAdd  True
 
 
@@ -1109,6 +1190,9 @@ currentTmpExprTree sv = getTmpExprTree sv (svTracePos sv)
 currentControllable :: SourceView c a -> Bool
 currentControllable sv = storeEvalBool (currentStore sv) (EVar mkContVarName)
 
+currentMagic :: SourceView c a -> Bool
+currentMagic sv = storeEvalBool (currentStore sv) (EVar mkMagicVarName)
+
 cfaAtFrame :: SourceView c a -> Int -> CFA
 cfaAtFrame sv frame = stackGetCFA sv (svPID sv) (drop frame $ currentStack sv)
 
@@ -1194,22 +1278,29 @@ microstep' sv (to, TranStat (SAssign l r)) = let rval = storeTryEval (currentSto
 completeTransition :: (D.Rel c v a s) => RSourceView c a -> IO ()
 completeTransition ref = do
     sv    <- readIORef ref
-    model <- readIORef $ svModel sv
-    let ?spec    = svSpec sv
-        ?absvars = svAbsVars sv
-        ?model   = model
-        ?m       = D.mCtx model
     -- update PC and PID variables
     let pc = currentLoc sv
         mmeth = fmap sname $ stackTask (currentStack sv) 0
         pid = svPID sv ++ (maybeToList mmeth)
         sv' = setPC pid pc $ setPID pid sv
     writeIORef ref sv'
+    makeTransition ref
+
+makeTransition :: (D.Rel c v a s) => RSourceView c a -> IO ()
+makeTransition ref = do
+    putStrLn "makeTransition"
+    sv <- readIORef ref
+    model <- readIORef $ svModel sv
+    let ?spec    = svSpec sv
+        ?absvars = svAbsVars sv
+        ?model   = model
+        ?m       = D.mCtx model
     -- abstract final state
-    let trans = D.abstractTransition (svState sv') (currentStore sv')
+    let trans = D.abstractTransition  (svState sv) (currentStore sv) 
     -- add transition
-    D.modelSelectTransition (svModel sv') trans
-    D.modelSelectState (svModel sv') (Just $ D.tranTo trans)
+    D.modelSelectTransition (svModel sv) trans
+    D.modelSelectState (svModel sv) (Just $ D.tranTo trans)
+
 
 setPID :: PID -> SourceView c a -> SourceView c a
 setPID pid sv = modifyCurrentStore sv (\s -> storeSet s mkPIDVar (Just $ SVal $ EnumVal $ mkPIDEnumeratorName pid))
@@ -1288,9 +1379,10 @@ compileControllableAction inspec flatspec pid sc str fname = do
     assert (null $ ctxVar ctx') (pos stat) "Cannot perform non-deterministic controllable action"
     -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
     let cfa   = ctxCFA ctx'
-        reach = cfaReachInst cfa cfaInitLoc
-        cfa'  = cfaPrune cfa (S.insert cfaInitLoc reach)
-    assert (Graph.noNodes cfa == Graph.noNodes cfa') (pos stat) "Controllable action must be an instantaneous statement"
+        cfar  = cfaPruneUnreachable cfa [cfaInitLoc]
+        reach = cfaReachInst cfar cfaInitLoc
+        cfa'  = cfaPrune cfar (S.insert cfaInitLoc reach)
+    cfaTrace cfar "cfar" $ assert (Graph.noNodes cfar == Graph.noNodes cfa') (pos stat) "Controllable action must be an instantaneous statement"
     return cfa'
     
 -- Check whether statement specifies a valid controllable action:

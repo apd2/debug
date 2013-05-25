@@ -224,15 +224,15 @@ createTransition gv fromid toid tran = do
 
 createSubsetEdge :: GraphView c a b -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b)
 createSubsetEdge gv fromid toid = 
-    createEdge gv fromid toid EdgeSubset [] subsetStyle EndDiamond True
+    createEdge gv fromid toid EdgeSubset [] subsetStyle EndDiamond False 
 
 createEqEdge :: GraphView c a b -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b)
 createEqEdge gv fromid toid = 
-    createEdge gv fromid toid EdgeEq [] eqStyle EndNone True
+    createEdge gv fromid toid EdgeEq [] eqStyle EndNone False
 
 createOverlapEdge :: GraphView c a b -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b)
 createOverlapEdge gv fromid toid = 
-    createEdge gv fromid toid EdgeOverlap [] overlapStyle EndNone True
+    createEdge gv fromid toid EdgeOverlap [] overlapStyle EndNone False
 
 createEdge :: GraphView c a b -> G.Node -> G.Node -> (GEdgeId -> Edge a b) -> [GAnnotation] -> GC -> EndStyle -> Bool -> IO (GEdgeId, GraphView c a b)
 createEdge gv fromid toid f annots gc end visible = do
