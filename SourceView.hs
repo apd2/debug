@@ -47,6 +47,7 @@ import qualified InstTree        as Front
 import qualified TemplateOps     as Front
 import qualified ExprInline      as Front
 import qualified Spec            as Front
+import qualified Expr            as Front
 import qualified ExprFlatten     as Front
 import qualified ExprOps         as Front
 import qualified ExprValidate    as Front
@@ -1066,7 +1067,11 @@ stackFromStore' sv s pid methname = stack' ++ stack
                                                                  in if' (t==mkTagIdle) []
                                                                     $ stackFromStore' sv s [] (Just t)
                                                             else []
-                                             Just nam -> stackFromStore' sv s pid (Just nam)
+                                             Just nam -> let ?spec = svFlatSpec sv in
+                                                         let meth = snd $ Front.getMethod (Front.ScopeTemplate tmMain) (Front.MethodRef nopos [Ident nopos nam]) in
+                                                         if storeEvalBool s $ mkEnVar pid (Just meth)
+                                                            then stackFromStore' sv s pid (Just nam)
+                                                            else []
                         _            -> []
 
 -- Extract the last controllable or uncontrollable task call 
@@ -1257,7 +1262,7 @@ microstep ref = do
     let transitions = Graph.lsuc (currentCFA sv) (currentLoc sv)
     case mapMaybe (microstep' sv) transitions of
          []               -> return False
-         (store, stack):_ -> do writeIORef ref $ traceAppend sv store stack
+         (store, stack):_ -> do trace ("microstep': stack=" ++ showStack stack) $ writeIORef ref $ traceAppend sv store stack
                                 return True
 
 microstep' :: SourceView c a -> (Loc, TranLabel) -> Maybe (Store, Stack)
@@ -1382,7 +1387,7 @@ compileControllableAction inspec flatspec pid sc str fname = do
         cfar  = cfaPruneUnreachable cfa [cfaInitLoc]
         reach = cfaReachInst cfar cfaInitLoc
         cfa'  = cfaPrune cfar (S.insert cfaInitLoc reach)
-    cfaTrace cfar "cfar" $ assert (Graph.noNodes cfar == Graph.noNodes cfa') (pos stat) "Controllable action must be an instantaneous statement"
+    assert (Graph.noNodes cfar == Graph.noNodes cfa') (pos stat) "Controllable action must be an instantaneous statement"
     return cfa'
     
 -- Check whether statement specifies a valid controllable action:
