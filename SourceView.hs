@@ -1367,8 +1367,6 @@ compileControllableAction inspec flatspec pid sc str fname = do
     let (simpstat, (_, vars)) = let ?scope = sc
                                 in runState (Front.statSimplify flatstat) (0,[])
     assert (null vars) (pos stat) "Statement too complex"
-    -- add return after the statement to pop FrameInteractive off the stack
-    let simpstat' = Front.sSeq nopos [simpstat, Front.SReturn nopos Nothing]
     -- 5. inline
     let ctx = CFACtx { ctxPID     = pid
                      , ctxStack   = []
@@ -1378,9 +1376,12 @@ compileControllableAction inspec flatspec pid sc str fname = do
                      , ctxLastVar = 0
                      , ctxVar     = []}
         ctx' = let ?procs =[] in execState (do -- create final state and make it the return location
-                                               retloc <- ctxInsLocLab (LFinal ActNone [])
-                                               ctxPushScope sc retloc Nothing (scopeLMap pid sc)
-                                               Front.procStatToCFA True simpstat' cfaInitLoc) ctx
+                                               aftret <- ctxInsLocLab (LFinal ActNone [])
+                                               ctxPushScope sc aftret Nothing (scopeLMap pid sc)
+                                               aftstat <- Front.procStatToCFA True simpstat cfaInitLoc
+                                               -- add return after the statement to pop FrameInteractive off the stack
+                                               ctxInsTrans aftstat aftret TranReturn
+                                               ) ctx
     assert (null $ ctxVar ctx') (pos stat) "Cannot perform non-deterministic controllable action"
     -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
     let cfa   = ctxCFA ctx'
