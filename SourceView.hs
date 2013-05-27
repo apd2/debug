@@ -1266,8 +1266,14 @@ microstep ref = do
                                 return True
 
 microstep' :: SourceView c a -> (Loc, TranLabel) -> Maybe (Store, Stack)
-microstep' sv (to, TranCall meth)          = let ?spec = svFlatSpec sv
-                                             in Just (currentStore sv, (FrameStatic (Front.ScopeMethod tmMain meth) to) : currentStack sv)
+microstep' sv (to, TranCall meth mretloc)  = -- insert new stack frame and mofify the old frame to point to teturn location,
+                                             -- so that Return can be performed later
+                                             let ?spec = svFlatSpec sv in
+                                             let f0:frames = currentStack sv in
+                                                 stack' = case mretloc of
+                                                               Nothing -> f0 : frames
+                                                               Just l  -> f0{fLoc = l} : frames
+                                             in Just (currentStore sv, (FrameStatic (Front.ScopeMethod tmMain meth) to) : stack')
 microstep' sv (_ , TranReturn)             = Just (currentStore sv, tail $ currentStack sv)
 microstep' sv (to, TranNop)                = Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
 microstep' sv (to, TranStat (SAssume e))   = if storeEvalBool (currentStore sv) e == True
