@@ -689,12 +689,19 @@ sourceWindowCreate ref = do
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox
     -- Source widow at the top
+    scroll <- G.scrolledWindowNew Nothing Nothing
+    G.widgetShow scroll
+    G.boxPackStart vbox scroll G.PackGrow 0
+    
+    font <- G.fontDescriptionFromString "Courier 10 Pitch"
+
     view <- G.textViewNew
+    G.widgetModifyFont view $ Just font
     G.widgetShow view
-    G.boxPackStart vbox view G.PackGrow 0
+    G.containerAdd scroll view
     G.textViewSetEditable view False
     tag <- G.textTagNew Nothing
-    G.set tag [G.textTagBackground G.:= "grey"]
+    G.set tag [G.textTagBackground G.:= "#8080c0"]
     buf <- G.textBufferNew Nothing
     table <- G.textBufferGetTagTable buf
     G.textTagTableAdd table tag
@@ -1266,10 +1273,10 @@ microstep ref = do
                                 return True
 
 microstep' :: SourceView c a -> (Loc, TranLabel) -> Maybe (Store, Stack)
-microstep' sv (to, TranCall meth mretloc)  = -- insert new stack frame and mofify the old frame to point to teturn location,
+microstep' sv (to, TranCall meth mretloc)  = -- insert new stack frame and mofify the old frame to point to return location,
                                              -- so that Return can be performed later
                                              let ?spec = svFlatSpec sv in
-                                             let f0:frames = currentStack sv in
+                                             let f0:frames = currentStack sv
                                                  stack' = case mretloc of
                                                                Nothing -> f0 : frames
                                                                Just l  -> f0{fLoc = l} : frames
