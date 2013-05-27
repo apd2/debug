@@ -17,6 +17,7 @@ import Control.Monad.State
 import Control.Monad.Error
 import System.IO.Error
 import Text.Parsec
+import Control.Applicative
 import qualified Text.PrettyPrint           as PP
 
 import Name
@@ -127,7 +128,7 @@ data SourceView c a = SourceView {
 
     -- Action selector
     svActSelectText  :: G.TextView,                 -- user-edited controllable action
-    --svActSelectBExit :: G.Button,                   -- exit magic block button
+    svActSelectBExit :: G.Button,                   -- exit magic block button
     svActSelectBAdd  :: G.Button                    -- perform controllable action button
 }
 
@@ -174,7 +175,7 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
                                  , svInprogLab      = error "SourceView: svInprogLab undefined"
                                  , svResolveStore   = error "SourceView: svResolveStore undefined"
                                  , svActSelectText  = error "SourceView: svActSelectText undefined"
-                                 --, svActSelectBExit = error "SourceView: svActSelectBExit undefined"
+                                 , svActSelectBExit = error "SourceView: svActSelectBExit undefined"
                                  , svActSelectBAdd  = error "SourceView: svActSelectBAdd undefined"
                                  }
 
@@ -764,8 +765,7 @@ sourceWindowUpdate ref = do
 
     G.labelSetMarkup (svInprogLab sv) $ if' (svTracePos sv == 0) "<span weight=\"bold\">PAUSE</span>" ""
 
-    G.widgetSetSensitive (svContTog sv) $ (currentControllable sv) ||
-                                          ((not $ currentControllable sv) && svTracePos sv == 0 && currentMagic sv)
+    G.widgetSetSensitive (svContTog sv) $ (not $ currentControllable sv) && svTracePos sv == 0 && currentMagic sv
 
 sourceWindowDisable :: RSourceView c a -> IO ()
 sourceWindowDisable ref = do
@@ -959,10 +959,10 @@ actionSelectorCreate ref = do
     G.boxPackStart vbox bbox G.PackNatural 0
 
     ---- Exit magic block button
-    --bexit <- G.buttonNewWithLabel "Exit Magic Block"
-    --G.widgetShow bexit
-    --G.containerAdd bbox bexit
-    --_ <- G.on bexit G.buttonActivated (actionSelectorExit ref)
+    bexit <- G.buttonNewWithLabel "Exit Magic Block"
+    G.widgetShow bexit
+    G.containerAdd bbox bexit
+    _ <- G.on bexit G.buttonActivated (actionSelectorExit ref)
 
     -- Add transition button
     badd <- G.buttonNewWithLabel "Perform controllable action"
@@ -971,7 +971,7 @@ actionSelectorCreate ref = do
     _ <- G.on badd G.buttonActivated (actionSelectorRun ref)
 
     modifyIORef ref (\sv -> sv { svActSelectText  = tview
-                               --, svActSelectBExit = bexit
+                               , svActSelectBExit = bexit
                                , svActSelectBAdd  = badd})
     actionSelectorDisable ref
     panel <- D.framePanelNew (G.toWidget vbox) "Controllable action" (return ())
@@ -1027,13 +1027,13 @@ actionSelectorUpdate ref = do
 actionSelectorDisable :: RSourceView c a -> IO ()
 actionSelectorDisable ref = do
     SourceView{..} <- readIORef ref
-    --G.widgetSetSensitive svActSelectBExit False
+    G.widgetSetSensitive svActSelectBExit False
     G.widgetSetSensitive svActSelectBAdd  False
 
 actionSelectorEnable :: RSourceView c a -> IO ()
 actionSelectorEnable ref = do
     SourceView{..} <- readIORef ref
-    --G.widgetSetSensitive svActSelectBExit True
+    G.widgetSetSensitive svActSelectBExit True
     G.widgetSetSensitive svActSelectBAdd  True
 
 
@@ -1315,7 +1315,7 @@ makeTransition ref = do
         ?model   = model
         ?m       = D.mCtx model
     -- abstract final state
-    let trans = D.abstractTransition  (svState sv) (currentStore sv) 
+    let trans = D.abstractTransition (svState sv) (currentStore sv) 
     -- add transition
     D.modelSelectTransition (svModel sv) trans
     D.modelSelectState (svModel sv) (Just $ D.tranTo trans)
@@ -1332,7 +1332,7 @@ storeEvalStr :: Front.Spec -> Front.Spec -> Store -> PID -> Front.Scope -> Strin
 storeEvalStr inspec flatspec store pid sc str = do
     -- Apply all transformations that the input spec goes through to the expression:
     -- 1. parse
-    expr <- case parse Parse.detexpr "" str of
+    expr <- case parse (Parse.detexpr <* eof) "" str of
                  Left  e  -> Left $ show e
                  Right ex -> Right ex
     let (scope, iid) = flatScopeToScope inspec sc
@@ -1366,7 +1366,7 @@ compileControllableAction inspec flatspec pid sc str fname = do
     -- Apply all transformations that the input spec goes through to the statement:
     -- 1. parse
     stat <- liftM (Front.sSeq nopos)
-            $ case parse Parse.statements fname str of
+            $ case parse (Parse.statements1 <* eof) fname str of
                    Left  e  -> Left $ show e
                    Right st -> Right st
     let (scope,iid) = flatScopeToScope inspec sc
@@ -1393,8 +1393,10 @@ compileControllableAction inspec flatspec pid sc str fname = do
                                                aftret <- ctxInsLocLab (LFinal ActNone [])
                                                ctxPushScope sc aftret Nothing (scopeLMap pid sc)
                                                aftstat <- Front.procStatToCFA True simpstat cfaInitLoc
+                                               -- switch to uncontrollable state
+                                               aftucont <- ctxInsTrans' aftstat $ TranStat $ mkContVar =: false
                                                -- add return after the statement to pop FrameInteractive off the stack
-                                               ctxInsTrans aftstat aftret TranReturn
+                                               ctxInsTrans aftucont aftret TranReturn
                                                ) ctx
     assert (null $ ctxVar ctx') (pos stat) "Cannot perform non-deterministic controllable action"
     -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
