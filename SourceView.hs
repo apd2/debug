@@ -991,10 +991,11 @@ actionSelectorRun ref = do
 
 actionSelectorExit :: (D.Rel c v a s) => RSourceView c a -> IO ()
 actionSelectorExit ref = do
-    modifyIORef ref (\sv -> modifyCurrentStore sv (\st0 -> let st1 = storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)
-                                                               st2 = storeSet st1 mkContVar  (Just $ SVal $ BoolVal False)
-                                                           in st2))
-    completeTransition ref
+    modifyIORef ref (\sv -> setPID pidCont 
+                            $ modifyCurrentStore sv (\st0 -> let st1 = storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)
+                                                                 st2 = storeSet st1 mkContVar  (Just $ SVal $ BoolVal False)
+                                                             in st2))
+    makeTransition ref
 
 actionSelectorEnter :: (D.Rel c v a s) => RSourceView c a -> IO ()
 actionSelectorEnter ref = do
