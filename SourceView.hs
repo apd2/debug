@@ -57,6 +57,13 @@ import qualified StatementOps    as Front
 import qualified StatementInline as Front
 
 --------------------------------------------------------------
+-- Constants
+--------------------------------------------------------------
+
+colorCont  = "#80c080"
+colorUCont = "#8080c0"
+
+--------------------------------------------------------------
 -- Data structures
 --------------------------------------------------------------
 
@@ -702,7 +709,6 @@ sourceWindowCreate ref = do
     G.containerAdd scroll view
     G.textViewSetEditable view False
     tag <- G.textTagNew Nothing
-    G.set tag [G.textTagBackground G.:= "#8080c0"]
     buf <- G.textBufferNew Nothing
     table <- G.textBufferGetTagTable buf
     G.textTagTableAdd table tag
@@ -753,9 +759,14 @@ sourceWindowUpdate ref = do
     case locAct $ cfaLocLabel loc cfa of
          ActNone   -> do sourceClearPos sv
                          G.labelSetText (svFileLab sv) ""
-         ActExpr e -> do sourceSetPos sv $ pos e
+         ActExpr e -> do sourceSetPos sv (pos e) colorUCont
                          G.labelSetText (svFileLab sv) (sourceName $ fst $ pos e)
-         ActStat s -> do sourceSetPos sv $ pos s
+         ActStat (Front.SMagic p mp _) -> do let col = if' (currentControllable sv) colorCont colorUCont
+                                             if currentMagic sv 
+                                                then sourceSetPos sv mp col
+                                                else sourceSetPos sv p  col
+                                             G.labelSetText (svFileLab sv) (sourceName $ fst p)
+         ActStat s -> do sourceSetPos sv (pos s) colorUCont
                          G.labelSetText (svFileLab sv) (sourceName $ fst $ pos s)
     if currentControllable sv
        then do G.toggleButtonSetActive (svContTog sv) True
@@ -783,8 +794,8 @@ sourceClearPos sv = do
        G.textBufferRemoveTag buf (svSourceTag sv) istart iend
     `catchIOError` (\_ -> return ())
 
-sourceSetPos :: SourceView c a -> Pos -> IO ()
-sourceSetPos sv (from, to) = do
+sourceSetPos :: SourceView c a -> Pos -> String -> IO ()
+sourceSetPos sv (from, to) color = do
     putStrLn $ "sourceSetPos " ++ show (from, to)
     let fname = sourceName from
         buf   = svSourceBuf sv
@@ -795,6 +806,7 @@ sourceSetPos sv (from, to) = do
        ifrom <- G.textBufferGetIterAtLineOffset buf (sourceLine from - 1) (sourceColumn from - 1)
        ito <- G.textBufferGetIterAtLineOffset buf (sourceLine to - 1) (sourceColumn to - 1)
        G.textBufferRemoveTag buf (svSourceTag sv) istart iend
+       G.set (svSourceTag sv) [G.textTagBackground G.:= color]
        G.textBufferApplyTag buf (svSourceTag sv) ifrom ito
        mark <- G.textMarkNew Nothing True
        G.textBufferAddMark buf mark ifrom
@@ -1420,16 +1432,16 @@ validateControllableStat sc stat = do
                                 assert (Front.methCat m /= Front.Task Front.Invisible)      p "Invisible task invocations are not allowed inside controllable actions")
          $ Front.statCallees sc stat
     _ <- Front.mapStatM (\_ st -> case st of
-                                       Front.SVarDecl p _ -> err p "Variable declarations are not allowed inside controllable actions"
-                                       Front.SReturn  p _ -> err p "Return statements are not allowed inside controllable actions"
-                                       Front.SPar     p _ -> err p "Fork statements are not allowed inside controllable actions"
-                                       Front.SPause   p   -> err p "Pause statements are not allowed inside controllable actions"
-                                       Front.SWait    p _ -> err p "Wait statements are not allowed inside controllable actions"
-                                       Front.SStop    p   -> err p "Stop statements are not allowed inside controllable actions"
-                                       Front.SAssert  p _ -> err p "Assertions are not allowed inside controllable actions"
-                                       Front.SAssume  p _ -> err p "Assume statements are not allowed inside controllable actions"
-                                       Front.SMagic   p _ -> err p "Magic blocks are not allowed inside controllable actions"
-                                       _                  -> return st) sc stat
+                                       Front.SVarDecl p _   -> err p "Variable declarations are not allowed inside controllable actions"
+                                       Front.SReturn  p _   -> err p "Return statements are not allowed inside controllable actions"
+                                       Front.SPar     p _   -> err p "Fork statements are not allowed inside controllable actions"
+                                       Front.SPause   p     -> err p "Pause statements are not allowed inside controllable actions"
+                                       Front.SWait    p _   -> err p "Wait statements are not allowed inside controllable actions"
+                                       Front.SStop    p     -> err p "Stop statements are not allowed inside controllable actions"
+                                       Front.SAssert  p _   -> err p "Assertions are not allowed inside controllable actions"
+                                       Front.SAssume  p _   -> err p "Assume statements are not allowed inside controllable actions"
+                                       Front.SMagic   p _ _ -> err p "Magic blocks are not allowed inside controllable actions"
+                                       _                    -> return st) sc stat
     return ()
 
 flatScopeToScope :: Front.Spec -> Front.Scope -> (Front.Scope, Front.IID)
