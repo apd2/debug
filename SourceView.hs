@@ -62,7 +62,7 @@ import qualified StatementInline as Front
 
 colorCont  = "#80c080"
 colorUCont = "#8080c0"
-
+fontSrc    = "Courier 10 Pitch"
 --------------------------------------------------------------
 -- Data structures
 --------------------------------------------------------------
@@ -98,6 +98,7 @@ data SourceView c a = SourceView {
     -- Command buttons
     svStepButton     :: G.ToolButton,
     svRunButton      :: G.ToolButton,
+    svMagExitButton  :: G.ToolButton,               -- exit magic block
 
     -- Trace
     svTrace          :: Trace,                      -- steps from the current state
@@ -126,8 +127,8 @@ data SourceView c a = SourceView {
     svSourceBuf      :: G.TextBuffer,
     svSourceTag      :: G.TextTag,                  -- tag to mark current selection current selection
     svFileLab        :: G.Label,                    -- Status labels: file name
-    svContTog        :: G.ToggleButton,             --                controllable/uncontrollable state
-    svContLab        :: G.Label,                    --
+    --svContTog        :: G.ToggleButton,             --                controllable/uncontrollable state
+    --svContLab        :: G.Label,                    --
     svInprogLab      :: G.Label,                    --                transition in progress
 
     -- Resolve view
@@ -135,7 +136,6 @@ data SourceView c a = SourceView {
 
     -- Action selector
     svActSelectText  :: G.TextView,                 -- user-edited controllable action
-    svActSelectBExit :: G.Button,                   -- exit magic block button
     svActSelectBAdd  :: G.Button                    -- perform controllable action button
 }
 
@@ -159,6 +159,7 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
                                  , svTranPID        = Nothing
                                  , svStepButton     = error "SourceView: svStepButton undefined"
                                  , svRunButton      = error "SourceView: svRunButton undefined"
+                                 , svMagExitButton  = error "SourceView: svMagExitButton undefined"
                                  , svTrace          = []
                                  , svTracePos       = 0
                                  , svTraceCombo     = error "SourceView: svTraceCombo undefined"
@@ -177,12 +178,11 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
                                  , svSourceBuf      = error "SourceView: svSourceBuf undefined"
                                  , svSourceTag      = error "SourceView: svSourceTag undefined"
                                  , svFileLab        = error "SourceView: svFileLab undefined"
-                                 , svContTog        = error "SourceView: svContTog undefined"
-                                 , svContLab        = error "SourceViewL svContLab undefined"
+                                 --, svContTog        = error "SourceView: svContTog undefined"
+                                 --, svContLab        = error "SourceViewL svContLab undefined"
                                  , svInprogLab      = error "SourceView: svInprogLab undefined"
                                  , svResolveStore   = error "SourceView: svResolveStore undefined"
                                  , svActSelectText  = error "SourceView: svActSelectText undefined"
-                                 , svActSelectBExit = error "SourceView: svActSelectBExit undefined"
                                  , svActSelectBAdd  = error "SourceView: svActSelectBAdd undefined"
                                  }
 
@@ -218,9 +218,15 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
     G.widgetShow butrun
     G.toolbarInsert tbar butrun (-1)
 
-    modifyIORef ref (\sv -> sv { svRunButton  = butrun
-                               , svStepButton = butstep
-                               })
+    bexit <- G.toolButtonNewFromStock G.stockClose
+    G.set bexit [G.widgetTooltipText G.:= Just "Exit Magic Block"]
+    _ <- G.onToolButtonClicked bexit (exitMagicBlock ref)
+    G.widgetShow bexit
+    G.toolbarInsert tbar bexit (-1)    
+
+    modifyIORef ref (\sv -> sv { svRunButton     = butrun
+                               , svStepButton    = butstep
+                               , svMagExitButton = bexit})
 
     sep2 <- G.separatorToolItemNew
     G.widgetShow sep2
@@ -356,6 +362,14 @@ run ref = do
     lab <- getIORef currentLocLabel ref
     when (ok && (not $ isDelayLabel lab)) $ run ref
 
+exitMagicBlock :: (D.Rel c v a s) => RSourceView c a -> IO ()
+exitMagicBlock ref = do
+    switchToControllable ref
+    modifyIORef ref (\sv -> setPID pidCont 
+                            $ modifyCurrentStore sv (\st0 -> let st1 = storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)
+                                                                 st2 = storeSet st1 mkContVar  (Just $ SVal $ BoolVal False)
+                                                             in st2))
+    makeTransition ref
 
 --------------------------------------------------------------
 -- GUI components
@@ -700,10 +714,9 @@ sourceWindowCreate ref = do
     scroll <- G.scrolledWindowNew Nothing Nothing
     G.widgetShow scroll
     G.boxPackStart vbox scroll G.PackGrow 0
-    
 
     view <- G.textViewNew
-    font <- G.fontDescriptionFromString "Courier 10 Pitch"
+    font <- G.fontDescriptionFromString fontSrc
     G.widgetModifyFont view $ Just font
     G.widgetSetSizeRequest view 600 300
     G.widgetShow view
@@ -722,14 +735,14 @@ sourceWindowCreate ref = do
     lfile <- G.labelNew Nothing
     G.widgetShow lfile
     G.boxPackStart sbar lfile G.PackGrow 0
-    -- cont/ucont switcher
-    bcont <- G.toggleButtonNew
-    G.widgetShow bcont
-    G.boxPackStart sbar bcont G.PackGrow 0
-    lcont <- G.labelNew Nothing
-    G.widgetShow lcont
-    G.containerAdd bcont lcont
-    _ <- G.on bcont G.toggled (contToggled ref)
+--    -- cont/ucont switcher
+--    bcont <- G.toggleButtonNew
+--    G.widgetShow bcont
+--    G.boxPackStart sbar bcont G.PackGrow 0
+--    lcont <- G.labelNew Nothing
+--    G.widgetShow lcont
+--    G.containerAdd bcont lcont
+--    _ <- G.on bcont G.toggled (contToggled ref)
     -- transition-in-progress label
     lprog <- G.labelNew Nothing
     G.widgetShow lprog
@@ -739,18 +752,17 @@ sourceWindowCreate ref = do
                                , svSourceBuf  = buf
                                , svSourceTag  = tag
                                , svFileLab    = lfile
-                               , svContTog    = bcont
-                               , svContLab    = lcont
+                               --, svContTog    = bcont
+                               --, svContLab    = lcont
                                , svInprogLab  = lprog})
     return $ G.toWidget vbox
 
-contToggled :: (D.Rel c v a s) => RSourceView c a -> IO ()
-contToggled ref = do
-    putStrLn "contToggled"
-    sv <- readIORef ref
-    c <- G.toggleButtonGetActive (svContTog sv)
-    when (c && (not $ currentControllable sv)) $ actionSelectorEnter ref
-    when (not c && currentControllable sv)     $ actionSelectorExit  ref
+--contToggled :: (D.Rel c v a s) => RSourceView c a -> IO ()
+--contToggled ref = do
+--    putStrLn "contToggled"
+--    sv <- readIORef ref
+--    c <- G.toggleButtonGetActive (svContTog sv)
+--    when (c && (not $ currentControllable sv)) $ switchToControllable ref
 
 sourceWindowUpdate :: RSourceView c a -> IO ()
 sourceWindowUpdate ref = do
@@ -769,23 +781,23 @@ sourceWindowUpdate ref = do
                                              G.labelSetText (svFileLab sv) (sourceName $ fst p)
          ActStat s -> do sourceSetPos sv (pos s) colorUCont
                          G.labelSetText (svFileLab sv) (sourceName $ fst $ pos s)
-    if currentControllable sv
-       then do G.toggleButtonSetActive (svContTog sv) True
-               G.labelSetMarkup (svContLab sv) "<span color=\"green\"> CONTROLLABLE </span>"
-       else do G.toggleButtonSetActive (svContTog sv) False
-               G.labelSetMarkup (svContLab sv) "<span color=\"blue\">  UNCONTROLLABLE </span>"
+--    if currentControllable sv
+--       then do G.toggleButtonSetActive (svContTog sv) True
+--               G.labelSetMarkup (svContLab sv) "<span color=\"green\"> CONTROLLABLE </span>"
+--       else do G.toggleButtonSetActive (svContTog sv) False
+--               G.labelSetMarkup (svContLab sv) "<span color=\"blue\">  UNCONTROLLABLE </span>"
 
     G.labelSetMarkup (svInprogLab sv) $ if' (svTracePos sv == 0) "<span weight=\"bold\">PAUSE</span>" ""
 
-    G.widgetSetSensitive (svContTog sv) $ (not $ currentControllable sv) && svTracePos sv == 0 && currentMagic sv
+--    G.widgetSetSensitive (svContTog sv) $ (not $ currentControllable sv) && svTracePos sv == 0 && currentMagic sv
 
 sourceWindowDisable :: RSourceView c a -> IO ()
 sourceWindowDisable ref = do
     sv <- readIORef ref
     G.labelSetText       (svFileLab sv)   ""
     G.labelSetText       (svInprogLab sv) ""
-    G.labelSetText       (svContLab sv)   ""
-    G.widgetSetSensitive (svContTog sv)   False
+    --G.labelSetText       (svContLab sv)   ""
+    --G.widgetSetSensitive (svContTog sv)   False
 
 sourceClearPos :: SourceView c a -> IO ()
 sourceClearPos sv = do
@@ -838,16 +850,20 @@ commandButtonsUpdate ref = do
               $ filter isTypeScalar
               $ concatMap flatten 
               $ currentTmpExprTree sv)
-    G.widgetSetSensitive (svStepButton sv) en
-    G.widgetSetSensitive (svRunButton sv) en
+    G.widgetSetSensitive (svStepButton sv)    en
+    G.widgetSetSensitive (svRunButton sv)     en
+    G.widgetSetSensitive (svMagExitButton sv) $  (currentMagic sv)                       -- we're inside a magic block
+                                              && (svTracePos sv == 0)                    -- there is not transition in progress
+                                              && (not $ currentControllable sv)          -- we're in an uncontrollable state
+                                              && isInsideMagicBlock (currentLocLabel sv) -- current process is inside the MB
 
 commandButtonsDisable :: RSourceView c a -> IO ()
 commandButtonsDisable ref = do
     sv <- readIORef ref
     -- disable command buttons
-    G.widgetSetSensitive (svStepButton sv) False
-    G.widgetSetSensitive (svRunButton sv) False
-
+    G.widgetSetSensitive (svStepButton sv)    False
+    G.widgetSetSensitive (svRunButton sv)     False
+    G.widgetSetSensitive (svMagExitButton sv) False
 -- Resolve --
 
 resolveViewCreate :: RSourceView c a -> IO G.Widget
@@ -963,6 +979,8 @@ actionSelectorCreate ref = do
     -- Text view for specifying controllable action
     tview <- G.textViewNew
     G.textViewSetEditable tview True
+    font <- G.fontDescriptionFromString fontSrc
+    G.widgetModifyFont tview $ Just font
     G.widgetShow tview
     G.boxPackStart vbox tview G.PackGrow 0
 
@@ -971,11 +989,11 @@ actionSelectorCreate ref = do
     G.widgetShow bbox
     G.boxPackStart vbox bbox G.PackNatural 0
 
-    ---- Exit magic block button
-    bexit <- G.buttonNewWithLabel "Exit Magic Block"
-    G.widgetShow bexit
-    G.containerAdd bbox bexit
-    _ <- G.on bexit G.buttonActivated (actionSelectorExit ref)
+--    ---- Exit magic block button
+--    bexit <- G.buttonNewWithLabel "Exit Magic Block"
+--    G.widgetShow bexit
+--    G.containerAdd bbox bexit
+--    _ <- G.on bexit G.buttonActivated (actionSelectorExit ref)
 
     -- Add transition button
     badd <- G.buttonNewWithLabel "Perform controllable action"
@@ -984,14 +1002,14 @@ actionSelectorCreate ref = do
     _ <- G.on badd G.buttonActivated (actionSelectorRun ref)
 
     modifyIORef ref (\sv -> sv { svActSelectText  = tview
-                               , svActSelectBExit = bexit
                                , svActSelectBAdd  = badd})
     actionSelectorDisable ref
     panel <- D.framePanelNew (G.toWidget vbox) "Controllable action" (return ())
     D.panelGetWidget panel
 
-actionSelectorRun :: RSourceView c a -> IO ()
+actionSelectorRun :: (D.Rel c v a s) => RSourceView c a -> IO ()
 actionSelectorRun ref = do
+    switchToControllable ref
     sv@SourceView{..} <- readIORef ref
     buf <- G.textViewGetBuffer svActSelectText
     text <- G.get buf G.textBufferText
@@ -1002,16 +1020,16 @@ actionSelectorRun ref = do
          Right cfa -> do writeFile fpath text
                          runControllableCFA ref cfa
 
-actionSelectorExit :: (D.Rel c v a s) => RSourceView c a -> IO ()
-actionSelectorExit ref = do
-    modifyIORef ref (\sv -> setPID pidCont 
-                            $ modifyCurrentStore sv (\st0 -> let st1 = storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)
-                                                                 st2 = storeSet st1 mkContVar  (Just $ SVal $ BoolVal False)
-                                                             in st2))
-    makeTransition ref
+--actionSelectorExit :: (D.Rel c v a s) => RSourceView c a -> IO ()
+--actionSelectorExit ref = do
+--    modifyIORef ref (\sv -> setPID pidCont 
+--                            $ modifyCurrentStore sv (\st0 -> let st1 = storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)
+--                                                                 st2 = storeSet st1 mkContVar  (Just $ SVal $ BoolVal False)
+--                                                             in st2))
+--    makeTransition ref
 
-actionSelectorEnter :: (D.Rel c v a s) => RSourceView c a -> IO ()
-actionSelectorEnter ref = do
+switchToControllable :: (D.Rel c v a s) => RSourceView c a -> IO ()
+switchToControllable ref = do
     sv0 <- readIORef ref
     let sv1 = modifyCurrentStore sv0 (\st0 -> storeSet st0 mkContVar (Just $ SVal $ BoolVal True))
         sv2 = setPID pidIdle sv1
@@ -1033,20 +1051,18 @@ actionSelectorUpdate ref = do
                (show $ currentControllable sv) ++ 
                " waitformagic=" ++ 
                (show $ isWaitForMagicLabel $ currentLocLabel sv)
-    if currentControllable sv && (isWaitForMagicLabel $ currentLocLabel sv)
+    if (isWaitForMagicLabel $ currentLocLabel sv)
        then actionSelectorEnable ref
        else actionSelectorDisable ref
 
 actionSelectorDisable :: RSourceView c a -> IO ()
 actionSelectorDisable ref = do
     SourceView{..} <- readIORef ref
-    G.widgetSetSensitive svActSelectBExit False
-    G.widgetSetSensitive svActSelectBAdd  False
+    G.widgetSetSensitive svActSelectBAdd False
 
 actionSelectorEnable :: RSourceView c a -> IO ()
 actionSelectorEnable ref = do
     SourceView{..} <- readIORef ref
-    G.widgetSetSensitive svActSelectBExit True
     G.widgetSetSensitive svActSelectBAdd  True
 
 
@@ -1132,13 +1148,15 @@ isProcEnabled sv pid =
                          -- In an uncontrollable state, the process is enabled if its
                          -- pause condition holds
                          if currentControllable sv
-                            then case lab of
-                                      LPause _ _ cond -> cond == mkMagicDoneCond
-                                      _               -> False
+                            then isInsideMagicBlock lab
                             else case lab of
                                       LPause _ _ cond -> storeEvalBool store cond == True
                                       LFinal _ _      -> not $ null $ Graph.lsuc cfa loc
                                       _               -> True
+
+isInsideMagicBlock :: LocLabel -> Bool
+isInsideMagicBlock (LPause _ _ cond) = cond == mkMagicDoneCond
+isInsideMagicBlock _                 = False
 
 -- update all displays
 updateDisplays :: RSourceView c a -> IO ()
