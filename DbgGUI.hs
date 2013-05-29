@@ -67,7 +67,7 @@ debugGUI extraFactories model = do
 
     -- main window
     wmain <- G.windowNew
-    G.widgetSetSizeRequest wmain dbgDefaultWidth dbgDefaultHeight
+    G.windowSetDefaultSize wmain dbgDefaultWidth dbgDefaultHeight
     G.windowMaximize wmain
     _ <- G.on wmain G.deleteEvent (do {liftIO G.mainQuit; return True})
 

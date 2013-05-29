@@ -701,10 +701,11 @@ sourceWindowCreate ref = do
     G.widgetShow scroll
     G.boxPackStart vbox scroll G.PackGrow 0
     
-    font <- G.fontDescriptionFromString "Courier 10 Pitch"
 
     view <- G.textViewNew
+    font <- G.fontDescriptionFromString "Courier 10 Pitch"
     G.widgetModifyFont view $ Just font
+    G.widgetSetSizeRequest view 600 300
     G.widgetShow view
     G.containerAdd scroll view
     G.textViewSetEditable view False
