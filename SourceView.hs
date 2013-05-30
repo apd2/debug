@@ -19,12 +19,13 @@ import System.IO.Error
 import Text.Parsec
 import Control.Applicative
 import qualified Text.PrettyPrint           as PP
+import Debug.Trace
 
 import Name
 import Pos
 import PP
 import qualified Parse
-import Util hiding (name)
+import Util hiding (name, trace)
 import TSLUtil
 import qualified DbgTypes    as D
 import qualified IDE         as D
@@ -787,7 +788,11 @@ sourceWindowUpdate ref = do
 --       else do G.toggleButtonSetActive (svContTog sv) False
 --               G.labelSetMarkup (svContLab sv) "<span color=\"blue\">  UNCONTROLLABLE </span>"
 
-    G.labelSetMarkup (svInprogLab sv) $ if' (svTracePos sv == 0) "<span weight=\"bold\">PAUSE</span>" ""
+    G.labelSetMarkup (svInprogLab sv) $ if svTracePos sv == 0
+                                           then if currentError sv
+                                                   then "<span color=\"red\" weight=\"bold\">ERROR</span>"
+                                                   else "<span weight=\"bold\">PAUSE</span>" 
+                                           else ""
 
 --    G.widgetSetSensitive (svContTog sv) $ (not $ currentControllable sv) && svTracePos sv == 0 && currentMagic sv
 
@@ -1237,6 +1242,9 @@ currentControllable sv = storeEvalBool (currentStore sv) (EVar mkContVarName)
 currentMagic :: SourceView c a -> Bool
 currentMagic sv = storeEvalBool (currentStore sv) (EVar mkMagicVarName)
 
+currentError :: SourceView c a -> Bool
+currentError sv = storeEvalBool (currentStore sv) mkErrVar
+
 cfaAtFrame :: SourceView c a -> Int -> CFA
 cfaAtFrame sv frame = stackGetCFA sv (svPID sv) (drop frame $ currentStack sv)
 
@@ -1300,7 +1308,8 @@ microstep ref = do
     -- Try all transitions from the current location; choose the first successful one
     let transitions = Graph.lsuc (currentCFA sv) (currentLoc sv)
     case mapMaybe (microstep' sv) transitions of
-         []               -> return False
+         []               -> do putStrLn "microstep' returns false" 
+                                return False
          (store, stack):_ -> do trace ("microstep': stack=" ++ showStack stack) $ writeIORef ref $ traceAppend sv store stack
                                 return True
 
@@ -1318,7 +1327,8 @@ microstep' sv (to, TranNop)                = Just (currentStore sv, (head $ curr
 microstep' sv (to, TranStat (SAssume e))   = if storeEvalBool (currentStore sv) e == True
                                                 then Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
                                                 else Nothing
-microstep' sv (to, TranStat (SAssign l r)) = let rval = storeTryEval (currentStore sv) r
+microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=" ++ show r) $
+                                             let rval = storeTryEval (currentStore sv) r
                                                  store' = storeSet (currentStore sv) l rval
                                              in case rval of 
                                                      Nothing -> Nothing
