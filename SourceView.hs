@@ -134,6 +134,8 @@ data SourceView c a = SourceView {
 
     -- Resolve view
     svResolveStore   :: G.TreeStore Expr,           -- tmp variables in the scope of the current expression
+    svAutoResolve    :: Bool,                       -- resolve non-determinism automatically
+    svAutoResolveTog :: G.CheckButton,              -- toggle auto-resolve mode button
 
     -- Action selector
     svActSelectText  :: G.TextView,                 -- user-edited controllable action
@@ -183,6 +185,8 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
                                  --, svContLab        = error "SourceViewL svContLab undefined"
                                  , svInprogLab      = error "SourceView: svInprogLab undefined"
                                  , svResolveStore   = error "SourceView: svResolveStore undefined"
+                                 , svAutoResolve    = True
+                                 , svAutoResolveTog = error "SourceView: svAutoResolveTog undefined"
                                  , svActSelectText  = error "SourceView: svActSelectText undefined"
                                  , svActSelectBAdd  = error "SourceView: svActSelectBAdd undefined"
                                  }
@@ -869,6 +873,8 @@ commandButtonsDisable ref = do
     G.widgetSetSensitive (svStepButton sv)    False
     G.widgetSetSensitive (svRunButton sv)     False
     G.widgetSetSensitive (svMagExitButton sv) False
+
+
 -- Resolve --
 
 resolveViewCreate :: RSourceView c a -> IO G.Widget
@@ -876,8 +882,18 @@ resolveViewCreate ref = do
     spec <- getIORef svSpec ref
     let ?spec = spec
 
+    vbox <- G.vBoxNew False 0
+    G.widgetShow vbox
+
+    -- autoresolve enable/disable switch
+    bauto <- G.checkButtonNewWithLabel "Auto-resolve non-determinism"
+    G.widgetShow bauto
+    G.boxPackStart vbox bauto G.PackNatural 0
+    _ <- G.on bauto G.toggled (toggleAutoResolve ref)
+
     view <- G.treeViewNew
     G.widgetShow view
+    G.boxPackStart vbox view G.PackGrow 0
     store <- G.treeStoreNew []
     G.treeViewSetModel view store
 
@@ -929,9 +945,16 @@ resolveViewCreate ref = do
     _ <- G.on combrend G.edited (textAsnChanged ref) 
 
     _ <- G.treeViewAppendColumn view valcol
-    modifyIORef ref (\sv -> sv {svResolveStore = store})
-    panel <- D.framePanelNew (G.toWidget view) "Resolve non-determinism" (return ())
+    modifyIORef ref (\sv -> sv { svResolveStore   = store
+                               , svAutoResolveTog = bauto})
+    panel <- D.framePanelNew (G.toWidget vbox) "Resolve non-determinism" (return ())
     D.panelGetWidget panel
+
+toggleAutoResolve :: RSourceView c a -> IO ()
+toggleAutoResolve ref = do
+    sv <- readIORef ref
+    mode <- G.toggleButtonGetActive $ svAutoResolveTog sv
+    writeIORef ref $ sv {svAutoResolve = mode}
 
 comboTextModel :: (?spec::Spec) => Type -> IO (G.ListStore String, G.ColumnId String String)
 comboTextModel Bool     = do store <- G.listStoreNew ["*", "true", "false"]
@@ -942,7 +965,7 @@ comboTextModel (Enum n) = do store <- G.listStoreNew ("*": (enumEnums $ getEnume
                              let column = G.makeColumnIdString 0
                              G.customStoreSetColumn store column id
                              return (store, column)
-comboTextModel t        = do store <- G.listStoreNew []
+comboTextModel _        = do store <- G.listStoreNew []
                              let column = G.makeColumnIdString 0
                              return (store, column)
 
@@ -963,16 +986,34 @@ textAsnChanged ref path valstr = do
 resolveViewUpdate :: RSourceView c a -> IO ()
 resolveViewUpdate ref = do
     sv <- readIORef ref
+    G.toggleButtonSetActive (svAutoResolveTog sv) (svAutoResolve sv)
     let exprs = currentTmpExprTree sv
         store = svResolveStore sv
     G.treeStoreClear store
     G.treeStoreInsertForest store [] 0 exprs
 
-
 resolveViewDisable :: RSourceView c a -> IO ()
 resolveViewDisable ref = do
     sv <- readIORef ref
     G.treeStoreClear $ svResolveStore sv
+
+autoResolve :: RSourceView c a -> IO ()
+autoResolve ref = do
+     sv <- readIORef ref
+     let ?spec = svSpec sv
+     _ <- mapM (autoResolve1 ref)
+          $ filter isTypeScalar
+          $ concatMap flatten 
+          $ currentTmpExprTree sv
+     return ()
+
+autoResolve1 :: RSourceView c a -> Expr -> IO ()
+autoResolve1 ref e = do
+    modifyIORef ref (\sv -> let ?spec = svSpec sv in
+                            if isNothing $ storeTryEval (currentStore sv) e
+                               then modifyCurrentStore sv (\s -> storeSet s e (Just $ SVal $ valDefault e))
+                               else sv)
+    
 
 -- Controllable action selector --
 
@@ -1149,7 +1190,8 @@ isProcEnabled sv pid =
     in case svTranPID sv of
             Just pid' -> pid' == pid
             _         -> -- The process is always enabled if it is inside a magic block
-                         -- Otherwise, the process is enabled if its pause condition holds
+                         -- Otherwise, the process is enabled if its
+                         -- pause condition holds
                          if isInsideMagicBlock lab
                             then True
                             else case lab of
@@ -1164,6 +1206,8 @@ isInsideMagicBlock _                 = False
 -- update all displays
 updateDisplays :: RSourceView c a -> IO ()
 updateDisplays ref = do
+    autores <- getIORef svAutoResolve ref
+    when autores $ autoResolve ref
     commandButtonsUpdate ref
     stackViewUpdate      ref
     traceViewUpdate      ref
