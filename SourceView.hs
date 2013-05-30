@@ -1148,12 +1148,10 @@ isProcEnabled sv pid =
         lab   = cfaLocLabel loc cfa
     in case svTranPID sv of
             Just pid' -> pid' == pid
-            _         -> -- In a controllable state, the process is enabled if it is
-                         -- currently inside a magic block
-                         -- In an uncontrollable state, the process is enabled if its
-                         -- pause condition holds
-                         if currentControllable sv
-                            then isInsideMagicBlock lab
+            _         -> -- The process is always enabled if it is inside a magic block
+                         -- Otherwise, the process is enabled if its pause condition holds
+                         if isInsideMagicBlock lab
+                            then True
                             else case lab of
                                       LPause _ _ cond -> storeEvalBool store cond == True
                                       LFinal _ _      -> not $ null $ Graph.lsuc cfa loc
