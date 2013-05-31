@@ -616,7 +616,7 @@ traceAppend sv store stack = sv {svTrace = tr, svTracePos = p}
 
 traceSetPos :: SourceView c a -> Int -> SourceView c a
 traceSetPos sv i | (i >= (length $ svTrace sv)) || (i < 0) = sv
-                 | otherwise = sv {svTracePos = i}
+                 | otherwise = sv {svTracePos = i, svStackFrame = 0}
 
 
 -- Watch --
@@ -810,6 +810,7 @@ sourceWindowDisable ref = do
 
 sourceClearPos :: SourceView c a -> IO ()
 sourceClearPos sv = do
+    putStrLn "sourceClearPos"
     let buf   = svSourceBuf sv
     do istart <- G.textBufferGetStartIter buf
        iend <- G.textBufferGetEndIter buf
@@ -1288,7 +1289,7 @@ currentError :: SourceView c a -> Bool
 currentError sv = storeEvalBool (currentStore sv) mkErrVar
 
 cfaAtFrame :: SourceView c a -> Int -> CFA
-cfaAtFrame sv frame = stackGetCFA sv (svPID sv) (drop frame $ currentStack sv)
+cfaAtFrame sv frame = trace ("cfaAtFrame " ++ showStack (drop frame $ currentStack sv)) $ stackGetCFA sv (svPID sv) (drop frame $ currentStack sv)
 
 -- Access arbitrary location in the trace 
 
@@ -1363,7 +1364,10 @@ microstep' sv (to, TranCall meth mretloc)  = -- insert new stack frame and mofif
                                                  stack' = case mretloc of
                                                                Nothing -> f0 : frames
                                                                Just l  -> f0{fLoc = l} : frames
-                                             in Just (currentStore sv, (FrameStatic (Front.ScopeMethod tmMain meth) to) : stack')
+                                                 sc = Front.ScopeMethod tmMain meth
+                                             in if fScope f0 == sc -- avoid creating duplicate frames (happens with task calls)
+                                                   then Just (currentStore sv, (FrameStatic sc to) : frames)
+                                                   else Just (currentStore sv, (FrameStatic sc to) : stack')
 microstep' sv (_ , TranReturn)             = Just (currentStore sv, tail $ currentStack sv)
 microstep' sv (to, TranNop)                = Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
 microstep' sv (to, TranStat (SAssume e))   = if storeEvalBool (currentStore sv) e == True
