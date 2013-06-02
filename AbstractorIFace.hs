@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards, MultiParamTypeClasses, FlexibleInstances, TypeSynonymInstances, UndecidableInstances #-}
+{-# LANGUAGE RecordWildCards, MultiParamTypeClasses, FlexibleInstances, TypeSynonymInstances, UndecidableInstances, ImplicitParams #-}
 
 -- Interface to the abstraction library
 
@@ -9,23 +9,37 @@ import Data.List
 
 import Cudd
 import CuddConvert
-import DbgTypes
 import Interface
 import TermiteGame
 import CuddExplicitDeref
+import Predicate
+import qualified ISpec          as I
+import qualified IType          as I
+import qualified DbgTypes       as D
 
-mkModel :: (Show sp, Show lp) => STDdManager s u -> RefineStatic s u -> RefineDynamic s u -> SectionInfo s u -> SymbolInfo s u sp lp -> Model DdManager DdNode b
-mkModel m RefineStatic{..} RefineDynamic{..} SectionInfo{..} SymbolInfo{..} = Model {..} 
+mkModel :: I.Spec -> STDdManager s u -> RefineStatic s u -> RefineDynamic s u -> SectionInfo s u -> SymbolInfo s u AbsVar AbsVar -> D.Model DdManager DdNode b
+mkModel spec m rs rd si symi = let ?spec = spec in mkModel' m rs rd si symi
+
+mkModel' :: (?spec::I.Spec) => STDdManager s u -> RefineStatic s u -> RefineDynamic s u -> SectionInfo s u -> SymbolInfo s u AbsVar AbsVar -> D.Model DdManager DdNode b
+mkModel' m RefineStatic{..} RefineDynamic{..} SectionInfo{..} SymbolInfo{..} = D.Model {..} 
     where
+    -- Extract type information from AbsVar
+    avarType :: AbsVar -> D.Type
+    avarType (AVarPred _) = D.Bool
+    avarType (AVarTerm t) = case I.typ t of
+                                 I.Bool   -> D.Bool
+                                 I.Enum n -> D.Enum $ (I.enumEnums $ I.getEnumeration n)
+                                 I.SInt w -> D.SInt w
+                                 I.UInt w -> D.UInt w
     mCtx           = toDdManager m
     (state, untracked) = partition func $ Map.toList _stateVars
         where func (_, (_, is, _, _)) = not $ null $ intersect is _trackedInds
     mStateVars     = map toTupleState state
-        where toTupleState        (p, (_, is, _, is')) = (show p, UInt (length is), (is, is'))
+        where toTupleState        (p, (_, is, _, is')) = (show p, avarType p, (is, is'))
     mUntrackedVars = map toModelVarUntracked untracked
-        where toModelVarUntracked (p, (_, is, _, _)) = ModelVar (show p) (UInt (length is)) is
+        where toModelVarUntracked (p, (_, is, _, _)) = D.ModelVar (show p) (avarType p) is
     mLabelVars     = concatMap toModelVarLabel $ Map.toList _labelVars
-        where toModelVarLabel     (p, (_, is, _, ie)) = [ModelVar (show p) (UInt (length is)) is, ModelVar (show p ++ ".en") (UInt 1) [ie]]
+        where toModelVarLabel     (p, (_, is, _, ie)) = [D.ModelVar (show p) (avarType p) is, D.ModelVar (show p ++ ".en") D.Bool [ie]]
     mStateRels = concat $ [[("cont", toDdNode mCtx cont)], [("init", toDdNode mCtx init)], goals, fairs]
         where
         goals = zipWith (func "goal") [0..] goal
