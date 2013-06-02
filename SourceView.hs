@@ -280,26 +280,27 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
 
     -- HACK: create an initial state
     model <- readIORef rmodel
-    let ?spec    = spec
-        ?absvars = absvars
-        ?model   = model
-        ?m       = D.mCtx model
-    initstore <- liftM storeExtendDefault
-                 $ case smtGetModel solver [let ?pred = [] in bexprToFormula $ snd $ tsInit $ specTran spec] of
-                        Just (Right store) -> return store                      
-                        _                  -> fail "Unsatisfiable initial condition"
-    -- more hack: simulate init transition
-    modifyIORef ref (\sv -> sv { svState      = D.abstractState initstore
-                               , svTmp        = SStruct $ M.empty
-                               , svPID        = ["$init"]
-                               , svTrace      = [TraceEntry { teStack = [FrameStatic (Front.ScopeTemplate (let ?spec = flatspec in tmMain)) (tranFrom $ fst $ tsInit $ specTran ?spec)]
-                                                            , teStore = initstore}]
-                               , svTracePos   = 0
-                               , svStackFrame = 0})
+    when (isNothing $ find ((== "init") . fst) $ D.mStateRels model) $ do
+        let ?spec    = spec
+            ?absvars = absvars
+            ?model   = model
+            ?m       = D.mCtx model
+        initstore <- liftM storeExtendDefault
+                     $ case smtGetModel solver [let ?pred = [] in bexprToFormula $ snd $ tsInit $ specTran spec] of
+                            Just (Right store) -> return store                      
+                            _                  -> fail "Unsatisfiable initial condition"
+        -- more hack: simulate init transition
+        modifyIORef ref (\sv -> sv { svState      = D.abstractState initstore
+                                   , svTmp        = SStruct $ M.empty
+                                   , svPID        = ["$init"]
+                                   , svTrace      = [TraceEntry { teStack = [FrameStatic (Front.ScopeTemplate (let ?spec = flatspec in tmMain)) (tranFrom $ fst $ tsInit $ specTran ?spec)]
+                                                                , teStore = initstore}]
+                                   , svTracePos   = 0
+                                   , svStackFrame = 0})
 
-    run ref
-    initstore' <- getIORef currentStore ref
-    D.modelSelectState rmodel (Just $ D.abstractState initstore') 
+        run ref
+        initstore' <- getIORef currentStore ref
+        D.modelSelectState rmodel (Just $ D.abstractState initstore') 
     -- END HACK
 
     return $ D.View { D.viewName      = "Source"
