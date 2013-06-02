@@ -51,7 +51,7 @@ dbgSetView ref idx view = do
 
 -- List of available views
 viewFactories :: (Rel c v a s, Vals b) => [(RModel c a b -> IO (View a b), Bool)]
-viewFactories = [ (varViewNew,   False)
+viewFactories = [ (varViewNew,   True)
                 , (graphViewNew, True)]
 
 
