@@ -631,6 +631,7 @@ watchCreate ref = do
 
     namecol <- G.treeViewColumnNew
     G.treeViewColumnSetTitle namecol "Watch expression"
+    G.treeViewColumnSetResizable namecol True
 
     exprend <- G.cellRendererTextNew
     G.cellLayoutPackStart namecol exprend False
@@ -649,6 +650,7 @@ watchCreate ref = do
 
     valcol <- G.treeViewColumnNew
     G.treeViewColumnSetTitle valcol "Value"
+    G.treeViewColumnSetResizable valcol True
 
     valrend <- G.cellRendererTextNew
     G.cellLayoutPackStart valcol valrend True
@@ -902,6 +904,7 @@ resolveViewCreate ref = do
     -- Variable name column
     namecol <- G.treeViewColumnNew
     G.treeViewColumnSetTitle namecol "Variables"
+    G.treeViewColumnSetResizable namecol True
 
     namerend <- G.cellRendererTextNew
     G.cellLayoutPackStart namecol namerend False
@@ -916,6 +919,7 @@ resolveViewCreate ref = do
     -- Variable assignment column
     valcol <- G.treeViewColumnNew
     G.treeViewColumnSetTitle valcol "Value"
+    G.treeViewColumnSetResizable valcol True
 
     textrend <- G.cellRendererTextNew
     G.cellLayoutPackStart valcol textrend True

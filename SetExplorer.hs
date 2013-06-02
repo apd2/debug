@@ -266,6 +266,7 @@ createSection ref panels section offset = do
     let addColumn :: String -> [(G.Object,(G.TreeIter -> IO ()))] -> IO ()
         addColumn title renderers = do
             col <- G.treeViewColumnNew
+            G.treeViewColumnSetResizable col True
             G.treeViewColumnSetTitle col title
             _ <- mapM (\(w,func) -> do let rend = G.castToCellRenderer w
                                        G.cellLayoutPackStart col rend False
