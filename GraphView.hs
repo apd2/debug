@@ -8,6 +8,7 @@ import Data.Maybe
 import Data.Tuple.Select
 import Data.Bits
 import Control.Monad
+import qualified Graphics.UI.Gtk as Gt
 
 import Util
 import Implicit
@@ -77,8 +78,10 @@ graphViewNew model = do
                                 , gvSelectedTrans = Nothing
                                 , gvLastEdgeId    = 0
                                 }
-    graphDrawSetCB draw $ graphDrawDefaultCB { onEdgeLeftClick = edgeLeftClick ref
-                                             , onNodeLeftClick = nodeLeftClick ref}
+    graphDrawSetCB draw $ graphDrawDefaultCB { onEdgeLeftClick  = edgeLeftClick  ref
+                                             , onNodeLeftClick  = nodeLeftClick  ref
+                                             , onNodeRightClick = nodeRightClick ref
+                                             }
 
     let cb = D.ViewEvents { D.evtStateSelected      = graphViewStateSelected      ref 
                           , D.evtTransitionSelected = graphViewTransitionSelected ref
@@ -135,6 +138,16 @@ nodeLeftClick ref nid = do
     gv <- readIORef ref
     D.modelSelectState (gvModel gv) (Just $ getState gv nid)
 
+nodeRightClick :: RGraphView c a b -> GNodeId -> IO ()
+nodeRightClick ref nid = do
+    menu <- Gt.menuNew
+
+    idelete <- Gt.menuItemNewWithLabel "Delete Node"
+    _ <- Gt.on idelete Gt.menuItemActivate (deleteState ref nid)
+    Gt.containerAdd menu idelete
+    Gt.widgetShow idelete
+
+    Gt.menuPopup menu Nothing
 
 --------------------------------------------------------------
 -- Private functions
@@ -216,6 +229,17 @@ createState gv coords s = do
     gv2 <- foldM (\_gv sid' -> (liftM snd) $ createSubsetEdge  _gv sid  sid') gv1 supersets
     gv3 <- foldM (\_gv sid' -> (liftM snd) $ createOverlapEdge _gv sid  sid') gv2 overlaps
     return (sid, gv3)
+
+deleteState :: RGraphView c a b -> G.Node -> IO ()
+deleteState ref nid = do
+    gv <- readIORef ref
+    graphDrawDeleteNode (gvGraphDraw gv) nid
+    writeIORef ref $ gv {gvGraph = G.delNode nid (gvGraph gv)}
+    if Just nid == gvSelectedState gv
+       then D.modelSelectState (gvModel gv) Nothing
+       else return ()
+
+
 
 createTransition :: (D.Rel c v a s, ?m::c) => GraphView c a b -> G.Node -> G.Node -> D.Transition a b -> IO (GEdgeId, GraphView c a b)
 createTransition gv fromid toid tran = do
