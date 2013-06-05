@@ -27,9 +27,10 @@ import PP
 import qualified Parse
 import Util hiding (name, trace)
 import TSLUtil
-import qualified DbgTypes    as D
-import qualified IDE         as D
-import qualified DbgAbstract as D
+import qualified DbgTypes      as D
+import qualified IDE           as D
+import qualified DbgAbstract   as D
+import qualified DbgConcretise as D
 import ISpec
 import TranSpec
 import IExpr
@@ -148,9 +149,8 @@ type RSourceView c a = IORef (SourceView c a)
 -- View callbacks
 --------------------------------------------------------------
 
-sourceViewNew :: (D.Rel c v a s) => Front.Spec -> Front.Spec -> Spec -> [AbsVar] -> SMTSolver -> D.RModel c a Store -> IO (D.View a Store)
-sourceViewNew inspec flatspec spec avars solver rmodel = do
-    let absvars = M.fromList $ map (\v -> (show v, v)) avars
+sourceViewNew :: (D.Rel c v a s) => Front.Spec -> Front.Spec -> Spec -> M.Map String AbsVar -> SMTSolver -> D.RModel c a Store -> IO (D.View a Store)
+sourceViewNew inspec flatspec spec absvars solver rmodel = do
 
     ref <- newIORef $ SourceView { svModel          = rmodel
                                  , svInputSpec      = inspec
@@ -285,7 +285,7 @@ sourceViewNew inspec flatspec spec avars solver rmodel = do
             ?absvars = absvars
             ?model   = model
             ?m       = D.mCtx model
-        initstore <- liftM storeExtendDefault
+        initstore <- liftM D.storeExtendDefault
                      $ case smtGetModel solver [let ?pred = [] in bexprToFormula $ snd $ tsInit $ specTran spec] of
                             Just (Right store) -> return store                      
                             _                  -> fail "Unsatisfiable initial condition"
@@ -1121,17 +1121,6 @@ actionSelectorEnable ref = do
 --------------------------------------------------------------
 -- Private helpers
 --------------------------------------------------------------
-
--- Assign all unassigned state variables to their default values
-storeExtendDefault :: (?spec::Spec) => Store -> Store
-storeExtendDefault store = foldl' (\st v -> let evar = EVar $ varName v in
-                                            foldl' extendScalar st (exprScalars evar (typ evar)))
-                                  store (specVar ?spec)
-
-extendScalar :: (?spec::Spec) => Store -> Expr -> Store
-extendScalar store e = case storeTryEval store e of
-                            Nothing -> storeSet store e (Just $ SVal $ valDefault e)
-                            _       -> store
 
 isWaitForMagicLabel :: LocLabel -> Bool
 isWaitForMagicLabel (LPause _ _ e) = isWaitForMagic e

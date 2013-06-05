@@ -42,6 +42,9 @@ uncontrollableStyle = ( GC {gcFG = (0    ,     0, 40000), gcLW=2, gcLS=True}
 bothStyle           = ( GC {gcFG = (0    ,     0, 40000), gcLW=2, gcLS=True}
                       , GC {gcFG = (40000, 40000, 40000), gcLW=0, gcLS=False})
 
+-- show concrete nodes as smaller circles
+scaleConcreteNode   = 0.5
+
 --------------------------------------------------------------
 -- Types
 --------------------------------------------------------------
@@ -138,14 +141,23 @@ nodeLeftClick ref nid = do
     gv <- readIORef ref
     D.modelSelectState (gvModel gv) (Just $ getState gv nid)
 
-nodeRightClick :: RGraphView c a b -> GNodeId -> IO ()
+nodeRightClick :: (D.Rel c v a s, D.Vals b) => RGraphView c a b -> GNodeId -> IO ()
 nodeRightClick ref nid = do
+    gv <- readIORef ref
+    let s = getState gv nid
+
     menu <- Gt.menuNew
 
     idelete <- Gt.menuItemNewWithLabel "Delete Node"
     _ <- Gt.on idelete Gt.menuItemActivate (deleteState ref nid)
     Gt.containerAdd menu idelete
     Gt.widgetShow idelete
+
+    when (not $ D.isConcreteState s) $ do
+        iconc <- Gt.menuItemNewWithLabel "Concretise Node"
+        _ <- Gt.on iconc Gt.menuItemActivate (concretiseState ref nid)
+        Gt.containerAdd menu iconc
+        Gt.widgetShow iconc
 
     Gt.menuPopup menu Nothing
 
@@ -221,9 +233,10 @@ createState gv coords s = do
         (subsets, other1)   = partition ((.== t) . (.-> rel) . D.sAbstract . getState gv) other0
         (supersets, other2) = partition ((.== t) . (rel .->) . D.sAbstract . getState gv) other1
         overlaps            = filter    ((./= b) . (.& rel)  . D.sAbstract . getState gv) other2
+        rscale = if isNothing (D.sConcrete s) then 1.0 else scaleConcreteNode
     (ls, as) <- stateStyle gv' sid
     annots <- stateAnnots gv' rel
-    graphDrawInsertNode (gvGraphDraw gv') sid annots coords (ls, as)
+    graphDrawInsertNode (gvGraphDraw gv') sid annots coords rscale (ls, as)
     gv0 <- foldM (\_gv sid' -> (liftM snd) $ createEqEdge      _gv sid  sid') gv' eqsets
     gv1 <- foldM (\_gv sid' -> (liftM snd) $ createSubsetEdge  _gv sid' sid)  gv0 subsets
     gv2 <- foldM (\_gv sid' -> (liftM snd) $ createSubsetEdge  _gv sid  sid') gv1 supersets
@@ -239,7 +252,19 @@ deleteState ref nid = do
        then D.modelSelectState (gvModel gv) Nothing
        else return ()
 
-
+concretiseState :: (D.Rel c v a s, D.Vals b) => RGraphView c a b -> G.Node -> IO ()
+concretiseState ref nid = do
+    gv <- readIORef ref
+    ctx <- D.modelCtx $ gvModel gv
+    let ?m = ctx
+    let s = getState gv nid
+    ms' <- D.modelConcretiseState (gvModel gv) (D.sAbstract s)
+    case ms' of
+         Nothing -> -- TODO: error message
+                    return ()
+         Just s' -> do (nid', gv') <- findOrCreateState gv (Just nid) s'
+                       writeIORef ref gv'
+                       D.modelSelectState (gvModel gv') (Just $ getState gv' nid')
 
 createTransition :: (D.Rel c v a s, ?m::c) => GraphView c a b -> G.Node -> G.Node -> D.Transition a b -> IO (GEdgeId, GraphView c a b)
 createTransition gv fromid toid tran = do

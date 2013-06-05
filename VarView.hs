@@ -10,8 +10,6 @@ import qualified DbgTypes        as D
 import qualified IDE             as D
 import SetExplorer
 import Implicit
-import DbgConcretise
-import DbgAbstract
 
 data VarView c a b = VarView {
     vvModel    :: D.RModel c a b,
@@ -77,7 +75,7 @@ varViewStateSelected ref mstate = do
     ctx <- D.modelCtx vvModel
     let ?m = ctx
     trel <- D.modelActiveTransRel vvModel
-    putStrLn $ "trel support: " ++ (show $ supportIndices trel)
+--    putStrLn $ "trel support: " ++ (show $ supportIndices trel)
     setExplorerSetRelation vvExplorer $ case mstate of
                                              Nothing    -> trel
                                              Just state -> (D.sAbstract state) .& trel

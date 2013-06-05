@@ -203,7 +203,7 @@ varUserConstraint :: (D.Rel c v a s, ?m::c) => VarEntry a -> a
 varUserConstraint var = constraintFromStr var (varUserSelectionText var)
 
 varAssignmentStr :: (D.Rel c v a s, ?m::c) => VarEntry a -> String
-varAssignmentStr var = constraintToStr var (varAssignment var)
+varAssignmentStr var = D.valStrFromRel (varVar var) (varType var) (varAssignment var)
 
 constraintFromStr :: (D.Rel c v a s, ?m::c) => VarEntry a -> String -> a
 constraintFromStr var@VarEntry{..} str =
@@ -225,12 +225,6 @@ constraintFromStr var@VarEntry{..} str =
     where ichoice::(Maybe Integer) = readMay str
           v = varVar var
          
-constraintToStr :: (D.Rel c v a s, ?m::c) => VarEntry a -> a -> String
-constraintToStr _ rel            | rel .== t = "*"
-constraintToStr _ rel            | rel .== b = "#"
-constraintToStr var@VarEntry{..} rel = 
-    D.valStrFromInt varType $ boolArrToBitsBe $ extract (varVar var) $ fromJust $ satOne rel
-
 createSection :: (D.Rel c v a s, ?m::c) => RSetExplorer c a -> IDEPanels -> Section -> Int -> IO (G.ListStore (VarEntry a))
 createSection ref panels section offset = do
     -- frame

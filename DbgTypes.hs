@@ -6,6 +6,7 @@ module DbgTypes(Rel,
                 ViewEvents(..),
                 Type(..),
                 State(..),
+                isConcreteState,
                 StateCategory(..),
                 stateCategory,
                 Transition(..),
@@ -20,9 +21,11 @@ module DbgTypes(Rel,
                 mNextV, 
                 mUntrackedV, 
                 mLabelV,
+                mDumpIndices,
                 contRelName,
                 idxToVS,
                 valStrFromInt,
+                valStrFromRel,
                 oneSatVal,
                 modelCtx,
                 modelStateVars,
@@ -30,6 +33,7 @@ module DbgTypes(Rel,
                 modelUntrackedVars,
                 modelStateRels,
                 modelTransRels,
+                modelConcretiseState,
                 modelActiveTransRel,
                 modelSelectTransition,
                 modelSelectState) where
@@ -37,6 +41,7 @@ module DbgTypes(Rel,
 import qualified Graphics.UI.Gtk as G 
 import Data.IORef
 import Data.List
+import Data.Maybe
 import Control.Monad
 
 import Util
@@ -71,7 +76,7 @@ class (L.Variable c v,
 class (Eq b) => Vals b
 
 idxToVS :: (Rel c v a s, ?m::c) => [Int] -> v
-idxToVS indices = vconcat $ map varAtIndex indices
+idxToVS = vconcat . map varAtIndex . sort
 
 -- Debugger's own type system
 data Type = Bool
@@ -91,6 +96,11 @@ valStrFromInt Bool      1                                = "true"
 valStrFromInt (Enum es) i | length es >= fromInteger i+1 = es !! (fromInteger i)
                           | otherwise                    = "?"
 valStrFromInt _         i                                = show i
+
+valStrFromRel :: (Rel c v a s, ?m::c) => v -> Type -> a -> String
+valStrFromRel _ _  rel | rel .== t = "*"
+valStrFromRel _ _  rel | rel .== b = "#"
+valStrFromRel x tp rel             = valStrFromInt tp $ boolArrToBitsBe $ extract x $ fromJust $ satOne rel
 
 -- View interface
 data View a b = View {
@@ -116,6 +126,9 @@ data State a b = State {
     sAbstract :: a,      -- abstract state
     sConcrete :: Maybe b -- concrete state
 }
+
+isConcreteState :: State a b -> Bool
+isConcreteState = isJust . sConcrete
 
 instance (?m::c, L.Boolean c a, Eq b) => Eq (State a b) where
     (==) x y = sAbstract x .== sAbstract y && sConcrete x == sConcrete y
@@ -173,6 +186,9 @@ data Model c a b = Model {
     mStateRels            :: [(String, a)],
     mTransRels            :: [(String, a)],
 
+    -- Callbacks
+    mConcretiseState      :: a -> Maybe (State a b),
+
     -- Dynamic part --
     mViews                :: [View a b]
 }
@@ -184,10 +200,10 @@ mNextStateVars :: Model c a b -> [ModelVar]
 mNextStateVars = map (\(n,tp,(_,i)) -> ModelVar n tp i) . mStateVars
 
 mStateV, mNextV, mUntrackedV, mLabelV :: (Rel c v a s, ?m::c) => Model c a b -> v
-mStateV     = vconcat . map varAtIndex . concatMap mvarIdx . mCurStateVars
-mNextV      = vconcat . map varAtIndex . concatMap mvarIdx . mNextStateVars
-mUntrackedV = vconcat . map varAtIndex . concatMap mvarIdx . mUntrackedVars
-mLabelV     = vconcat . map varAtIndex . concatMap mvarIdx . mLabelVars
+mStateV     = idxToVS . concatMap mvarIdx . mCurStateVars
+mNextV      = idxToVS . concatMap mvarIdx . mNextStateVars
+mUntrackedV = idxToVS . concatMap mvarIdx . mUntrackedVars
+mLabelV     = idxToVS . concatMap mvarIdx . mLabelVars
 
 
 type RModel c a b = IORef (Model c a b)
@@ -216,6 +232,9 @@ modelTransRels ref = getIORef mTransRels ref
 modelStateRels :: RModel c a b -> IO [(String, a)]
 modelStateRels ref = getIORef mStateRels ref
 
+modelConcretiseState :: RModel c a b -> a -> IO (Maybe (State a b))
+modelConcretiseState ref x = getIORef ((flip mConcretiseState) x) ref
+
 -- TODO: implement proper selection of transition relation to debug
 modelActiveTransRel :: RModel c a b -> IO a
 modelActiveTransRel ref = getIORef (snd . head . mTransRels) ref
@@ -233,6 +252,8 @@ modelSelectState ref mrel = do
    _ <- mapM (\v -> (evtStateSelected $ viewCB v) mrel) views
    return ()
 
+
+
 -- Utils
 
 -- Find satisfying assignment and return valuation of variables
@@ -243,6 +264,21 @@ oneSatVal rel vars = do
     asn <- satOne rel
     let supvars = filter (any (\idx -> elem idx support) . mvarIdx) vars
     return $ map (\v -> (v, boolArrToBitsBe $ extract (idxToVS (mvarIdx v)) asn)) supvars
+
+----------------------------------------------------------
+-- Debugging
+----------------------------------------------------------
+
+mDumpIndices :: Model c a b -> String
+mDumpIndices m =
+    intercalate "\n" $
+    map (\(n,_,(i,i')) -> (pad p ' ' n) ++ ": (" ++ showi i ++ "," ++ showi i' ++ ")") (mStateVars     m) ++
+    map showmv                                                                         (mUntrackedVars m) ++
+    map showmv                                                                         (mLabelVars     m)
+    where
+    p = 32 
+    showi is = "[" ++ (intercalate "," $ map show is) ++ "]"
+    showmv v = (pad p ' ' (mvarName v)) ++ ": " ++ showi (mvarIdx v)
 
 ----------------------------------------------------------
 -- Private functions
