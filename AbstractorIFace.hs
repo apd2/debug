@@ -6,12 +6,14 @@ module AbstractorIFace(mkModel) where
 
 import qualified Data.Map as M
 import Data.List
+import Data.Maybe
 
 import Cudd
 import CuddConvert
 import Interface
 import TermiteGame
 import CuddExplicitDeref
+import Implicit
 import CuddSymTab
 import Predicate
 import Store
@@ -20,6 +22,7 @@ import qualified ISpec          as I
 import qualified IType          as I
 import qualified DbgTypes       as D
 import qualified DbgConcretise  as D
+import qualified DbgAbstract    as D
 
 instance D.Rel DdManager VarData DdNode [[SatBit]]
 
@@ -73,9 +76,26 @@ mkModel' m RefineStatic{..} RefineDynamic{..} SectionInfo{..} SymbolInfo{..} = m
     mTransRels = [("trans", toDdNode mCtx trans), ("c-c", toDdNode mCtx consistentMinusCULCont), ("c+c", toDdNode mCtx consistentPlusCULCont), ("c-u", toDdNode mCtx consistentMinusCULUCont), ("c+u", toDdNode mCtx consistentPlusCULUCont)]
     mViews     = []
     model = D.Model{..}
-    mConcretiseState = concretiseS
+    mConcretiseState      = concretiseS
+    mConcretiseTransition = concretiseT
+    mAutoConcretiseTrans = True
+
     concretiseS :: DdNode -> Maybe (D.State DdNode Store)
     concretiseS d =
         let ?m       = mCtx
             ?model   = model
         in D.concretiseState d
+
+    concretiseT :: D.Transition DdNode Store -> Maybe (D.Transition DdNode Store)
+    concretiseT D.Transition{..} | D.isConcreteState tranFrom =
+        let ?m     = mCtx
+            ?model = model in
+        let cstate = fromJust $ D.sConcrete tranFrom
+            cnext  = D.concretiseTransition cstate tranAbstractLabel (D.sAbstract tranTo)
+            mtr'    = fmap (D.abstractTransition tranFrom) cnext
+        in case mtr' of
+                Nothing  -> Nothing
+                Just tr' -> if (D.sAbstract $ D.tranTo tr') .== (D.sAbstract tranTo)
+                               then Just tr'
+                               else error "concretiseT: concretised next-state differs from abstract next-state"
+                                 | otherwise = Nothing

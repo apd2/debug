@@ -213,13 +213,13 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
     -- command buttons
     butstep <- G.toolButtonNewFromStock G.stockGoForward
     G.set butstep [G.widgetTooltipText G.:= Just "step"]
-    _ <- G.onToolButtonClicked butstep (do {_ <- step ref; return ()})
+    _ <- G.onToolButtonClicked butstep (stepAction ref)
     G.widgetShow butstep
     G.toolbarInsert tbar butstep (-1)
 
     butrun <- G.toolButtonNewFromStock G.stockGotoLast
     G.set butrun [G.widgetTooltipText G.:= Just "run"]
-    _ <- G.onToolButtonClicked butrun (run ref)
+    _ <- G.onToolButtonClicked butrun (runAction ref)
     G.widgetShow butrun
     G.toolbarInsert tbar butrun (-1)
 
@@ -298,7 +298,7 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
                                    , svTracePos   = 0
                                    , svStackFrame = 0})
 
-        run ref
+        runAction ref
         initstore' <- getIORef currentStore ref
         D.modelSelectState rmodel (Just $ D.abstractState initstore') 
     -- END HACK
@@ -337,36 +337,47 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
 -- Actions
 --------------------------------------------------------------
 
+stepAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
+stepAction ref = do 
+    sv   <- readIORef ref
+    let msv' = step sv
+    when (isJust msv') $ do writeIORef ref (fromJust msv')
+                            when (currentDelay $ fromJust msv') $ completeTransition ref
+                            updateDisplays ref
+
 -- Execute one statement
-step :: (D.Rel c v a s) => RSourceView c a -> IO Bool
-step ref = do
-    modifyIORef ref (\sv -> sv{svStackFrame = 0})
-    -- save current state
-    backup <- readIORef ref
-    ok <- microstep ref
-    if ok
-       then do -- did we reach the next statement?
-               lab <- getIORef currentLocLabel ref
-               let action = locAct lab
-               if (isActNone action) && (not $ isDelayLabel lab)
-                  then step ref
-                  else do -- if we reached a pause statement, update PC and PID variables
-                          when (isDelayLabel lab) $ completeTransition ref
-                          updateDisplays ref
-                          return True 
-       else do -- rollback changes
-               writeIORef ref backup
-               updateDisplays ref
-               return False
+step :: (D.Rel c v a s) => SourceView c a -> Maybe (SourceView c a)
+step sv = 
+    let sv0 = sv {svStackFrame = 0} in
+    case microstep sv0 of
+         Just sv' -> let -- did we reach the next statement?
+                         lab    = currentLocLabel sv'
+                         action = locAct lab
+                     in if isActNone action && (not $ isDelayLabel lab)
+                           then step sv'
+                           else Just sv'
+         Nothing -> Nothing
 
 
+runAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
+runAction ref = do
+    sv <- readIORef ref
+    case run sv of
+         Nothing  -> return ()
+         Just sv' -> do writeIORef ref sv'
+                        when (currentDelay sv') $ completeTransition ref
+                        updateDisplays ref
+    
 
 -- run until pause or nondeterministic choice
-run :: (D.Rel c v a s) => RSourceView c a -> IO ()
-run ref = do
-    ok <- step ref
-    lab <- getIORef currentLocLabel ref
-    when (ok && (not $ isDelayLabel lab)) $ run ref
+run :: (D.Rel c v a s) => SourceView c a -> Maybe (SourceView c a)
+run sv = case step sv of
+              Nothing  -> Nothing
+              Just sv' -> if currentDelay sv' 
+                             then Just sv'
+                             else case run sv' of
+                                       Nothing   -> Just sv'
+                                       Just sv'' -> Just sv''
 
 exitMagicBlock :: (D.Rel c v a s) => RSourceView c a -> IO ()
 exitMagicBlock ref = do
@@ -1255,6 +1266,9 @@ currentLoc sv = getLoc sv (svTracePos sv)
 currentLocLabel :: SourceView c a -> LocLabel
 currentLocLabel sv = getLocLabel sv (svTracePos sv)
 
+currentDelay :: SourceView c a -> Bool
+currentDelay sv = getDelay sv (svTracePos sv)
+
 currentStore :: SourceView c a -> Store
 currentStore sv = getStore sv (svTracePos sv)
 
@@ -1307,6 +1321,9 @@ getLoc sv p = fLoc $ head $ getStack sv p
 getLocLabel :: SourceView c a -> Int -> LocLabel
 getLocLabel sv p = cfaLocLabel (getLoc sv p) (getCFA sv p)
 
+getDelay :: SourceView c a -> Int -> Bool
+getDelay sv p = isDelayLabel $ getLocLabel sv p
+
 getStore :: SourceView c a -> Int -> Store
 getStore sv p = teStore $ svTrace sv !! p
 
@@ -1340,16 +1357,15 @@ getTmpExprTree sv p =
 -- Returns True if the step was performed successfully and
 -- False otherwise (i.e., the user did not provide values
 -- for nondeterministic arguments)
-microstep :: RSourceView c a -> IO Bool
-microstep ref = do
-    sv <- readIORef ref
+microstep :: SourceView c a -> Maybe (SourceView c a)
+microstep sv = 
     -- Try all transitions from the current location; choose the first successful one
     let transitions = Graph.lsuc (currentCFA sv) (currentLoc sv)
-    case mapMaybe (microstep' sv) transitions of
-         []               -> do putStrLn "microstep' returns false" 
-                                return False
-         (store, stack):_ -> do trace ("microstep': stack=" ++ showStack stack) $ writeIORef ref $ traceAppend sv store stack
-                                return True
+    in case mapMaybe (microstep' sv) transitions of
+            []               -> trace "microstep' returns false" 
+                                $ Nothing
+            (store, stack):_ -> trace ("microstep': stack=" ++ showStack stack) 
+                                $ Just $ traceAppend sv store stack
 
 microstep' :: SourceView c a -> (Loc, TranLabel) -> Maybe (Store, Stack)
 microstep' sv (to, TranCall meth mretloc)  = -- insert new stack frame and mofify the old frame to point to return location,

@@ -6,8 +6,6 @@ module DbgAbstract (abstractState,
                     abstractTransition) where
 
 import qualified Data.Map as M
-import Data.List
-import Debug.Trace
 
 import Util hiding (trace)
 import qualified DbgTypes as D
@@ -50,8 +48,8 @@ evalAbsVar store D.ModelVar{..} =
     -- to the debugger must be handled in a special way: set the .en variable
     -- to true iff the base variable is assigned
     case M.lookup mvarName ?absvars of
-         Nothing -> if isSuffixOf ".en" mvarName
-                       then case M.lookup (take (length mvarName - length ".en") mvarName) ?absvars of
+         Nothing -> if D.isEnVarName mvarName
+                       then case M.lookup (D.mkBaseVarName mvarName) ?absvars of
                                  Nothing -> error $ "evalAbsVar: unknown .en variable " ++ mvarName
                                  Just v  -> case storeTryEval store (avarToExpr v) of
                                                  Nothing -> Imp.eqConst (D.idxToVS mvarIdx) (0::Int)
@@ -65,18 +63,6 @@ evalAbsVar' store avar is =
     case storeTryEvalScalar store $ avarToExpr avar of
          Just v   -> Imp.eqConst (D.idxToVS is) (scalarToInt v)
          Nothing  -> Imp.t
-
---evalAbsVar' store (AVarTerm term) is = 
---   case storeTryEvalScalar store $ termToExpr term of
---        Just v  -> Imp.eqConst (D.idxToVS is) $ scalarToInt v
---        Nothing -> Imp.t
-
---evalAbsVar' store (AVarEnum name vals) is =
---    case findIndex (==v) vals of
---         Just i  -> eqConst vs i
---         Nothing -> conj $ map (nt $ eqConst vs i) [0..length vals -1]
---    where v  = storeEvalScalar store (I.EVar name)
---          vs = D.idxToVS is
 
 scalarToInt :: (?spec::Spec) => Val -> Integer
 scalarToInt (BoolVal True)  = 1

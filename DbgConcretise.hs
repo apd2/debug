@@ -22,7 +22,6 @@ import IVar
 import ISpec
 import IType
 import IExpr hiding (conj)
-import DbgAbstract
 
 -- Input: relation over a set of abstract variables
 -- Output: a single concrete assignment or Nothing if a 
@@ -70,18 +69,24 @@ concretiseLabel cstate alabel = do
                                      Just $ SStruct $ M.filterWithKey (\n _ -> (varCat $ getVar n) == VarTmp) fs 
         _                         -> Nothing
 
-concretiseTransition :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => Store -> a -> Maybe (D.Transition a Store)
-concretiseTransition cstate alabel = do
-    let tranFrom          = abstractState     cstate
-        tranUntracked     = abstractUntracked cstate
-        tranAbstractLabel = alabel
-    clabel <- concretiseLabel cstate alabel
-    let cto = simulateTransition cstate clabel
-        tranConcreteLabel = Just $ storeProject cto $ map varName $ specTmpVar ?spec
-        tranTo = abstractState cto
-    return $ D.Transition{..}
-
-
+-- Inputs:
+-- * Concrete from-state
+-- * Abstract label
+-- * Abstract next-state
+--
+-- Outputs: 
+-- * Concrete next-state and label store, which
+--   can be used to compute other components of 
+--   the transition
+--
+-- Concretises label variables and PID using concretiseRel and then simulates the 
+-- transition using the SourceView component
+concretiseTransition :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => Store -> a -> a -> Maybe Store
+concretiseTransition _ _ _ = Nothing
+--concretiseTransition cstate alabel anext = simulateTransition cstate clabel pid
+--    where clabel = concretiseLabel cstate alabel
+--          pid    = 
+--
 simulateTransition = error "simulateTransition not implemented"
 
 

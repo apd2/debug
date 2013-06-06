@@ -27,6 +27,9 @@ module DbgTypes(Rel,
                 idxToVS,
                 valStrFromInt,
                 valStrFromRel,
+                isEnVarName,
+                mkEnVarName,
+                mkBaseVarName,
                 oneSatVal,
                 modelCtx,
                 modelStateVars,
@@ -194,10 +197,12 @@ data Model c a b = Model {
     mTransRels            :: [(String, a)],
 
     -- Callbacks
-    mConcretiseState      :: a -> Maybe (State a b),
+    mConcretiseState      :: a              -> Maybe (State a b),
+    mConcretiseTransition :: Transition a b -> Maybe (Transition a b),
 
     -- Dynamic part --
-    mViews                :: [View a b]
+    mViews                :: [View a b],
+    mAutoConcretiseTrans  :: Bool
 }
 
 mCurStateVars :: Model c a b -> [ModelVar]
@@ -249,8 +254,13 @@ modelActiveTransRel ref = getIORef (snd . head . mTransRels) ref
 -- Actions
 modelSelectTransition :: RModel c a b -> Transition a b -> IO ()
 modelSelectTransition ref tran = do
-   views <- modelViews ref
-   _ <- mapM (\v -> (evtTransitionSelected $ viewCB v) tran) views
+   Model{..} <- readIORef ref
+   let tran' = if (not $ isConcreteTransition tran) && mAutoConcretiseTrans
+                  then case mConcretiseTransition tran of 
+                            Nothing -> tran
+                            Just tr -> tr
+                  else tran
+   _ <- mapM (\v -> (evtTransitionSelected $ viewCB v) tran') mViews
    return ()
 
 modelSelectState :: RModel c a b -> Maybe (State a b) -> IO ()
@@ -259,12 +269,20 @@ modelSelectState ref mrel = do
    _ <- mapM (\v -> (evtStateSelected $ viewCB v) mrel) views
    return ()
 
-
-
 -- Utils
 
+isEnVarName :: String -> Bool
+isEnVarName = isSuffixOf ".en"
+
+mkEnVarName :: String -> String
+mkEnVarName = (++ ".en")
+
+mkBaseVarName :: String -> String
+mkBaseVarName n = take (length n - length ".en") n
+
 -- Find satisfying assignment and return valuation of variables
--- in support of rel
+-- in support of rel.  Filter out variables whose corresponsing 
+-- .en variables are false.
 oneSatVal :: (Rel c v a s, ?m::c) => a -> [ModelVar] -> Maybe [(ModelVar, Integer)]
 oneSatVal rel vars = do
     let support = supportIndices rel
