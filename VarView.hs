@@ -12,9 +12,21 @@ import SetExplorer
 import Implicit
 
 data VarView c a b = VarView {
-    vvModel    :: D.RModel c a b,
-    vvExplorer :: RSetExplorer c a
+    vvModel     :: D.RModel c a b,
+    vvSelection :: Maybe (Either (D.State a b) (D.Transition a b)),
+    vvExplorer  :: RSetExplorer c a
 }
+
+vvSelectionFrom :: VarView c a b -> Maybe (D.State a b)
+vvSelectionFrom vv = case vvSelection vv of
+                          Nothing         -> Nothing
+                          Just (Left s)   -> Just s
+                          Just (Right tr) -> Just (D.tranFrom tr)
+
+vvSelectionTo :: VarView c a b -> Maybe (D.State a b)
+vvSelectionTo vv = case vvSelection vv of
+                          Just (Right tr) -> Just (D.tranTo tr)
+                          _               -> Nothing
 
 type RVarView c a b = IORef (VarView c a b)
 
@@ -34,8 +46,9 @@ varViewNew rmodel = do
                    ]
     explorer         <- setExplorerNew ?m sections (SetExplorerEvents {evtValueChanged = return ()})
     w                <- setExplorerGetWidget explorer
-    ref <- newIORef $ VarView { vvModel    = rmodel
-                              , vvExplorer = explorer
+    ref <- newIORef $ VarView { vvModel     = rmodel
+                              , vvSelection = Nothing 
+                              , vvExplorer  = explorer
                               }
     -- Top-level vbox
     vbox <- G.vBoxNew False 0
@@ -71,10 +84,11 @@ varViewNew rmodel = do
 
 varViewStateSelected :: (D.Rel c v a s) => RVarView c a b -> Maybe (D.State a b) -> IO ()
 varViewStateSelected ref mstate = do
-    VarView{..} <- readIORef ref
+    vv@VarView{..} <- readIORef ref
     ctx <- D.modelCtx vvModel
     let ?m = ctx
     trel <- D.modelActiveTransRel vvModel
+    writeIORef ref $ vv {vvSelection = fmap Left mstate}
 --    putStrLn $ "trel support: " ++ (show $ supportIndices trel)
     setExplorerSetRelation vvExplorer $ case mstate of
                                              Nothing    -> trel
@@ -82,9 +96,10 @@ varViewStateSelected ref mstate = do
 
 varViewTransitionSelected :: (D.Rel c v a s) => RVarView c a b -> D.Transition a b -> IO ()
 varViewTransitionSelected ref tran = do
-    VarView{..} <- readIORef ref
+    vv@VarView{..} <- readIORef ref
     model <- readIORef vvModel
     let ?m = D.mCtx model
+    writeIORef ref $ vv {vvSelection = Just $ Right tran}
     setExplorerSetRelation vvExplorer (D.tranRel model tran)
 
 ---------------------------------------------------------------------
@@ -93,14 +108,20 @@ varViewTransitionSelected ref tran = do
 
 executeTransition :: (D.Rel c v a s, ?m::c) => RVarView c a b -> IO ()
 executeTransition ref = do
-    VarView{..} <- readIORef ref
+    vv@VarView{..} <- readIORef ref
     [from, untracked, label, to] <- setExplorerGetVarAssignment vvExplorer 
     model <- readIORef vvModel
-    let tranFrom          = D.State { sAbstract = conj $ map snd $ from
-                                    , sConcrete = Nothing}
+    let fabs              = conj $ map snd $ from
+        tranFrom          = D.State { sAbstract = fabs
+                                    , sConcrete = case vvSelectionFrom vv of
+                                                       Nothing -> Nothing
+                                                       Just st -> if D.sAbstract st .== fabs then D.sConcrete st else Nothing}
         tranUntracked     = conj $ map snd $ untracked 
         tranAbstractLabel = conj $ map snd $ label
         tranConcreteLabel = Nothing
-        tranTo            = D.State { sAbstract = swap (D.mNextV model) (D.mStateV model) (conj $ map snd $ to)
-                                    , sConcrete = Nothing}
+        tabs              = swap (D.mNextV model) (D.mStateV model) (conj $ map snd $ to)
+        tranTo            = D.State { sAbstract = tabs
+                                    , sConcrete = case vvSelectionTo vv of
+                                                       Nothing -> Nothing
+                                                       Just st -> if D.sAbstract st  .== tabs then D.sConcrete st else Nothing}
     D.modelSelectTransition vvModel D.Transition{..}

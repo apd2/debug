@@ -806,8 +806,9 @@ sourceWindowUpdate ref = do
 sourceWindowDisable :: RSourceView c a -> IO ()
 sourceWindowDisable ref = do
     sv <- readIORef ref
-    G.labelSetText       (svFileLab sv)   ""
-    G.labelSetText       (svInprogLab sv) ""
+    G.labelSetText (svFileLab sv)   ""
+    G.labelSetText (svInprogLab sv) ""
+    sourceClearPos sv
     --G.labelSetText       (svContLab sv)   ""
     --G.widgetSetSensitive (svContTog sv)   False
 
