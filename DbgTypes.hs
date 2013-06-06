@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, ImplicitParams, FunctionalDependencies, UndecidableInstances #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, ImplicitParams, FunctionalDependencies, UndecidableInstances, RecordWildCards #-}
 
 module DbgTypes(Rel,
                 Vals,
@@ -12,6 +12,7 @@ module DbgTypes(Rel,
                 Transition(..),
                 tranTo',
                 tranRel,
+                isConcreteTransition,
                 ModelVar(..),
                 Model(..),
                 RModel,
@@ -130,6 +131,7 @@ data State a b = State {
 isConcreteState :: State a b -> Bool
 isConcreteState = isJust . sConcrete
 
+
 instance (?m::c, L.Boolean c a, Eq b) => Eq (State a b) where
     (==) x y = sAbstract x .== sAbstract y && sConcrete x == sConcrete y
 
@@ -166,6 +168,11 @@ tranRel model tr = (sAbstract $ tranFrom tr)
                 .& (tranTo' model tr)
                 .& (tranUntracked tr)
                 .& (tranAbstractLabel tr)
+
+isConcreteTransition :: Transition a b -> Bool
+isConcreteTransition Transition{..} = isConcreteState tranFrom 
+                                   && isConcreteState tranTo 
+                                   && isJust tranConcreteLabel
 
 data ModelVar = ModelVar { mvarName :: String
                          , mvarType :: Type

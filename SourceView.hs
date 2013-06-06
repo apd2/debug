@@ -313,9 +313,9 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
     
 
 sourceViewStateSelected :: (D.Rel c v a s) => RSourceView c a -> Maybe (D.State a Store) -> IO ()
-sourceViewStateSelected ref Nothing                              = disable ref
-sourceViewStateSelected ref (Just s) | isNothing (D.sConcrete s) = disable ref
-                                     | otherwise                 = do
+sourceViewStateSelected ref Nothing                                = disable ref
+sourceViewStateSelected ref (Just s) | (not $ D.isConcreteState s) = disable ref
+                                     | otherwise                   = do
     putStrLn $ "sourceViewStateSelected: store: " ++ (show $ D.sConcrete s)
     modifyIORef ref (\sv -> sv { svState   = s
                                , svTmp     = SStruct $ M.empty
@@ -324,8 +324,8 @@ sourceViewStateSelected ref (Just s) | isNothing (D.sConcrete s) = disable ref
     reset ref
 
 sourceViewTransitionSelected :: (D.Rel c v a s) => RSourceView c a -> D.Transition a Store -> IO ()
-sourceViewTransitionSelected ref tran | isNothing (D.sConcrete $ D.tranFrom tran) = disable ref
-                                      | otherwise                                 = do
+sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = disable ref
+                                      | otherwise                           = do
     putStrLn "sourceViewTransitionSelected"
     modifyIORef ref (\sv -> sv { svState   = D.tranFrom tran
                                , svTmp     = tranTmpStore sv tran
