@@ -342,7 +342,7 @@ stepAction ref = do
     sv   <- readIORef ref
     let msv' = step sv
     when (isJust msv') $ do writeIORef ref (fromJust msv')
-                            when (currentDelay $ fromJust msv') $ completeTransition ref
+                            when (currentDelay $ fromJust msv') $ makeTransition ref
                             updateDisplays ref
 
 -- Execute one statement
@@ -355,7 +355,7 @@ step sv =
                          action = locAct lab
                      in if isActNone action && (not $ isDelayLabel lab)
                            then step sv'
-                           else Just sv'
+                           else Just $ maybeCompleteTransition sv'
          Nothing -> Nothing
 
 
@@ -365,7 +365,7 @@ runAction ref = do
     case run sv of
          Nothing  -> return ()
          Just sv' -> do writeIORef ref sv'
-                        when (currentDelay sv') $ completeTransition ref
+                        when (currentDelay sv') $ makeTransition ref
                         updateDisplays ref
     
 
@@ -387,6 +387,31 @@ exitMagicBlock ref = do
                                                                  st2 = storeSet st1 mkContVar  (Just $ SVal $ BoolVal False)
                                                              in st2))
     makeTransition ref
+
+---- simulate transition without GUI 
+--simulateTransition :: (D.Rel c v a s) => D.Model -> Spec -> M.Map String AbsVar -> Store -> Store -> PID -> Maybe Store
+--simulateTransition model spec absvars state label pid =
+--    -- create enough of source view to call run
+--    let sv0 = SourceView { svModel      = model
+--                         , svSpec       = spec
+--                         , svAbsVars    = absvars
+--                         , svState      = D.State {sConcrete = state}
+--                         , svTmp        = label
+--                         , svTranPID    = pid
+--                         , svTrace      = [TraceEntry { teStack = error "teStack is undefined"
+--                                                      , teStore = storeUnion state label}]
+--                         , svTracePos   = 0
+--                         , svPID        = pid
+--                         , svStackFrame = 0}
+--
+--    -- controllable action
+--    if' (currentControllable sv0) (simulateControllable sv0) $
+--    -- exit from magic block
+--    -- idle transition into magic block
+--    if'
+--    -- idle loop transition
+--    -- normal uncontrollable transition
+--
 
 --------------------------------------------------------------
 -- GUI components
@@ -1392,16 +1417,13 @@ microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=
                                                      _       -> Just (store', (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
 
 -- Actions taken upon reaching a delay location
-completeTransition :: (D.Rel c v a s) => RSourceView c a -> IO ()
-completeTransition ref = do
-    sv    <- readIORef ref
+maybeCompleteTransition :: (D.Rel c v a s) => SourceView c a -> SourceView c a
+maybeCompleteTransition sv | currentDelay sv = setPC pid pc $ setPID pid sv
+                           | otherwise       = sv
     -- update PC and PID variables
-    let pc = currentLoc sv
-        mmeth = fmap sname $ stackTask (currentStack sv) 0
-        pid = svPID sv ++ (maybeToList mmeth)
-        sv' = setPC pid pc $ setPID pid sv
-    writeIORef ref sv'
-    makeTransition ref
+    where pc = currentLoc sv
+          mmeth = fmap sname $ stackTask (currentStack sv) 0
+          pid = svPID sv ++ (maybeToList mmeth)
 
 makeTransition :: (D.Rel c v a s) => RSourceView c a -> IO ()
 makeTransition ref = do
