@@ -1,6 +1,7 @@
 {-# LANGUAGE ImplicitParams, RecordWildCards #-}
 
-module SourceView(sourceViewNew) where
+module SourceView(sourceViewNew, 
+                  simulateTransition) where
 
 import Data.Maybe
 import Data.List
@@ -145,6 +146,44 @@ data SourceView c a = SourceView {
 
 type RSourceView c a = IORef (SourceView c a)
 
+sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel undefined"
+                             , svInputSpec      = error "SourceView: svInputSpec undefined"
+                             , svFlatSpec       = error "SourceView: svFlatSpec undefined"
+                             , svSpec           = error "SourceView: svSpec undefined" 
+                             , svAbsVars        = error "SourceView: svAbsVars undefined"
+                             , svState          = error "SourceView: svState undefined"
+                             , svTmp            = error "SourceView: svTmp undefined"
+                             , svTranPID        = Nothing
+                             , svStepButton     = error "SourceView: svStepButton undefined"
+                             , svRunButton      = error "SourceView: svRunButton undefined"
+                             , svMagExitButton  = error "SourceView: svMagExitButton undefined"
+                             , svTrace          = []
+                             , svTracePos       = 0
+                             , svTraceCombo     = error "SourceView: svTraceCombo undefined"
+                             , svTraceStore     = error "SourceView: svTraceStore undefined"
+                             , svTraceUndo      = error "SourceView: svTraceUndo undefined"
+                             , svTraceRedo      = error "SourceView: svTraceRedo undefined"
+                             , svPID            = error "SourceView: PID undefined"
+                             , svProcessCombo   = error "SourceView: svProcessCombo undefined"
+                             , svProcessStore   = error "SourceView: svProcessStore undefined"
+                             , svStackView      = error "SourceView: svStackView undefined"
+                             , svStackStore     = error "SourceView: svStackStore undefined"
+                             , svStackFrame     = error "SourceView: svStackFrame undefined"
+                             , svWatchView      = error "SourceView: scWatchView undefined"
+                             , svWatchStore     = error "SourceView: svWatchStore undefined"
+                             , svSourceView     = error "SourceView: svSourceView undefined"
+                             , svSourceBuf      = error "SourceView: svSourceBuf undefined"
+                             , svSourceTag      = error "SourceView: svSourceTag undefined"
+                             , svFileLab        = error "SourceView: svFileLab undefined"
+                             , svInprogLab      = error "SourceView: svInprogLab undefined"
+                             , svResolveStore   = error "SourceView: svResolveStore undefined"
+                             , svAutoResolve    = True
+                             , svAutoResolveTog = error "SourceView: svAutoResolveTog undefined"
+                             , svActSelectText  = error "SourceView: svActSelectText undefined"
+                             , svActSelectBAdd  = error "SourceView: svActSelectBAdd undefined"
+                             }
+
+
 --------------------------------------------------------------
 -- View callbacks
 --------------------------------------------------------------
@@ -152,44 +191,12 @@ type RSourceView c a = IORef (SourceView c a)
 sourceViewNew :: (D.Rel c v a s) => Front.Spec -> Front.Spec -> Spec -> M.Map String AbsVar -> SMTSolver -> D.RModel c a Store -> IO (D.View a Store)
 sourceViewNew inspec flatspec spec absvars solver rmodel = do
 
-    ref <- newIORef $ SourceView { svModel          = rmodel
-                                 , svInputSpec      = inspec
-                                 , svFlatSpec       = flatspec
-                                 , svSpec           = specInlineWireAlways spec
-                                 , svAbsVars        = absvars
-                                 , svState          = error "SourceView: svState undefined"
-                                 , svTmp            = error "SourceView: svTmp undefined"
-                                 , svTranPID        = Nothing
-                                 , svStepButton     = error "SourceView: svStepButton undefined"
-                                 , svRunButton      = error "SourceView: svRunButton undefined"
-                                 , svMagExitButton  = error "SourceView: svMagExitButton undefined"
-                                 , svTrace          = []
-                                 , svTracePos       = 0
-                                 , svTraceCombo     = error "SourceView: svTraceCombo undefined"
-                                 , svTraceStore     = error "SourceView: svTraceStore undefined"
-                                 , svTraceUndo      = error "SourceView: svTraceUndo undefined"
-                                 , svTraceRedo      = error "SourceView: svTraceRedo undefined"
-                                 , svPID            = error "SourceView: PID undefined"
-                                 , svProcessCombo   = error "SourceView: svProcessCombo undefined"
-                                 , svProcessStore   = error "SourceView: svProcessStore undefined"
-                                 , svStackView      = error "SourceView: svStackView undefined"
-                                 , svStackStore     = error "SourceView: svStackStore undefined"
-                                 , svStackFrame     = error "SourceView: svStackFrame undefined"
-                                 , svWatchView      = error "SourceView: scWatchView undefined"
-                                 , svWatchStore     = error "SourceView: svWatchStore undefined"
-                                 , svSourceView     = error "SourceView: svSourceView undefined"
-                                 , svSourceBuf      = error "SourceView: svSourceBuf undefined"
-                                 , svSourceTag      = error "SourceView: svSourceTag undefined"
-                                 , svFileLab        = error "SourceView: svFileLab undefined"
-                                 --, svContTog        = error "SourceView: svContTog undefined"
-                                 --, svContLab        = error "SourceViewL svContLab undefined"
-                                 , svInprogLab      = error "SourceView: svInprogLab undefined"
-                                 , svResolveStore   = error "SourceView: svResolveStore undefined"
-                                 , svAutoResolve    = True
-                                 , svAutoResolveTog = error "SourceView: svAutoResolveTog undefined"
-                                 , svActSelectText  = error "SourceView: svActSelectText undefined"
-                                 , svActSelectBAdd  = error "SourceView: svActSelectBAdd undefined"
-                                 }
+    ref <- newIORef $ sourceViewEmpty { svModel          = rmodel
+                                      , svInputSpec      = inspec
+                                      , svFlatSpec       = flatspec
+                                      , svSpec           = specInlineWireAlways spec
+                                      , svAbsVars        = absvars
+                                      }
 
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox
@@ -388,30 +395,36 @@ exitMagicBlock ref = do
                                                              in st2))
     makeTransition ref
 
----- simulate transition without GUI 
---simulateTransition :: (D.Rel c v a s) => D.Model -> Spec -> M.Map String AbsVar -> Store -> Store -> PID -> Maybe Store
---simulateTransition model spec absvars state label pid =
---    -- create enough of source view to call run
---    let sv0 = SourceView { svModel      = model
---                         , svSpec       = spec
---                         , svAbsVars    = absvars
---                         , svState      = D.State {sConcrete = state}
---                         , svTmp        = label
---                         , svTranPID    = pid
---                         , svTrace      = [TraceEntry { teStack = error "teStack is undefined"
---                                                      , teStore = storeUnion state label}]
---                         , svTracePos   = 0
---                         , svPID        = pid
---                         , svStackFrame = 0}
---
---    -- controllable action
---    if' (currentControllable sv0) (simulateControllable sv0) $
---    -- exit from magic block
---    -- idle transition into magic block
---    if'
---    -- idle loop transition
---    -- normal uncontrollable transition
---
+-- simulate transition without GUI 
+simulateTransition :: (D.Rel c v a s) => D.RModel c a Store -> Spec -> M.Map String AbsVar -> Store -> Store -> PID -> Maybe Store
+simulateTransition model spec absvars st lab pid =
+    -- create enough of source view to call run
+    let sv0 = sourceViewEmpty { svModel      = model
+                              , svSpec       = spec
+                              , svAbsVars    = absvars
+                              , svState      = D.State { sAbstract = error "simulateTransition: sAbstract is undefined"
+                              , sConcrete = Just st}
+                              , svTmp        = lab
+                              , svTranPID    = Just pid
+                              , svTracePos   = 0
+                              , svPID        = pid
+                              , svStackFrame = 0
+                              }
+        sv1 = if currentControllable sv0 
+                 then -- execute controllable CFA
+                      sv0 {svTrace = [TraceEntry { teStore = storeUnion st lab
+                                                 , teStack = [FrameInteractive Front.ScopeTop cfaInitLoc (specCAct spec)]}]}
+                 else -- execute uncontrollable process from its current location
+                      sv0 {svTrace = [TraceEntry { teStore = storeUnion st lab 
+                                                 , teStack = stackFromStore sv0 st pid}]} 
+        msv2 = run sv1
+    in case msv2 of
+            Nothing  -> Nothing
+            Just sv2 -> if not $ currentDelay sv2
+                            then Nothing
+                            else Just $ currentStore sv2
+    -- TODO magic block entry
+
 
 --------------------------------------------------------------
 -- GUI components
@@ -1418,8 +1431,9 @@ microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=
 
 -- Actions taken upon reaching a delay location
 maybeCompleteTransition :: (D.Rel c v a s) => SourceView c a -> SourceView c a
-maybeCompleteTransition sv | currentDelay sv = setPC pid pc $ setPID pid sv
-                           | otherwise       = sv
+maybeCompleteTransition sv | currentDelay sv && currentControllable sv = setPID pidCont sv
+                           | currentDelay sv                           = setPC pid pc $ setPID pid sv
+                           | otherwise                                 = sv
     -- update PC and PID variables
     where pc = currentLoc sv
           mmeth = fmap sname $ stackTask (currentStack sv) 0
