@@ -260,8 +260,7 @@ concretiseState ref nid = do
     let s = getState gv nid
     ms' <- D.modelConcretiseState (gvModel gv) (D.sAbstract s)
     case ms' of
-         Nothing -> -- TODO: error message
-                    return ()
+         Nothing -> D.showMessage (gvModel gv) Gt.MessageError "Could not find concrete representative of the abstract state"
          Just s' -> do (nid', gv') <- findOrCreateState gv (Just nid) s'
                        writeIORef ref gv'
                        D.modelSelectState (gvModel gv') (Just $ getState gv' nid')

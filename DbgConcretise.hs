@@ -5,8 +5,7 @@
 module DbgConcretise (concretiseRel,
                       concretiseState,
                       concretiseLabel,
-                      concretiseTransition,
-                      storeExtendDefault) where
+                      concretiseTransition) where
 
 import Data.List
 import qualified Data.Map as M
@@ -15,13 +14,15 @@ import Debug.Trace
 import Store
 import SMTSolver
 import Predicate
-import qualified DbgTypes as D
+import qualified DbgTypes   as D
+import qualified SourceView as D
 import Implicit
 import BFormula
 import IVar
 import ISpec
 import IType
 import IExpr hiding (conj)
+import Inline
 
 -- Input: relation over a set of abstract variables
 -- Output: a single concrete assignment or Nothing if a 
@@ -79,24 +80,17 @@ concretiseLabel cstate alabel = do
 --   can be used to compute other components of 
 --   the transition
 --
--- Concretises label variables and PID using concretiseRel and then simulates the 
--- transition using the SourceView component
+-- Concretises label variables, $pid, and $cont using concretiseRel and then 
+-- simulates the transition using the SourceView component
 concretiseTransition :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => Store -> a -> a -> Maybe Store
-concretiseTransition _ _ _ = Nothing
---concretiseTransition cstate alabel anext = simulateTransition cstate clabel pid
---    where clabel = concretiseLabel cstate alabel
---          pid    = 
---
-simulateTransition = error "simulateTransition not implemented"
-
-
--- Assign all unassigned state variables to their default values
-storeExtendDefault :: (?spec::Spec) => Store -> Store
-storeExtendDefault store = foldl' (\st v -> let evar = EVar $ varName v in
-                                            foldl' extendScalar st (exprScalars evar (typ evar)))
-                                  store (specVar ?spec)
-
-extendScalar :: (?spec::Spec) => Store -> Expr -> Store
-extendScalar store e = case storeTryEval store e of
-                            Nothing -> storeSet store e (Just $ SVal $ valDefault e)
-                            _       -> store
+concretiseTransition cstate alabel anext = do
+    -- concretise label
+    clabel <- concretiseLabel cstate alabel
+    -- concretise $pid
+    asn    <- D.oneSatVal anext $ D.mCurStateVars ?model
+    (_, pidval) <- find ((== mkPIDVarName) . D.mvarName . fst) asn
+    let pid = [(enumEnums $ getEnumeration mkPIDVarName) !! fromInteger pidval]
+    -- concretise $cont
+    (_, contval) <- find ((== mkContVarName) . D.mvarName . fst) asn
+    let cont = (contval == 1)
+    D.simulateTransition ?spec ?absvars cstate clabel pid cont

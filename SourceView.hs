@@ -1,4 +1,4 @@
-{-# LANGUAGE ImplicitParams, RecordWildCards #-}
+{-# LANGUAGE ImplicitParams, RecordWildCards, ScopedTypeVariables #-}
 
 module SourceView(sourceViewNew, 
                   simulateTransition) where
@@ -31,7 +31,7 @@ import TSLUtil
 import qualified DbgTypes      as D
 import qualified IDE           as D
 import qualified DbgAbstract   as D
-import qualified DbgConcretise as D
+--import qualified DbgConcretise as D
 import ISpec
 import TranSpec
 import IExpr
@@ -292,7 +292,7 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
             ?absvars = absvars
             ?model   = model
             ?m       = D.mCtx model
-        initstore <- liftM D.storeExtendDefault
+        initstore <- liftM storeExtendDefault
                      $ case smtGetModel solver [let ?pred = [] in bexprToFormula $ snd $ tsInit $ specTran spec] of
                             Just (Right store) -> return store                      
                             _                  -> fail "Unsatisfiable initial condition"
@@ -353,7 +353,7 @@ stepAction ref = do
                             updateDisplays ref
 
 -- Execute one statement
-step :: (D.Rel c v a s) => SourceView c a -> Maybe (SourceView c a)
+step :: SourceView c a -> Maybe (SourceView c a)
 step sv = 
     let sv0 = sv {svStackFrame = 0} in
     case microstep sv0 of
@@ -377,7 +377,7 @@ runAction ref = do
     
 
 -- run until pause or nondeterministic choice
-run :: (D.Rel c v a s) => SourceView c a -> Maybe (SourceView c a)
+run :: SourceView c a -> Maybe (SourceView c a)
 run sv = case step sv of
               Nothing  -> Nothing
               Just sv' -> if currentDelay sv' 
@@ -396,20 +396,20 @@ exitMagicBlock ref = do
     makeTransition ref
 
 -- simulate transition without GUI 
-simulateTransition :: (D.Rel c v a s) => D.RModel c a Store -> Spec -> M.Map String AbsVar -> Store -> Store -> PID -> Maybe Store
-simulateTransition model spec absvars st lab pid =
-    -- create enough of source view to call run
-    let sv0 = sourceViewEmpty { svModel      = model
-                              , svSpec       = spec
+simulateTransition :: Spec -> M.Map String AbsVar -> Store -> Store -> PID -> Bool -> Maybe Store
+simulateTransition spec absvars st lab pid nextcont =
+    let -- create enough of source view to call run
+        sv0 :: SourceView () ()
+        sv0 = sourceViewEmpty { svSpec       = spec
                               , svAbsVars    = absvars
                               , svState      = D.State { sAbstract = error "simulateTransition: sAbstract is undefined"
-                              , sConcrete = Just st}
+                                                       , sConcrete = Just st}
                               , svTmp        = lab
                               , svTranPID    = Just pid
                               , svTracePos   = 0
                               , svPID        = pid
                               , svStackFrame = 0
-                              }
+                              } 
         sv1 = if currentControllable sv0 
                  then -- execute controllable CFA
                       sv0 {svTrace = [TraceEntry { teStore = storeUnion st lab
@@ -417,14 +417,15 @@ simulateTransition model spec absvars st lab pid =
                  else -- execute uncontrollable process from its current location
                       sv0 {svTrace = [TraceEntry { teStore = storeUnion st lab 
                                                  , teStack = stackFromStore sv0 st pid}]} 
-        msv2 = run sv1
-    in case msv2 of
-            Nothing  -> Nothing
-            Just sv2 -> if not $ currentDelay sv2
-                            then Nothing
-                            else Just $ currentStore sv2
-    -- TODO magic block entry
-
+        msv2 = run sv1 
+        mstore2 = if pid == pidIdle
+                     then Just $ storeSet st mkPIDVar (Just $ SVal $ EnumVal $ mkPIDEnumeratorName pidIdle)
+                     else case msv2 of
+                               Nothing  -> Nothing
+                               Just sv2 -> if not $ currentDelay sv2
+                                              then Nothing
+                                              else Just $ currentStore sv2
+    in fmap (\s -> storeSet s mkContVar (Just $ SVal $ BoolVal nextcont)) mstore2
 
 --------------------------------------------------------------
 -- GUI components
@@ -1033,7 +1034,7 @@ textAsnChanged ref path valstr = do
     val <- if valstr == "*"
               then return Nothing
               else case parseVal (typ e) valstr of
-                        Left er -> do showMessage ref G.MessageError er
+                        Left er -> do D.showMessage (svModel sv) G.MessageError er
                                       return Nothing
                         Right v -> return $ Just $ SVal v
     writeIORef ref $ modifyCurrentStore sv (\store -> storeSet store e val)
@@ -1118,7 +1119,7 @@ actionSelectorRun ref = do
     let fname = hash text
         fpath = "/tmp/" ++ show fname
     case compileControllableAction svInputSpec svFlatSpec svPID (fScope $ head $ currentStack sv) text fpath of
-         Left e    -> showMessage ref G.MessageError e
+         Left e    -> D.showMessage svModel G.MessageError e
          Right cfa -> do writeFile fpath text
                          runControllableCFA ref cfa
 
@@ -1430,7 +1431,7 @@ microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=
                                                      _       -> Just (store', (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
 
 -- Actions taken upon reaching a delay location
-maybeCompleteTransition :: (D.Rel c v a s) => SourceView c a -> SourceView c a
+maybeCompleteTransition :: SourceView c a -> SourceView c a
 maybeCompleteTransition sv | currentDelay sv && currentControllable sv = setPID pidCont sv
                            | currentDelay sv                           = setPC pid pc $ setPID pid sv
                            | otherwise                                 = sv
@@ -1588,9 +1589,3 @@ tranTmpStore sv tran =
                 $ specTmpVar $ svSpec sv
     where tstore = fromJust $ D.tranConcreteLabel tran
 
--- Message boxes
-showMessage :: RSourceView c a -> G.MessageType -> String -> IO ()
-showMessage _ mtype mtext = do
-    dialog <- G.messageDialogNew Nothing [G.DialogModal] mtype G.ButtonsOk mtext
-    _ <- G.onResponse dialog (\_ -> G.widgetDestroy dialog)
-    G.windowPresent dialog

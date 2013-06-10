@@ -127,7 +127,7 @@ debugGUI extraFactories model = do
          $ zip dviews (map snd factories)
 
     putStr $ "Variable map\n" ++ mDumpIndices model ++ "\n"
-    let initst = fmap ((\rel -> State rel Nothing) . fromJust . oneCube (mStateV model) . snd) 
+    let initst = fmap ((\rel -> State rel Nothing) . {- fromJust . oneCube (mStateV model) .-} snd) 
                       $ find ((== "init") . fst) $ mStateRels model
     modelSelectState rmodel initst
 

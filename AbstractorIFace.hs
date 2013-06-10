@@ -1,24 +1,27 @@
-{-# LANGUAGE RecordWildCards, MultiParamTypeClasses, FlexibleInstances, TypeSynonymInstances, UndecidableInstances, ImplicitParams #-}
+{-# LANGUAGE RecordWildCards, MultiParamTypeClasses, FlexibleInstances, TypeSynonymInstances, UndecidableInstances, ImplicitParams, TupleSections #-}
 
 -- Interface to the abstraction library
 
-module AbstractorIFace(mkModel) where
+module AbstractorIFace( SynthesisRes(..)
+                      , mkSynthesisRes
+                      , mkModel) where
 
 import qualified Data.Map as M
 import Data.List
 import Data.Maybe
 
+import Util
 import Cudd
 import CuddConvert
 import Interface
 import TermiteGame
-import CuddExplicitDeref
 import Implicit
 import CuddSymTab
 import Predicate
 import Store
 import SMTSolver
 import qualified ISpec          as I
+import qualified TranSpec       as I
 import qualified IType          as I
 import qualified DbgTypes       as D
 import qualified DbgConcretise  as D
@@ -26,76 +29,143 @@ import qualified DbgAbstract    as D
 
 instance D.Rel DdManager VarData DdNode [[SatBit]]
 
+data SynthesisRes c a = SynthesisRes { srWin           :: Bool
+                                     , srCtx           :: c
+                                     , srStateVars     :: [D.ModelStateVar]
+                                     , srUntrackedVars :: [D.ModelVar]
+                                     , srLabelVars     :: [D.ModelVar]
+                                     , srAbsVars       :: M.Map String AbsVar
+                                     , srCont          :: a
+                                     , srInit          :: a
+                                     , srGoals         :: [a]
+                                     , srFairs         :: [a]
+                                     , srTran          :: a
+                                     , srCPlusC        :: a
+                                     , srCMinusC       :: a
+                                     , srCPlusU        :: a
+                                     , srCMinusU       :: a
+                                     }
+
+mkSynthesisRes :: I.Spec -> STDdManager s u -> ((Bool, RefineStatic s u, RefineDynamic s u), DB s u AbsVar AbsVar) -> SynthesisRes DdManager DdNode
+mkSynthesisRes spec m ((res, RefineStatic{..}, RefineDynamic{..}), pdb) = 
+    let ?spec = spec in
+    let SectionInfo{..} = _sections pdb
+        SymbolInfo{..}  = _symbolTable pdb
+        (state, untracked) = partition func $ M.toList _stateVars
+            where func (_, (_, is, _, _)) = not $ null $ intersect is _trackedInds
+
+        srWin           = res 
+        srCtx           = toDdManager m
+        srStateVars     = map toTupleState state
+            where toTupleState        (p, (_, is, _, is')) = (show p, avarType p, (is, is'))
+        srUntrackedVars = map toModelVarUntracked untracked
+            where toModelVarUntracked (p, (_, is, _, _)) = D.ModelVar (show p) (avarType p) is
+        srLabelVars     = concatMap toModelVarLabel $ M.toList _labelVars
+            where toModelVarLabel     (p, (_, is, _, ie)) = [D.ModelVar (show p) (avarType p) is, D.ModelVar (show p ++ ".en") D.Bool [ie]]
+        srAbsVars       = M.fromList $ map (\v -> (show v,v)) $ (M.keys _stateVars) ++ (M.keys _labelVars)
+        srCont          = toDdNode srCtx cont
+        srInit          = toDdNode srCtx init
+        srGoals         = map (toDdNode srCtx) goal
+        srFairs         = map (toDdNode srCtx) fair
+        srTran          = toDdNode srCtx trans
+        srCMinusC       = toDdNode srCtx consistentMinusCULCont
+        srCPlusC        = toDdNode srCtx consistentPlusCULCont
+        srCMinusU       = toDdNode srCtx consistentMinusCULUCont
+        srCPlusU        = toDdNode srCtx consistentPlusCULUCont
+    in SynthesisRes{..}
+
+-- Extract type information from AbsVar
+avarType :: (?spec::I.Spec) => AbsVar -> D.Type
+avarType (AVarPred _)  = D.Bool
+avarType (AVarTerm tr) = case I.typ tr of
+                              I.Bool   -> D.Bool
+                              I.Enum n -> D.Enum $ (I.enumEnums $ I.getEnumeration n)
+                              I.SInt w -> D.SInt w
+                              I.UInt w -> D.UInt w
+
+-- Construct transition relation that represent the result of three-valued 
+-- abstraction.
+--
+-- If srWin == True then
+--   T := quantify_dis (Tc /\ c-c) \/ (Tu /\ c+u)
+-- else
+--   T := (Tc /\ c+c) \/ quantify_dis (Tc /\ c-u)
+--
+-- where Tc and Tu are controllable and uncontrollable transition relations,
+-- and the quantify_dis function quantifies away disabled variables.  For a 
+-- single variable X:
+--
+-- quantify_dis_X(rel) = (X.en /\ rel) \/ (!X.en /\ exists X. rel)
+-- 
+mkTRel :: (D.Rel c v a s) => SynthesisRes c a -> a
+mkTRel sr@SynthesisRes{..} =
+    let ?m     = srCtx in
+    let tcont  = srTran .& srCont
+        tucont = srTran .& (nt srCont)
+    in if srWin
+          then (quant_dis sr (tcont .& srCMinusC)) .| (tucont .& srCPlusU)
+          else (tcont .& srCPlusC)                 .| (quant_dis sr (tucont .& srCMinusU))
+
+quant_dis :: (D.Rel c v a s, ?m :: c) => SynthesisRes c a -> a -> a
+quant_dis SynthesisRes{..} rel = 
+    foldl' quant_dis1 rel
+    $ map (\(v,ev) -> (D.mvarToVS v, D.mvarToVS ev))
+    $ mapMaybe (\v -> fmap (v,) (find ((== (D.mkEnVarName $ D.mvarName v)) . D.mvarName) srLabelVars))
+    $ srLabelVars
+
+quant_dis1 :: (D.Rel c v a s, ?m :: c) => a -> (v,v) -> a
+quant_dis1 rel (var, envar) = 
+    ((eqConst envar (1::Int)) .& rel) .|
+    ((eqConst envar (0::Int)) .& exists var rel)
 
 mkModel :: I.Spec -> 
-           STDdManager s u -> 
-           RefineStatic s u -> 
-           RefineDynamic s u -> 
-           SectionInfo s u -> 
-           SymbolInfo s u AbsVar AbsVar -> 
            SMTSolver -> 
-           M.Map String AbsVar ->
+           SynthesisRes DdManager DdNode ->
            D.Model DdManager DdNode Store
-mkModel spec m rs rd si symi solver absvars = let ?spec    = spec 
-                                                  ?solver  = solver
-                                                  ?absvars = absvars
-                                              in mkModel' m rs rd si symi
-
-mkModel' :: (?spec::I.Spec, ?solver::SMTSolver, ?absvars::M.Map String AbsVar) => 
-    STDdManager s u -> 
-    RefineStatic s u -> 
-    RefineDynamic s u -> 
-    SectionInfo s u -> 
-    SymbolInfo s u AbsVar AbsVar -> 
-    D.Model DdManager DdNode Store
-mkModel' m RefineStatic{..} RefineDynamic{..} SectionInfo{..} SymbolInfo{..} = model
+mkModel spec solver sr = let ?spec    = spec 
+                             ?solver  = solver
+                         in mkModel' sr
+mkModel' :: (?spec::I.Spec, ?solver::SMTSolver) => SynthesisRes DdManager DdNode -> D.Model DdManager DdNode Store
+mkModel' sr@SynthesisRes{..} = model
     where
-    -- Extract type information from AbsVar
-    avarType :: AbsVar -> D.Type
-    avarType (AVarPred _) = D.Bool
-    avarType (AVarTerm t) = case I.typ t of
-                                 I.Bool   -> D.Bool
-                                 I.Enum n -> D.Enum $ (I.enumEnums $ I.getEnumeration n)
-                                 I.SInt w -> D.SInt w
-                                 I.UInt w -> D.UInt w
-    mCtx           = toDdManager m
-    (state, untracked) = partition func $ M.toList _stateVars
-        where func (_, (_, is, _, _)) = not $ null $ intersect is _trackedInds
-    mStateVars     = map toTupleState state
-        where toTupleState        (p, (_, is, _, is')) = (show p, avarType p, (is, is'))
-    mUntrackedVars = map toModelVarUntracked untracked
-        where toModelVarUntracked (p, (_, is, _, _)) = D.ModelVar (show p) (avarType p) is
-    mLabelVars     = concatMap toModelVarLabel $ M.toList _labelVars
-        where toModelVarLabel     (p, (_, is, _, ie)) = [D.ModelVar (show p) (avarType p) is, D.ModelVar (show p ++ ".en") D.Bool [ie]]
-    mStateRels = concat $ [[("cont", toDdNode mCtx cont)], [("init", toDdNode mCtx init)], goals, fairs]
-        where
-        goals = zipWith (func "goal") [0..] goal
-        fairs = zipWith (func "fair") [0..] fair
-        func :: String -> Int -> DDNode s u -> (String, DdNode)
-        func prefix idx node = (prefix ++ show idx, toDdNode mCtx node)
-    mTransRels = [("trans", toDdNode mCtx trans), ("c-c", toDdNode mCtx consistentMinusCULCont), ("c+c", toDdNode mCtx consistentPlusCULCont), ("c-u", toDdNode mCtx consistentMinusCULUCont), ("c+u", toDdNode mCtx consistentPlusCULUCont)]
-    mViews     = []
-    model = D.Model{..}
+    mCtx                  = srCtx
+    mStateVars            = srStateVars
+    mUntrackedVars        = srUntrackedVars 
+    mLabelVars            = srLabelVars
+    mStateRels            = [ ("controllable"  , srCont)
+                            , ("uncontrollable", let ?m = srCtx in nt srCont)
+                            , ("init"          , srInit)] ++
+                            zip (map I.goalName $ I.tsGoal $ I.specTran ?spec) srGoals  ++ 
+                            zip (map I.fairName $ I.tsFair $ I.specTran ?spec) srFairs
+    mTransRels            = [ (if' srWin "trel_win" "trel_lose" , mkTRel sr)
+                            , ("trel"                           , srTran)
+                            , ("c-c"                            , srCMinusC)
+                            , ("c+c"                            , srCPlusC)
+                            , ("c-u"                            , srCMinusU)
+                            , ("c+u"                            , srCPlusU)]
+    mViews                = []
     mConcretiseState      = concretiseS
     mConcretiseTransition = concretiseT
-    mAutoConcretiseTrans = True
+    mAutoConcretiseTrans  = True
+    
+    model = D.Model{..}
 
     concretiseS :: DdNode -> Maybe (D.State DdNode Store)
     concretiseS d =
         let ?m       = mCtx
             ?model   = model
+            ?absvars = srAbsVars
         in D.concretiseState d
 
     concretiseT :: D.Transition DdNode Store -> Maybe (D.Transition DdNode Store)
-    concretiseT D.Transition{..} | D.isConcreteState tranFrom =
-        let ?m     = mCtx
-            ?model = model in
-        let cstate = fromJust $ D.sConcrete tranFrom
-            cnext  = D.concretiseTransition cstate tranAbstractLabel (D.sAbstract tranTo)
-            mtr'    = fmap (D.abstractTransition tranFrom) cnext
-        in case mtr' of
-                Nothing  -> Nothing
-                Just tr' -> if (D.sAbstract $ D.tranTo tr') .== (D.sAbstract tranTo)
-                               then Just tr'
-                               else error "concretiseT: concretised next-state differs from abstract next-state"
+    concretiseT D.Transition{..} | D.isConcreteState tranFrom = do
+        let ?m       = mCtx
+            ?model   = model
+            ?absvars = srAbsVars
+        cstate <- D.sConcrete tranFrom
+        cnext  <- D.concretiseTransition cstate tranAbstractLabel (D.sAbstract tranTo)
+        let tr' = D.abstractTransition tranFrom cnext
+        if (D.sAbstract $ D.tranTo tr') .== (D.sAbstract tranTo)
+           then return tr'
+           else error "concretiseT: concretised next-state differs from abstract next-state"
                                  | otherwise = Nothing

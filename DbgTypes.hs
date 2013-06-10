@@ -14,6 +14,7 @@ module DbgTypes(Rel,
                 tranRel,
                 isConcreteTransition,
                 ModelVar(..),
+                ModelStateVar(..),
                 Model(..),
                 RModel,
                 mCurStateVars,
@@ -25,6 +26,7 @@ module DbgTypes(Rel,
                 mDumpIndices,
                 contRelName,
                 idxToVS,
+                mvarToVS,
                 valStrFromInt,
                 valStrFromRel,
                 isEnVarName,
@@ -40,7 +42,8 @@ module DbgTypes(Rel,
                 modelConcretiseState,
                 modelActiveTransRel,
                 modelSelectTransition,
-                modelSelectState) where
+                modelSelectState,
+                showMessage) where
 
 import qualified Graphics.UI.Gtk as G 
 import Data.IORef
@@ -182,13 +185,15 @@ data ModelVar = ModelVar { mvarName :: String
                          , mvarIdx  ::[Int]
                          }
 
+type ModelStateVar = (String, Type, ([Int],[Int]))
+
 -- Debugger state
 data Model c a b = Model {
     -- Static part --
     mCtx                  :: c,
 
     -- Abstract variable sections
-    mStateVars            :: [(String, Type, ([Int],[Int]))],
+    mStateVars            :: [ModelStateVar],
     mUntrackedVars        :: [ModelVar],
     mLabelVars            :: [ModelVar],
 
@@ -210,6 +215,9 @@ mCurStateVars = map (\(n,tp,(i,_)) -> ModelVar n tp i) . mStateVars
 
 mNextStateVars :: Model c a b -> [ModelVar]
 mNextStateVars = map (\(n,tp,(_,i)) -> ModelVar n tp i) . mStateVars
+
+mvarToVS :: (Rel c v a s, ?m::c) => ModelVar -> v
+mvarToVS = idxToVS . mvarIdx
 
 mStateV, mNextV, mUntrackedV, mLabelV :: (Rel c v a s, ?m::c) => Model c a b -> v
 mStateV     = idxToVS . concatMap mvarIdx . mCurStateVars
@@ -289,6 +297,13 @@ oneSatVal rel vars = do
     asn <- satOne rel
     let supvars = filter (any (\idx -> elem idx support) . mvarIdx) vars
     return $ map (\v -> (v, boolArrToBitsBe $ extract (idxToVS (mvarIdx v)) asn)) supvars
+
+-- Message boxes
+showMessage :: RModel c a b -> G.MessageType -> String -> IO ()
+showMessage _ mtype mtext = do
+    dialog <- G.messageDialogNew Nothing [G.DialogModal] mtype G.ButtonsOk mtext
+    _ <- G.onResponse dialog (\_ -> G.widgetDestroy dialog)
+    G.windowPresent dialog
 
 ----------------------------------------------------------
 -- Debugging
