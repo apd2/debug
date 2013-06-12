@@ -296,7 +296,7 @@ oneSatVal rel vars = do
     let support = supportIndices rel
     asn <- satOne rel
     let supvars = filter (any (\idx -> elem idx support) . mvarIdx) vars
-    return $ map (\v -> (v, boolArrToBitsBe $ extract (idxToVS (mvarIdx v)) asn)) supvars
+    return $ map (\v -> (v, boolArrToBitsBe $ extract (mvarToVS v) asn)) supvars
 
 -- Message boxes
 showMessage :: RModel c a b -> G.MessageType -> String -> IO ()

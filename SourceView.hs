@@ -1432,8 +1432,8 @@ microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=
 
 -- Actions taken upon reaching a delay location
 maybeCompleteTransition :: SourceView c a -> SourceView c a
-maybeCompleteTransition sv | currentDelay sv && currentControllable sv = setPID pidCont sv
-                           | currentDelay sv                           = setPC pid pc $ setPID pid sv
+maybeCompleteTransition sv | currentDelay sv && currentControllable sv = sv
+                           | currentDelay sv                           = setPC pid pc sv
                            | otherwise                                 = sv
     -- update PC and PID variables
     where pc = currentLoc sv
@@ -1486,6 +1486,7 @@ storeEvalStr inspec flatspec store pid sc str = do
     -- 5. inline
     let lmap = scopeLMap pid sc
     let ctx = CFACtx { ctxPID     = pid
+                     , ctxCont    = error "evalStr: ctxCont undefined"
                      , ctxStack   = [(sc, error "evalStr: return", Nothing, lmap)]
                      , ctxCFA     = error "evalStr: CFA undefined"
                      , ctxBrkLocs = []
@@ -1518,6 +1519,7 @@ compileControllableAction inspec flatspec pid sc str fname = do
     assert (null vars) (pos stat) "Statement too complex"
     -- 5. inline
     let ctx = CFACtx { ctxPID     = pid
+                     , ctxCont    = True
                      , ctxStack   = []
                      , ctxCFA     = newCFA sc simpstat true
                      , ctxBrkLocs = []
@@ -1527,7 +1529,7 @@ compileControllableAction inspec flatspec pid sc str fname = do
         ctx' = let ?procs =[] in execState (do -- create final state and make it the return location
                                                aftret <- ctxInsLocLab (LFinal ActNone [])
                                                ctxPushScope sc aftret Nothing (scopeLMap pid sc)
-                                               aftstat <- Front.procStatToCFA True simpstat cfaInitLoc
+                                               aftstat <- Front.procStatToCFA simpstat cfaInitLoc
                                                -- switch to uncontrollable state
                                                aftucont <- ctxInsTrans' aftstat $ TranStat $ mkContVar =: false
                                                -- add return after the statement to pop FrameInteractive off the stack
