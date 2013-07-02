@@ -48,14 +48,15 @@ data SynthesisRes c a = SynthesisRes { srWin           :: Bool
 
 mkSynthesisRes :: I.Spec -> STDdManager s u -> ((Bool, RefineStatic s u, RefineDynamic s u), DB s u AbsVar AbsVar) -> SynthesisRes DdManager DdNode
 mkSynthesisRes spec m ((res, RefineStatic{..}, RefineDynamic{..}), pdb) = 
-    let ?spec = spec in
+    let ?spec = spec 
+        ?m    = toDdManager m in
     let SectionInfo{..} = _sections pdb
         SymbolInfo{..}  = _symbolTable pdb
         (state, untracked) = partition func $ M.toList _stateVars
             where func (_, (_, is, _, _)) = not $ null $ intersect is _trackedInds
 
         srWin           = res 
-        srCtx           = toDdManager m
+        srCtx           = ?m
         srStateVars     = map toTupleState state
             where toTupleState        (p, (_, is, _, is')) = (show p, avarType p, (is, is'))
         srUntrackedVars = map toModelVarUntracked untracked
@@ -67,7 +68,7 @@ mkSynthesisRes spec m ((res, RefineStatic{..}, RefineDynamic{..}), pdb) =
         srInit          = toDdNode srCtx init
         srGoals         = map (toDdNode srCtx) goal
         srFairs         = map (toDdNode srCtx) fair
-        srTran          = toDdNode srCtx trans
+        srTran          = conj $ map (toDdNode srCtx . snd) trans
         srCMinusC       = toDdNode srCtx consistentMinusCULCont
         srCPlusC        = toDdNode srCtx consistentPlusCULCont
         srCMinusU       = toDdNode srCtx consistentMinusCULUCont
@@ -119,7 +120,7 @@ quant_dis1 :: (D.Rel c v a s, ?m :: c) => a -> (v,v) -> a
 quant_dis1 rel (var, envar) = 
     let rel1 = trace "quant_dis1 rel1" $ ((eqConst envar (1::Int)) .& rel)
         rel2 = trace "quant_dis1 rel2" $ ((eqConst envar (0::Int)) .& {-exists var-} rel)
-        rel3 = rel1 .| rel2
+        --rel3 = rel1 .| rel2
     in rel1 .| rel2
 mkModel :: I.Spec -> 
            SMTSolver -> 
