@@ -399,7 +399,7 @@ exitMagicBlock ref = do
 simulateTransition :: Spec -> M.Map String AbsVar -> Store -> Store -> Maybe Store
 simulateTransition spec absvars st lab =
     let -- create enough of source view to call run
-        pid = [storeEvalEnum lab mkPIDLVar]
+        pid = parsePIDEnumerator $ storeEvalEnum lab mkPIDLVar
         sv0 :: SourceView () ()
         sv0 = sourceViewEmpty { svSpec       = spec
                               , svAbsVars    = absvars
