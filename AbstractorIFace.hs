@@ -120,10 +120,7 @@ quant_dis1 rel (var, envar) =
     let rel1 = trace "quant_dis1 rel1" $ ((eqConst envar (1::Int)) .& rel)
         rel2 = trace "quant_dis1 rel2" $ ((eqConst envar (0::Int)) .& {-exists var-} rel)
         rel3 = rel1 .| rel2
-
-    in if rel3 .== rel
-          then trace "quant_dis1" $ rel1 .| rel2
-          else error "quant_dis1: rel3 /= rel"
+    in rel1 .| rel2
 mkModel :: I.Spec -> 
            SMTSolver -> 
            SynthesisRes DdManager DdNode ->

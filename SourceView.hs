@@ -396,9 +396,10 @@ exitMagicBlock ref = do
     makeTransition ref
 
 -- simulate transition without GUI 
-simulateTransition :: Spec -> M.Map String AbsVar -> Store -> Store -> PID -> Bool -> Maybe Store
-simulateTransition spec absvars st lab pid nextcont =
+simulateTransition :: Spec -> M.Map String AbsVar -> Store -> Store -> Maybe Store
+simulateTransition spec absvars st lab =
     let -- create enough of source view to call run
+        pid = [storeEvalEnum lab mkPIDLVar]
         sv0 :: SourceView () ()
         sv0 = sourceViewEmpty { svSpec       = spec
                               , svAbsVars    = absvars
@@ -410,7 +411,7 @@ simulateTransition spec absvars st lab pid nextcont =
                               , svPID        = pid
                               , svStackFrame = 0
                               } 
-        sv1 = if currentControllable sv0 
+        sv1 = if storeEvalBool st (EVar mkContVarName)
                  then -- execute controllable CFA
                       sv0 {svTrace = [TraceEntry { teStore = storeUnion st lab
                                                  , teStack = [FrameInteractive Front.ScopeTop cfaInitLoc (specCAct spec)]}]}
@@ -418,14 +419,12 @@ simulateTransition spec absvars st lab pid nextcont =
                       sv0 {svTrace = [TraceEntry { teStore = storeUnion st lab 
                                                  , teStack = stackFromStore sv0 st pid}]} 
         msv2 = run sv1 
-        mstore2 = if pid == pidIdle
-                     then Just $ storeSet st mkPIDVar (Just $ SVal $ EnumVal $ mkPIDEnumeratorName pidIdle)
-                     else case msv2 of
-                               Nothing  -> Nothing
-                               Just sv2 -> if not $ currentDelay sv2
-                                              then Nothing
-                                              else Just $ currentStore sv2
-    in fmap (\s -> storeSet s mkContVar (Just $ SVal $ BoolVal nextcont)) mstore2
+        mstore2 = case msv2 of
+                       Nothing  -> Nothing
+                       Just sv2 -> if not $ currentDelay sv2
+                                      then Nothing
+                                      else Just $ currentStore sv2
+    in mstore2
 
 --------------------------------------------------------------
 -- GUI components
@@ -1364,7 +1363,7 @@ getDelay :: SourceView c a -> Int -> Bool
 getDelay sv p = isDelayLabel $ getLocLabel sv p
 
 getStore :: SourceView c a -> Int -> Store
-getStore sv p = teStore $ svTrace sv !! p
+getStore sv p = trace ("getStore " ++ show p) $ teStore $ svTrace sv !! p
 
 getStack :: SourceView c a -> Int -> Stack
 getStack sv p = teStack $ svTrace sv !! p

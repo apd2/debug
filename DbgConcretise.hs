@@ -57,7 +57,8 @@ concretiseLabel :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?mode
 concretiseLabel cstate alabel = do
    -- extract predicates from abstract label
    asn <- D.oneSatVal alabel (D.mCurStateVars ?model ++ D.mLabelVars ?model)
-   let lpreds = map (\(mvar, val) -> avarAsnToPred (?absvars M.! D.mvarName mvar) val) asn
+   let lpreds = map (\(mvar, val) -> avarAsnToPred (?absvars M.! D.mvarName mvar) val) 
+                $ filter (not . D.isEnVarName . D.mvarName . fst) asn
        -- extract values of relevant state variables from concrete 
        -- state and transform them into additional predicates
        spreds = map (\term -> PAtom REq term $ (valToTerm $ storeEvalScalar cstate $ termToExpr term))
@@ -87,10 +88,10 @@ concretiseTransition cstate alabel anext = do
     -- concretise label
     clabel <- concretiseLabel cstate alabel
     -- concretise $pid
-    asn    <- D.oneSatVal anext $ D.mCurStateVars ?model
-    (_, pidval) <- find ((== mkPIDVarName) . D.mvarName . fst) asn
-    let pid = [(enumEnums $ getEnumeration mkPIDVarName) !! fromInteger pidval]
+    --asn    <- D.oneSatVal anext $ D.mCurStateVars ?model
+    --(_, pidval) <- find ((== mkPIDVarName) . D.mvarName . fst) asn
+    --let pid = [(enumEnums $ getEnumeration mkPIDEnumName) !! fromInteger pidval]
     -- concretise $cont
-    (_, contval) <- find ((== mkContVarName) . D.mvarName . fst) asn
-    let cont = (contval == 1)
-    D.simulateTransition ?spec ?absvars cstate clabel pid cont
+    --(_, contval) <- find ((== mkContVarName) . D.mvarName . fst) asn
+    --let cont = (contval == 1)
+    D.simulateTransition ?spec ?absvars cstate clabel
