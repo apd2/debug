@@ -348,7 +348,7 @@ stepAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
 stepAction ref = do 
     sv   <- readIORef ref
     -- sync PID
-    let sv0 = setLPID (svPID sv) sv
+    let sv0 = maybeSetLCont $ setLPID (svPID sv) sv
     let msv' = step sv0
     when (isJust msv') $ do writeIORef ref (fromJust msv')
                             when (currentDelay $ fromJust msv') $ makeTransition ref
@@ -372,7 +372,7 @@ runAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
 runAction ref = do
     sv <- readIORef ref
      -- sync PID
-    let sv0 = setLPID (svPID sv) sv
+    let sv0 = maybeSetLCont $ setLPID (svPID sv) sv
     case run sv0 of
          Nothing  -> return ()
          Just sv' -> do writeIORef ref sv'
@@ -1465,6 +1465,11 @@ setPID pid sv = modifyCurrentStore sv (\s -> storeSet s mkPIDVar (Just $ SVal $ 
     
 setLPID :: PID -> SourceView c a -> SourceView c a
 setLPID pid sv = modifyCurrentStore sv (\s -> storeSet s mkPIDLVar (Just $ SVal $ EnumVal $ mkPIDEnumeratorName pid))
+
+maybeSetLCont :: SourceView c a -> SourceView c a
+maybeSetLCont sv | (isNothing $ storeTryEvalBool (currentStore sv) mkContLVar) = 
+                   modifyCurrentStore sv (\s -> storeSet s mkContLVar $ Just $ SVal $ BoolVal False)
+                 | otherwise                                                  = sv
 
 setPC :: PID -> Loc -> SourceView c a -> SourceView c a
 setPC pid pcloc sv = modifyCurrentStore sv (\s -> storeSet s (mkPCVar pid) (Just $ SVal $ EnumVal $ mkPCEnum pid pcloc))
