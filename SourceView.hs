@@ -335,7 +335,7 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
                                       | otherwise                           = do
     putStrLn "sourceViewTransitionSelected"
     modifyIORef ref (\sv -> sv { svState   = D.tranFrom tran
-                               , svTmp     = tranTmpStore sv tran
+                               , svTmp     = fromJust $ D.tranConcreteLabel tran
                                , svTranPID = Just $ parsePIDEnumerator $ storeEvalEnum (fromJust $ D.sConcrete $ D.tranTo tran) mkPIDVar})
     putStrLn "sourceViewTransitionSelected done"
     reset ref
@@ -347,7 +347,9 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
 stepAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
 stepAction ref = do 
     sv   <- readIORef ref
-    let msv' = step sv
+    -- sync PID
+    let sv0 = setLPID (svPID sv) sv
+    let msv' = step sv0
     when (isJust msv') $ do writeIORef ref (fromJust msv')
                             when (currentDelay $ fromJust msv') $ makeTransition ref
                             updateDisplays ref
@@ -369,7 +371,9 @@ step sv =
 runAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
 runAction ref = do
     sv <- readIORef ref
-    case run sv of
+     -- sync PID
+    let sv0 = setLPID (svPID sv) sv
+    case run sv0 of
          Nothing  -> return ()
          Just sv' -> do writeIORef ref sv'
                         when (currentDelay sv') $ makeTransition ref
@@ -410,7 +414,7 @@ simulateTransition spec absvars st lab =
                               , svTracePos   = 0
                               , svPID        = pid
                               , svStackFrame = 0
-                              } 
+                              }
         sv1 = if storeEvalBool st (EVar mkContVarName)
                  then -- execute controllable CFA
                       sv0 {svTrace = [TraceEntry { teStore = storeUnion st lab
@@ -424,7 +428,8 @@ simulateTransition spec absvars st lab =
                        Just sv2 -> if not $ currentDelay sv2
                                       then Nothing
                                       else Just $ currentStore sv2
-    in mstore2
+    in trace ("simulateTransition\nlabel: " ++ show lab ++ "\nstate: " ++ show st)
+       $ mstore2
 
 --------------------------------------------------------------
 -- GUI components
@@ -1363,7 +1368,7 @@ getDelay :: SourceView c a -> Int -> Bool
 getDelay sv p = isDelayLabel $ getLocLabel sv p
 
 getStore :: SourceView c a -> Int -> Store
-getStore sv p = trace ("getStore " ++ show p) $ teStore $ svTrace sv !! p
+getStore sv p = teStore $ svTrace sv !! p
 
 getStack :: SourceView c a -> Int -> Stack
 getStack sv p = teStack $ svTrace sv !! p
@@ -1458,6 +1463,9 @@ makeTransition ref = do
 setPID :: PID -> SourceView c a -> SourceView c a
 setPID pid sv = modifyCurrentStore sv (\s -> storeSet s mkPIDVar (Just $ SVal $ EnumVal $ mkPIDEnumeratorName pid))
     
+setLPID :: PID -> SourceView c a -> SourceView c a
+setLPID pid sv = modifyCurrentStore sv (\s -> storeSet s mkPIDLVar (Just $ SVal $ EnumVal $ mkPIDEnumeratorName pid))
+
 setPC :: PID -> Loc -> SourceView c a -> SourceView c a
 setPC pid pcloc sv = modifyCurrentStore sv (\s -> storeSet s (mkPCVar pid) (Just $ SVal $ EnumVal $ mkPCEnum pid pcloc))
 
@@ -1582,11 +1590,11 @@ flatScopeToScope inspec sc =
                                        in (Front.ScopeProcess tm proc', i)
          Front.ScopeTemplate _      -> (Front.ScopeTop, [])
 
--- Create a store with all tmp variables assigned according to their values 
--- in the transition
-tranTmpStore :: SourceView c a -> D.Transition a Store -> Store
-tranTmpStore sv tran = 
-    storeUnions $ map (\v -> SStruct $ M.singleton (varName v) (storeEval tstore (EVar $ varName v)))
-                $ specTmpVar $ svSpec sv
-    where tstore = fromJust $ D.tranConcreteLabel tran
-
+---- Create a store with all tmp variables assigned according to their values 
+---- in the transition
+--tranTmpStore :: SourceView c a -> D.Transition a Store -> Store
+--tranTmpStore sv tran = 
+--    storeUnions $ map (\v -> SStruct $ M.singleton (varName v) (storeEval tstore (EVar $ varName v)))
+--                $ specTmpVar $ svSpec sv
+--    where tstore = fromJust $ D.tranConcreteLabel tran
+--
