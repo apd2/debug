@@ -749,8 +749,8 @@ watchChanged ref path val = do
 watchDelete :: RSourceView c a -> IO ()
 watchDelete ref = do
     sv <- readIORef ref
-    (idx:_, _) <- G.treeViewGetCursor (svWatchView sv)
-    G.listStoreRemove (svWatchStore sv) idx
+    (idx, _) <- G.treeViewGetCursor (svWatchView sv)
+    when (not $ null idx) $ G.listStoreRemove (svWatchStore sv) (head idx)
     watchUpdate ref
 
 watchUpdate :: RSourceView c a -> IO ()
@@ -1369,7 +1369,8 @@ getDelay :: SourceView c a -> Int -> Bool
 getDelay sv p = isDelayLabel $ getLocLabel sv p
 
 getStore :: SourceView c a -> Int -> Store
-getStore sv p = teStore $ svTrace sv !! p
+getStore sv p | p >= (length $ svTrace sv) = SStruct $ M.empty
+              | otherwise                  = teStore $ svTrace sv !! p
 
 getStack :: SourceView c a -> Int -> Stack
 getStack sv p = teStack $ svTrace sv !! p
