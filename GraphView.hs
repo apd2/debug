@@ -201,7 +201,7 @@ setSelectedState gv mid = do
 setSelectedTrans :: GraphView c a b -> (Maybe GEdgeId) -> IO (GraphView c a b)
 setSelectedTrans gv mid = do
     let gv' = gv {gvSelectedTrans = mid}
-    -- Deselect previous active node
+    -- Deselect previous active edge
     case gvSelectedTrans gv of
          Nothing  -> return ()
          Just eid -> graphDrawSetEdgeStyle (gvGraphDraw gv) eid transitionStyle
@@ -248,8 +248,14 @@ deleteState ref nid = do
     gv <- readIORef ref
     graphDrawDeleteNode (gvGraphDraw gv) nid
     writeIORef ref $ gv {gvGraph = G.delNode nid (gvGraph gv)}
+    case gvSelectedTrans gv of
+         Nothing  -> return ()
+         Just eid -> do gv' <- readIORef ref
+                        when (isNothing $ findEdge gv' eid) $ 
+                             writeIORef ref $ gv' {gvSelectedTrans = Nothing}
     if Just nid == gvSelectedState gv
-       then D.modelSelectState (gvModel gv) Nothing
+       then do modifyIORef ref $ \gv -> gv {gvSelectedState = Nothing}
+               D.modelSelectState (gvModel gv) Nothing
        else return ()
 
 concretiseState :: (D.Rel c v a s, D.Vals b) => RGraphView c a b -> G.Node -> IO ()

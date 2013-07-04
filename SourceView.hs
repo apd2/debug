@@ -364,7 +364,7 @@ step sv =
                          action = locAct lab
                      in if isActNone action && (not $ isDelayLabel lab)
                            then step sv'
-                           else Just $ maybeCompleteTransition sv'
+                           else Just sv'
          Nothing -> Nothing
 
 
@@ -1434,15 +1434,15 @@ microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=
                                                      Nothing -> Nothing
                                                      _       -> Just (store', (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
 
--- Actions taken upon reaching a delay location
-maybeCompleteTransition :: SourceView c a -> SourceView c a
-maybeCompleteTransition sv | currentDelay sv && currentControllable sv = sv
-                           | currentDelay sv                           = setPC pid pc sv
-                           | otherwise                                 = sv
-    -- update PC and PID variables
-    where pc = currentLoc sv
-          mmeth = fmap sname $ stackTask (currentStack sv) 0
-          pid = svPID sv ++ (maybeToList mmeth)
+---- Actions taken upon reaching a delay location
+--maybeCompleteTransition :: SourceView c a -> SourceView c a
+--maybeCompleteTransition sv | currentDelay sv && currentControllable sv = sv
+--                           | currentDelay sv                           = setPC pid pc sv
+--                           | otherwise                                 = sv
+--    -- update PC and PID variables
+--    where pc = currentLoc sv
+--          mmeth = fmap sname $ stackTask (currentStack sv) 0
+--          pid = svPID sv ++ (maybeToList mmeth)
 
 makeTransition :: (D.Rel c v a s) => RSourceView c a -> IO ()
 makeTransition ref = do
@@ -1471,8 +1471,8 @@ maybeSetLCont sv | (isNothing $ storeTryEvalBool (currentStore sv) mkContLVar) =
                    modifyCurrentStore sv (\s -> storeSet s mkContLVar $ Just $ SVal $ BoolVal False)
                  | otherwise                                                  = sv
 
-setPC :: PID -> Loc -> SourceView c a -> SourceView c a
-setPC pid pcloc sv = modifyCurrentStore sv (\s -> storeSet s (mkPCVar pid) (Just $ SVal $ EnumVal $ mkPCEnum pid pcloc))
+--setPC :: PID -> Loc -> SourceView c a -> SourceView c a
+--setPC pid pcloc sv = modifyCurrentStore sv (\s -> storeSet s (mkPCVar pid) (Just $ SVal $ EnumVal $ mkPCEnum pid pcloc))
 
 -- Evaluate expression written in terms of variables in the original input spec.
 storeEvalStr :: Front.Spec -> Front.Spec -> Store -> PID -> Front.Scope -> String -> Either String Store
