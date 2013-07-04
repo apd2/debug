@@ -18,6 +18,7 @@ import qualified DbgTypes   as D
 import qualified SourceView as D
 import Implicit
 import BFormula
+import qualified Spec       as F
 import IVar
 import ISpec
 import IType
@@ -83,15 +84,8 @@ concretiseLabel cstate alabel = do
 --
 -- Concretises label variables, $pid, and $cont using concretiseRel and then 
 -- simulates the transition using the SourceView component
-concretiseTransition :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => Store -> a -> a -> Maybe Store
+concretiseTransition :: (D.Rel c v a s, ?flatspec::F.Spec, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => Store -> a -> a -> Maybe Store
 concretiseTransition cstate alabel anext = do
     -- concretise label
     clabel <- concretiseLabel cstate alabel
-    -- concretise $pid
-    --asn    <- D.oneSatVal anext $ D.mCurStateVars ?model
-    --(_, pidval) <- find ((== mkPIDVarName) . D.mvarName . fst) asn
-    --let pid = [(enumEnums $ getEnumeration mkPIDEnumName) !! fromInteger pidval]
-    -- concretise $cont
-    --(_, contval) <- find ((== mkContVarName) . D.mvarName . fst) asn
-    --let cont = (contval == 1)
-    D.simulateTransition ?spec ?absvars cstate clabel
+    D.simulateTransition ?flatspec ?spec ?absvars cstate clabel

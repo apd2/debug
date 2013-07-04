@@ -13,13 +13,14 @@ import Data.Maybe
 import Util
 import Cudd
 import CuddConvert
-import Interface
+import Interface hiding (db)
 import TermiteGame
 import Implicit
 import CuddSymTab
 import Predicate
 import Store
 import SMTSolver
+import qualified Spec           as F
 import qualified ISpec          as I
 import qualified TranSpec       as I
 import qualified IType          as I
@@ -46,8 +47,11 @@ data SynthesisRes c a = SynthesisRes { srWin           :: Bool
                                      , srCMinusU       :: a
                                      }
 
-mkSynthesisRes :: I.Spec -> STDdManager s u -> ((Bool, RefineStatic s u, RefineDynamic s u), DB s u AbsVar AbsVar) -> SynthesisRes DdManager DdNode
-mkSynthesisRes spec m ((res, RefineStatic{..}, RefineDynamic{..}), pdb) = 
+mkSynthesisRes :: I.Spec -> STDdManager s u -> (Bool, RefineInfo s u AbsVar AbsVar) -> SynthesisRes DdManager DdNode
+mkSynthesisRes spec m (res, RefineInfo{..}) = 
+    let RefineStatic{..}  = rs
+        RefineDynamic{..} = rd
+        pdb               = db in
     let ?spec = spec 
         ?m    = toDdManager m in
     let SectionInfo{..} = _sections pdb
@@ -122,14 +126,18 @@ quant_dis1 rel (var, envar) =
         rel2 = trace "quant_dis1 rel2" $ ((eqConst envar (0::Int)) .& {-exists var-} rel)
         --rel3 = rel1 .| rel2
     in rel1 .| rel2
-mkModel :: I.Spec -> 
+
+mkModel :: F.Spec -> 
+           I.Spec -> 
            SMTSolver -> 
            SynthesisRes DdManager DdNode ->
            D.Model DdManager DdNode Store
-mkModel spec solver sr = let ?spec    = spec 
-                             ?solver  = solver
-                         in mkModel' sr
-mkModel' :: (?spec::I.Spec, ?solver::SMTSolver) => SynthesisRes DdManager DdNode -> D.Model DdManager DdNode Store
+mkModel flatspec spec solver sr = let ?spec     = spec 
+                                      ?flatspec = flatspec
+                                      ?solver   = solver
+                                  in mkModel' sr
+
+mkModel' :: (?flatspec::F.Spec, ?spec::I.Spec, ?solver::SMTSolver) => SynthesisRes DdManager DdNode -> D.Model DdManager DdNode Store
 mkModel' sr@SynthesisRes{..} = model
     where
     mCtx                  = srCtx

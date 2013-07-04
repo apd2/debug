@@ -400,12 +400,13 @@ exitMagicBlock ref = do
     makeTransition ref
 
 -- simulate transition without GUI 
-simulateTransition :: Spec -> M.Map String AbsVar -> Store -> Store -> Maybe Store
-simulateTransition spec absvars st lab =
+simulateTransition :: Front.Spec -> Spec -> M.Map String AbsVar -> Store -> Store -> Maybe Store
+simulateTransition flatspec spec absvars st lab =
     let -- create enough of source view to call run
         pid = parsePIDEnumerator $ storeEvalEnum lab mkPIDLVar
         sv0 :: SourceView () ()
         sv0 = sourceViewEmpty { svSpec       = spec
+                              , svFlatSpec   = flatspec
                               , svAbsVars    = absvars
                               , svState      = D.State { sAbstract = error "simulateTransition: sAbstract is undefined"
                                                        , sConcrete = Just st}
@@ -1471,9 +1472,6 @@ maybeSetLCont sv | (isNothing $ storeTryEvalBool (currentStore sv) mkContLVar) =
                    modifyCurrentStore sv (\s -> storeSet s mkContLVar $ Just $ SVal $ BoolVal False)
                  | otherwise                                                  = sv
 
---setPC :: PID -> Loc -> SourceView c a -> SourceView c a
---setPC pid pcloc sv = modifyCurrentStore sv (\s -> storeSet s (mkPCVar pid) (Just $ SVal $ EnumVal $ mkPCEnum pid pcloc))
-
 -- Evaluate expression written in terms of variables in the original input spec.
 storeEvalStr :: Front.Spec -> Front.Spec -> Store -> PID -> Front.Scope -> String -> Either String Store
 storeEvalStr inspec flatspec store pid sc str = do
@@ -1594,12 +1592,3 @@ flatScopeToScope inspec sc =
                                            proc' = fromJust $ find ((== pname) . Front.procName) $ Front.tmAllProcess tm
                                        in (Front.ScopeProcess tm proc', i)
          Front.ScopeTemplate _      -> (Front.ScopeTop, [])
-
----- Create a store with all tmp variables assigned according to their values 
----- in the transition
---tranTmpStore :: SourceView c a -> D.Transition a Store -> Store
---tranTmpStore sv tran = 
---    storeUnions $ map (\v -> SStruct $ M.singleton (varName v) (storeEval tstore (EVar $ varName v)))
---                $ specTmpVar $ svSpec sv
---    where tstore = fromJust $ D.tranConcreteLabel tran
---
