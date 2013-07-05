@@ -24,6 +24,7 @@ module DbgTypes(Rel,
                 mUntrackedV, 
                 mLabelV,
                 mDumpIndices,
+                mUpdateTRel,
                 contRelName,
                 idxToVS,
                 mvarToVS,
@@ -43,17 +44,19 @@ module DbgTypes(Rel,
                 modelActiveTransRel,
                 modelSelectTransition,
                 modelSelectState,
+                modelSetConstraint,
                 showMessage) where
 
 import qualified Graphics.UI.Gtk as G 
 import Data.IORef
 import Data.List
 import Data.Maybe
+import qualified Data.Map        as M
 import Control.Monad
 
 import Util
 import IDE
-import qualified LogicClasses as L
+import qualified LogicClasses    as L
 import Implicit
 
 ------------------------------------------------------
@@ -122,7 +125,8 @@ data View a b = View {
 -- Events sent from the debugger core to each view
 data ViewEvents a b = ViewEvents {
      evtStateSelected      :: Maybe (State a b) -> IO (),
-     evtTransitionSelected :: Transition a b -> IO ()
+     evtTransitionSelected :: Transition a b -> IO (),
+     evtTRelUpdated        :: IO ()
 }
 
 data StateCategory = StateControllable
@@ -207,7 +211,9 @@ data Model c a b = Model {
 
     -- Dynamic part --
     mViews                :: [View a b],
-    mAutoConcretiseTrans  :: Bool
+    mAutoConcretiseTrans  :: Bool,
+    mConstraints          :: M.Map String a,
+    mTransRel             :: a
 }
 
 mCurStateVars :: Model c a b -> [ModelVar]
@@ -225,9 +231,16 @@ mNextV      = idxToVS . concatMap mvarIdx . mNextStateVars
 mUntrackedV = idxToVS . concatMap mvarIdx . mUntrackedVars
 mLabelV     = idxToVS . concatMap mvarIdx . mLabelVars
 
+mSetConstraint :: (Rel c v a s) => Model c a b -> String -> Maybe a -> Model c a b
+mSetConstraint m cname Nothing  = mUpdateTRel $ m {mConstraints = M.delete cname   $ mConstraints m}
+mSetConstraint m cname (Just r) = mUpdateTRel $ m {mConstraints = M.insert cname r $ mConstraints m}
+
+mUpdateTRel :: (Rel c v a s) => Model c a b -> Model c a b
+mUpdateTRel m@Model{..} = m {mTransRel = r}
+    where r = let ?m = mCtx in 
+              conj $ (snd $ head mTransRels) : (map snd $ M.toList mConstraints)
 
 type RModel c a b = IORef (Model c a b)
-
 
 ----------------------------------------------------------
 -- External interface
@@ -255,9 +268,8 @@ modelStateRels ref = getIORef mStateRels ref
 modelConcretiseState :: RModel c a b -> a -> IO (Maybe (State a b))
 modelConcretiseState ref x = getIORef ((flip mConcretiseState) x) ref
 
--- TODO: implement proper selection of transition relation to debug
 modelActiveTransRel :: RModel c a b -> IO a
-modelActiveTransRel ref = getIORef (snd . head . mTransRels) ref
+modelActiveTransRel ref = getIORef mTransRel ref
 
 -- Actions
 modelSelectTransition :: RModel c a b -> Transition a b -> IO ()
@@ -276,6 +288,13 @@ modelSelectState ref mrel = do
    views <- modelViews ref
    _ <- mapM (\v -> (evtStateSelected $ viewCB v) mrel) views
    return ()
+
+modelSetConstraint :: (Rel c v a s) => RModel c a b -> String -> Maybe a -> IO ()
+modelSetConstraint ref cname crel = do 
+    modifyIORef ref $ \m -> mSetConstraint m cname crel
+    views <- modelViews ref
+    _ <- mapM (evtTRelUpdated . viewCB) views
+    return ()
 
 -- Utils
 

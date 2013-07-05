@@ -7,7 +7,6 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.IORef
 import Data.List
-import Data.Maybe
 
 import Util
 import DbgTypes
@@ -15,7 +14,6 @@ import IDE
 import Icon
 import VarView
 import GraphView
-import Implicit
 
 dbgDefaultWidth  = 1024
 dbgDefaultHeight = 768
@@ -60,7 +58,7 @@ debugGUI :: (Rel c v a s, Vals b) => [(RModel c a b -> IO (View a b), Bool)] -> 
 debugGUI extraFactories model = do
     let ?m = mCtx model
     let factories = viewFactories ++ extraFactories
-    rmodel <- newIORef model
+    rmodel <- newIORef $ mUpdateTRel model
 
     -- Initialize GTK+ engine
     _ <- G.initGUI 

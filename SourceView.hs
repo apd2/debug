@@ -67,7 +67,7 @@ colorCont  = "#80c080"
 colorUCont = "#8080c0"
 fontSrc    = "Courier 10 Pitch"
 --------------------------------------------------------------
--- Data structures
+-- Types
 --------------------------------------------------------------
 
 instance D.Vals Store
@@ -280,6 +280,7 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
 
     let cb = D.ViewEvents { D.evtStateSelected      = sourceViewStateSelected      ref 
                           , D.evtTransitionSelected = sourceViewTransitionSelected ref
+                          , D.evtTRelUpdated        = return ()
                           }
 
     -- disable everything until we get a state to start from
@@ -1211,16 +1212,16 @@ stackFromStore' sv s pid methname = stack' ++ stack
 -- Extract the last controllable or uncontrollable task call 
 -- from the stack or return Nothing if the stack does not 
 -- contain a task call
-stackTask :: Stack -> Int -> Maybe Front.Method
-stackTask stack frame = stackTask' $ drop frame stack
-
-stackTask' :: Stack -> Maybe Front.Method
-stackTask' []      = Nothing
-stackTask' (fr:st) = case fScope fr of
-                          Front.ScopeMethod _ m -> if Front.methCat m == Front.Task Front.Uncontrollable 
-                                                      then Just m
-                                                      else stackTask' st
-                          _               -> stackTask' st
+--stackTask :: Stack -> Int -> Maybe Front.Method
+--stackTask stack frame = stackTask' $ drop frame stack
+--
+--stackTask' :: Stack -> Maybe Front.Method
+--stackTask' []      = Nothing
+--stackTask' (fr:st) = case fScope fr of
+--                          Front.ScopeMethod _ m -> if Front.methCat m == Front.Task Front.Uncontrollable 
+--                                                      then Just m
+--                                                      else stackTask' st
+--                          _               -> stackTask' st
 
 storeGetLoc :: Store -> PID -> Maybe String -> Loc
 storeGetLoc s pid methname = pcEnumToLoc pc

@@ -73,6 +73,7 @@ varViewNew rmodel = do
 
     let cb = D.ViewEvents { D.evtStateSelected      = varViewStateSelected      ref 
                           , D.evtTransitionSelected = varViewTransitionSelected ref
+                          , D.evtTRelUpdated        = update                    ref
                           }
     return $ D.View { D.viewName      = "Variables"
                     , D.viewDefAlign  = D.AlignLeft
@@ -84,23 +85,26 @@ varViewNew rmodel = do
 
 varViewStateSelected :: (D.Rel c v a s) => RVarView c a b -> Maybe (D.State a b) -> IO ()
 varViewStateSelected ref mstate = do
-    vv@VarView{..} <- readIORef ref
-    ctx <- D.modelCtx vvModel
-    let ?m = ctx
-    trel <- D.modelActiveTransRel vvModel
-    writeIORef ref $ vv {vvSelection = fmap Left mstate}
+    modifyIORef ref $ \vv -> vv {vvSelection = fmap Left mstate}
+    update ref
 --    putStrLn $ "trel support: " ++ (show $ supportIndices trel)
-    setExplorerSetRelation vvExplorer $ case mstate of
-                                             Nothing    -> trel
-                                             Just state -> (D.sAbstract state) .& trel
 
 varViewTransitionSelected :: (D.Rel c v a s) => RVarView c a b -> D.Transition a b -> IO ()
 varViewTransitionSelected ref tran = do
-    vv@VarView{..} <- readIORef ref
-    model <- readIORef vvModel
-    let ?m = D.mCtx model
-    writeIORef ref $ vv {vvSelection = Just $ Right tran}
-    setExplorerSetRelation vvExplorer (D.tranRel model tran)
+    modifyIORef ref $ \vv -> vv {vvSelection = Just $ Right tran}
+    update ref
+
+update :: (D.Rel c v a s) => RVarView c a b -> IO ()
+update ref = do
+    VarView{..}  <- readIORef ref
+    model@D.Model{..} <- readIORef vvModel
+    let ?m = mCtx
+    trel <- D.modelActiveTransRel vvModel
+    let rel = case vvSelection of
+                   Nothing         -> trel
+                   Just (Left st)  -> (D.sAbstract st) .& trel 
+                   Just (Right tr) -> D.tranRel model tr
+    setExplorerSetRelation vvExplorer rel
 
 ---------------------------------------------------------------------
 -- Private functions

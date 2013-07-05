@@ -4,14 +4,17 @@
 
 module AbstractorIFace( SynthesisRes(..)
                       , mkSynthesisRes
-                      , mkModel) where
+                      , mkModel
+                      , mkStrategy) where
 
 import qualified Data.Map as M
 import Data.List
 import Data.Maybe
+import Control.Monad.ST
 
 import Util
 import Cudd
+import CuddExplicitDeref
 import CuddConvert
 import Interface hiding (db)
 import TermiteGame
@@ -27,10 +30,12 @@ import qualified IType          as I
 import qualified DbgTypes       as D
 import qualified DbgConcretise  as D
 import qualified DbgAbstract    as D
+import qualified StrategyView   as D
 
 instance D.Rel DdManager VarData DdNode [[SatBit]]
 
 data SynthesisRes c a = SynthesisRes { srWin           :: Bool
+                                     , srStrat         :: [[DdNode]]  -- winning strategy or counterexample
                                      , srCtx           :: c
                                      , srStateVars     :: [D.ModelStateVar]
                                      , srUntrackedVars :: [D.ModelVar]
@@ -47,13 +52,23 @@ data SynthesisRes c a = SynthesisRes { srWin           :: Bool
                                      , srCMinusU       :: a
                                      }
 
-mkSynthesisRes :: I.Spec -> STDdManager s u -> (Bool, RefineInfo s u AbsVar AbsVar) -> SynthesisRes DdManager DdNode
-mkSynthesisRes spec m (res, RefineInfo{..}) = 
+mkSynthesisRes :: I.Spec -> STDdManager s u -> (Bool, RefineInfo s u AbsVar AbsVar) -> ST s (SynthesisRes DdManager DdNode)
+mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
+    let ?spec = spec 
+        ?m    = toDdManager m
     let RefineStatic{..}  = rs
         RefineDynamic{..} = rd
-        pdb               = db in
-    let ?spec = spec 
-        ?m    = toDdManager m in
+        pdb               = db
+    srStrat <- if res
+                  then do s0 <- strat ri
+                          mapM (mapM (\(u,s) -> do deref m u
+                                                   s' <- bor m s $ bnot cont
+                                                   deref m s
+                                                   return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
+                  else do s0 <- cex ri
+                          mapM (mapM (\s -> do s' <- bor m s cont
+                                               deref m s
+                                               return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
     let SectionInfo{..} = _sections pdb
         SymbolInfo{..}  = _symbolTable pdb
         (state, untracked) = partition func $ M.toList _stateVars
@@ -77,7 +92,7 @@ mkSynthesisRes spec m (res, RefineInfo{..}) =
         srCPlusC        = toDdNode srCtx consistentPlusCULCont
         srCMinusU       = toDdNode srCtx consistentMinusCULUCont
         srCPlusU        = toDdNode srCtx consistentPlusCULUCont
-    in SynthesisRes{..}
+    return SynthesisRes{..}
 
 -- Extract type information from AbsVar
 avarType :: (?spec::I.Spec) => AbsVar -> D.Type
@@ -123,7 +138,7 @@ quant_dis SynthesisRes{..} rel =
 quant_dis1 :: (D.Rel c v a s, ?m :: c) => a -> (v,v) -> a
 quant_dis1 rel (var, envar) = 
     let rel1 = trace "quant_dis1 rel1" $ ((eqConst envar (1::Int)) .& rel)
-        rel2 = trace "quant_dis1 rel2" $ ((eqConst envar (0::Int)) .& {-exists var-} rel)
+        rel2 = trace "quant_dis1 rel2" $ ((eqConst envar (0::Int)) .& exists var rel)
         --rel3 = rel1 .| rel2
     in rel1 .| rel2
 
@@ -159,7 +174,9 @@ mkModel' sr@SynthesisRes{..} = model
     mConcretiseState      = concretiseS
     mConcretiseTransition = concretiseT
     mAutoConcretiseTrans  = True
-    
+    mConstraints          = M.empty
+    mTransRel             = let ?m = srCtx in b
+
     model = D.Model{..}
 
     concretiseS :: DdNode -> Maybe (D.State DdNode Store)
@@ -181,3 +198,12 @@ mkModel' sr@SynthesisRes{..} = model
            then return tr'
            else error "concretiseT: concretised next-state differs from abstract next-state"
                                  | otherwise = Nothing
+
+
+mkStrategy :: I.Spec -> SynthesisRes DdManager DdNode -> D.Strategy DdNode
+mkStrategy spec SynthesisRes{..} = D.Strategy{..}
+    where
+    stratName  = if' srWin "Winning strategy" "Counterexample strategy"
+    stratGoals = zip (map I.goalName $ I.tsGoal $ I.specTran spec) srGoals
+    stratFair  = zip (map I.fairName $ I.tsFair $ I.specTran spec) srFairs
+    stratRel   = srStrat

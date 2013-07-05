@@ -88,6 +88,7 @@ graphViewNew model = do
 
     let cb = D.ViewEvents { D.evtStateSelected      = graphViewStateSelected      ref 
                           , D.evtTransitionSelected = graphViewTransitionSelected ref
+                          , D.evtTRelUpdated        = return ()
                           }
     return $ D.View { D.viewName      = "Transition graph"
                     , D.viewDefAlign  = D.AlignCenter

@@ -21,9 +21,6 @@ import BFormula
 import qualified Spec       as F
 import IVar
 import ISpec
-import IType
-import IExpr hiding (conj)
-import Inline
 
 -- Input: relation over a set of abstract variables
 -- Output: a single concrete assignment or Nothing if a 
