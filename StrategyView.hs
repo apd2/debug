@@ -96,7 +96,6 @@ strategyViewNew strat@Strategy{..} model = do
                                      G.boxPackStart vbox1 rad G.PackNatural 0
                                      return rad)
                      stratGoals
-    _ <- mapM (\bt -> G.radioButtonSetGroup bt $ head gbuts) $ tail gbuts
 
 
     -- Fair regions
@@ -109,11 +108,13 @@ strategyViewNew strat@Strategy{..} model = do
                                      G.boxPackStart vbox2 rad G.PackNatural 0
                                      return rad)
                      stratFair
-    _ <- mapM (\bt -> G.radioButtonSetGroup bt $ head fbuts) $ tail fbuts
 
     modifyIORef ref $ \sv -> sv { svEnBut    = apply
                                 , svGoalButs = gbuts
                                 , svFairButs = fbuts}
+
+    _ <- mapM (\bt -> G.radioButtonSetGroup bt $ head gbuts) $ tail gbuts
+    _ <- mapM (\bt -> G.radioButtonSetGroup bt $ head fbuts) $ tail fbuts
 
     -- TODO: Automatic scheduling
     return $ D.View { D.viewName      = stratName
