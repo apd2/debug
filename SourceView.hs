@@ -1166,7 +1166,6 @@ actionSelectorCreate ref = do
 
 actionSelectorRun :: (D.Rel c v a s) => RSourceView c a -> IO ()
 actionSelectorRun ref = do
-    switchToControllable ref
     sv@SourceView{..} <- readIORef ref
     buf <- G.textViewGetBuffer svActSelectText
     text <- G.get buf G.textBufferText
@@ -1174,8 +1173,11 @@ actionSelectorRun ref = do
         fpath = "/tmp/" ++ show fname
     case compileControllableAction svInputSpec svFlatSpec svPID (frScope $ head $ currentStack sv) text fpath of
          Left e    -> D.showMessage svModel G.MessageError e
-         Right cfa -> do writeFile fpath text
+         Right cfa -> do switchToControllable ref 
+                         writeFile fpath text
                          runControllableCFA ref cfa
+    
+
 
 --actionSelectorExit :: (D.Rel c v a s) => RSourceView c a -> IO ()
 --actionSelectorExit ref = do
@@ -1561,6 +1563,7 @@ storeEvalStr inspec flatspec store pid sc str = do
 
 compileControllableAction :: Front.Spec -> Front.Spec -> PID -> Front.Scope -> String -> FilePath -> Either String CFA
 compileControllableAction inspec flatspec pid sc str fname = do
+    trace ("compileControllableAction" ++ show pid) $ return ()
     -- Apply all transformations that the input spec goes through to the statement:
     -- 1. parse
     stat <- liftM (Front.sSeq nopos)
@@ -1595,8 +1598,9 @@ compileControllableAction inspec flatspec pid sc str fname = do
                                                aftstat <- Front.procStatToCFA simpstat cfaInitLoc
                                                -- switch to uncontrollable state
                                                aftucont <- ctxInsTrans' aftstat $ TranStat $ mkContVar =: false
+                                               aftpid <- ctxInsTrans' aftucont $ TranStat $ mkPIDVar =: (EConst $ EnumVal $ mkPIDEnumeratorName pidCont)
                                                -- add return after the statement to pop FrameInteractive off the stack
-                                               ctxInsTrans aftucont aftret TranReturn
+                                               ctxInsTrans aftpid aftret TranReturn
                                                ) ctx
     assert (null $ ctxVar ctx') (pos stat) "Cannot perform non-deterministic controllable action"
     -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
@@ -1605,7 +1609,7 @@ compileControllableAction inspec flatspec pid sc str fname = do
         reach = cfaReachInst cfar cfaInitLoc
         cfa'  = cfaPrune cfar (S.insert cfaInitLoc reach)
     assert (Graph.noNodes cfar == Graph.noNodes cfa') (pos stat) "Controllable action must be an instantaneous statement"
-    return cfa'
+    return $ cfaTraceFile cfa' "action" cfa'
     
 -- Check whether statement specifies a valid controllable action:
 -- * Function, procedure, and controllable task calls only
