@@ -280,7 +280,8 @@ modelSelectTransition ref tran = do
                             Nothing -> tran
                             Just tr -> tr
                   else tran
-   _ <- mapM (\v -> (evtTransitionSelected $ viewCB v) tran') mViews
+   _ <- mapM (\v -> (evtTransitionSelected $ viewCB v) tran')                 mViews
+   _ <- mapM (\v -> (evtStateSelected      $ viewCB v) (Just $ tranTo tran')) mViews
    return ()
 
 modelSelectState :: RModel c a b -> Maybe (State a b) -> IO ()
