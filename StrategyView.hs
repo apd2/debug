@@ -68,13 +68,13 @@ strategyViewNew strat@Strategy{..} model = do
 
     hbox <- G.hBoxNew True 0
     G.widgetShow hbox
-    G.boxPackStart vbox hbox G.PackNatural 0
+    G.boxPackStart vbox hbox G.PackGrow 0
     
     frm1 <- G.frameNew
     G.widgetShow frm1
     G.frameSetLabel frm1 "Goals"
     G.boxPackStart hbox frm1 G.PackGrow 0
-    vbox1 <- G.vBoxNew True 0
+    vbox1 <- G.vBoxNew False 0
     G.widgetShow vbox1
     G.containerAdd frm1 vbox1
 
@@ -82,7 +82,7 @@ strategyViewNew strat@Strategy{..} model = do
     G.widgetShow frm2
     G.frameSetLabel frm2 "Fair regions"
     G.boxPackStart hbox frm2 G.PackGrow 0
-    vbox2 <- G.vBoxNew True 0
+    vbox2 <- G.vBoxNew False 0
     G.widgetShow vbox2
     G.containerAdd frm2 vbox2
 
