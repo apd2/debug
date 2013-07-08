@@ -35,6 +35,7 @@ import qualified StrategyView   as D
 instance D.Rel DdManager VarData DdNode [[SatBit]]
 
 data SynthesisRes c a = SynthesisRes { srWin           :: Bool
+                                     , srWinningRegion :: DdNode
                                      , srStrat         :: [[DdNode]]  -- winning strategy or counterexample
                                      , srCtx           :: c
                                      , srStateVars     :: [D.ModelStateVar]
@@ -83,6 +84,7 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         srLabelVars     = concatMap toModelVarLabel $ M.toList _labelVars
             where toModelVarLabel     (p, (_, is, _, ie)) = [D.ModelVar (show p) (avarType p) is, D.ModelVar (show p ++ ".en") D.Bool [ie]]
         srAbsVars       = M.fromList $ map (\v -> (show v,v)) $ (M.keys _stateVars) ++ (M.keys _labelVars)
+        srWinningRegion = toDdNode srCtx wn
         srCont          = toDdNode srCtx cont
         srInit          = toDdNode srCtx init
         srGoals         = map (toDdNode srCtx) goal
@@ -160,6 +162,7 @@ mkModel' sr@SynthesisRes{..} = model
     mUntrackedVars        = srUntrackedVars 
     mLabelVars            = srLabelVars
     mStateRels            = [ (D.contRelName  , srCont)
+                            , ("win"          , srWinningRegion)
                             --, ("uncontrollable", let ?m = srCtx in nt srCont)
                             , ("init"          , srInit)] ++
                             zip (map I.goalName $ I.tsGoal $ I.specTran ?spec) srGoals  {- ++ 
