@@ -1534,6 +1534,7 @@ storeEvalStr inspec flatspec store pid sc str = do
     let (scope, iid) = flatScopeToScope inspec sc
     -- 2. validate
     let ?spec  = inspec
+        ?privoverride = True 
     Front.validateExpr scope expr
     let ?scope = scope
         in when (not $ Front.exprNoSideEffects expr) $ throwError "Expression has side effects"
@@ -1569,6 +1570,7 @@ compileControllableAction inspec flatspec pid sc str fname = do
     let (scope,iid) = flatScopeToScope inspec sc
     -- 2. validate
     let ?spec = inspec
+        ?privoverride = False
     Front.validateStat scope stat
     validateControllableStat scope stat
     -- 3. flatten
