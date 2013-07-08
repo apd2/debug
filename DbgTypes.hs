@@ -43,6 +43,7 @@ module DbgTypes(Rel,
                 modelConcretiseState,
                 modelActiveTransRel,
                 modelSelectTransition,
+                modelAddTransition,
                 modelSelectState,
                 modelSetConstraint,
                 showMessage) where
@@ -273,16 +274,24 @@ modelActiveTransRel ref = getIORef mTransRel ref
 
 -- Actions
 modelSelectTransition :: RModel c a b -> Transition a b -> IO ()
-modelSelectTransition ref tran = do
+modelSelectTransition ref tran = doSelectTransition ref tran False
+
+modelAddTransition :: RModel c a b -> Transition a b -> IO ()
+modelAddTransition ref tran = doSelectTransition ref tran True
+
+doSelectTransition :: RModel c a b -> Transition a b -> Bool -> IO ()
+doSelectTransition ref tran selnext = do
    Model{..} <- readIORef ref
    let tran' = if (not $ isConcreteTransition tran) && mAutoConcretiseTrans
                   then case mConcretiseTransition tran of 
                             Nothing -> tran
                             Just tr -> tr
                   else tran
-   _ <- mapM (\v -> (evtTransitionSelected $ viewCB v) tran')                 mViews
-   _ <- mapM (\v -> (evtStateSelected      $ viewCB v) (Just $ tranTo tran')) mViews
+   _ <- mapM (\v -> (evtTransitionSelected $ viewCB v) tran') mViews
+   when selnext (do {_ <- mapM (\v -> (evtStateSelected $ viewCB v) (Just $ tranTo tran')) mViews; return ()})
    return ()
+
+
 
 modelSelectState :: RModel c a b -> Maybe (State a b) -> IO ()
 modelSelectState ref mrel = do

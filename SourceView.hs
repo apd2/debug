@@ -930,11 +930,12 @@ commandButtonsUpdate ref = do
     -- if we are in a pause location and the wait condition is true
     let ?spec = svSpec sv
     let lab = currentLocLabel sv
+        pen = isProcEnabled sv (svPID sv)
         en = -- current process must be enabled and ...
              case lab of
                   LInst _      -> True
-                  LPause _ _ c -> storeEvalBool (currentStore sv) c == True
-                  LFinal _ _   -> not $ null $ Graph.lsuc (currentCFA sv) (currentLoc sv)
+                  LPause _ _ c -> pen && (storeEvalBool (currentStore sv) c == True)
+                  LFinal _ _   -> pen && (not $ null $ Graph.lsuc (currentCFA sv) (currentLoc sv))
              && 
              -- ... non-determinism must be resolved
              -- (all scalar tmp variables that affect the next transition must be assigned)
@@ -1483,8 +1484,8 @@ makeTransition ref = do
     -- abstract final state
     let trans = D.abstractTransition (svState sv) (currentStore sv) 
     -- add transition
-    D.modelSelectTransition (svModel sv) trans
-    D.modelSelectState (svModel sv) (Just $ D.tranTo trans)
+    D.modelAddTransition (svModel sv) trans
+--    D.modelSelectState (svModel sv) (Just $ D.tranTo trans)
 
 
 setPID :: PID -> SourceView c a -> SourceView c a
