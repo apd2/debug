@@ -1,4 +1,4 @@
-{-# LANGUAGE ImplicitParams, RecordWildCards, ScopedTypeVariables #-}
+{-# LANGUAGE ImplicitParams, RecordWildCards, ScopedTypeVariables, TupleSections #-}
 
 module SourceView(sourceViewNew, 
                   simulateTransition) where
@@ -351,8 +351,9 @@ sourceViewStateSelected ref (Just s) | (not $ D.isConcreteState s) = disable ref
     modifyIORef ref (\sv -> sv { svState   = s
                                , svTmp     = SStruct $ M.empty
                                , svTranPID = Nothing})
-    putStrLn "sourceViewStateSelected done"
+    processSelectorChooseUniqueEnabled ref
     reset ref
+    putStrLn "sourceViewStateSelected done"
 
 sourceViewTransitionSelected :: (D.Rel c v a s) => RSourceView c a -> D.Transition a Store -> IO ()
 sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = disable ref
@@ -361,8 +362,9 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
     modifyIORef ref (\sv -> sv { svState   = D.tranFrom tran
                                , svTmp     = fromJust $ D.tranConcreteLabel tran
                                , svTranPID = Just $ parsePIDEnumerator $ storeEvalEnum (fromJust $ D.sConcrete $ D.tranTo tran) mkPIDVar})
-    putStrLn "sourceViewTransitionSelected done"
+    processSelectorChooseUniqueEnabled ref
     reset ref
+    putStrLn "sourceViewTransitionSelected done"
 
 --------------------------------------------------------------
 -- Actions
@@ -497,17 +499,21 @@ processSelectorChanged ref = do
            --cfaShow (specGetCFA (svSpec sv) pid Nothing) (pidToName pid)
            reset ref
 
+
+pidtree :: SourceView c a -> Forest PID 
+pidtree sv = map (procTree []) (specProc $ svSpec sv)
+    where procTree parpid p = Node { rootLabel = pid
+                                   , subForest = map (procTree pid) (procChildren p)}
+                              where pid = parpid ++ [procName p]
+
 processSelectorInit :: RSourceView c a -> IO ()
 processSelectorInit ref = do
     sv <- readIORef ref
     let store = svProcessStore sv
-        pidtree = map (procTree []) (specProc $ svSpec sv)
-                  where procTree parpid p = Node { rootLabel = (pid, False)
-                                                 , subForest = map (procTree pid) (procChildren p)}
-                                            where pid = parpid ++ [procName p]
+
     -- build store
     G.treeStoreClear store
-    G.treeStoreInsertForest store [] 0 pidtree
+    G.treeStoreInsertForest store [] 0 (map (fmap (,False)) $ pidtree sv)
 
 processSelectorUpdate :: RSourceView c a -> IO ()
 processSelectorUpdate ref = do
@@ -523,6 +529,24 @@ processSelectorUpdate ref = do
     when (isNothing miter) $ do miter' <- G.treeModelGetIter store [0]
                                 G.comboBoxSetActiveIter combo (fromJust miter')
     G.widgetSetSensitive combo True
+
+-- Check if there's only one enabled process in the current state
+-- and, if yes, select this process.
+processSelectorChooseUniqueEnabled :: RSourceView c a -> IO ()
+processSelectorChooseUniqueEnabled ref = do
+    sv <- readIORef ref
+    let enpids = filter (isProcEnabled sv)
+                 $ concatMap flatten $ pidtree sv
+    when (length enpids == 1) $ processSelectorSelectPID ref (head enpids)
+
+processSelectorSelectPID :: RSourceView c a -> PID -> IO ()
+processSelectorSelectPID ref pid = do
+    sv <- readIORef ref
+    let store = svProcessStore sv
+        combo = svProcessCombo sv
+    myTreeModelForeach store (\iter -> do path     <- G.treeModelGetPath store iter
+                                          (pid', _) <- G.treeStoreGetValue store path
+                                          when (pid' == pid) $ G.comboBoxSetActiveIter combo iter)
 
 -- GTK's treeModelForeach does not work if the 
 -- function modifies the store
@@ -1377,7 +1401,7 @@ getCFA sv p = stackGetCFA sv (svPID sv) (getStack sv p)
 stackGetCFA :: SourceView c a -> PID -> ProcStack -> CFA
 -- HACK
 stackGetCFA sv ["$init"] _                                                                                           = tranCFA $ fst $ tsInit $ specTran (svSpec sv)
-stackGetCFA sv pid ((FrameCTask   (Front.ScopeMethod _ m) _):_)                                                      = specGetCFA (svSpec sv) []  (Just $ sname m)
+stackGetCFA sv _   ((FrameCTask   (Front.ScopeMethod _ m) _):_)                                                      = specGetCFA (svSpec sv) []  (Just $ sname m)
 stackGetCFA sv pid ((FrameRegular (Front.ScopeMethod _ m) _):_) | Front.methCat m == Front.Task Front.Controllable   = specGetCFA (svSpec sv) pid (Just $ sname m)
                                                                 | Front.methCat m == Front.Task Front.Uncontrollable = specGetCFA (svSpec sv) pid (Just $ sname m) 
 stackGetCFA sv pid ((FrameRegular (Front.ScopeProcess _ _) _):_)                                                     = specGetCFA (svSpec sv) pid Nothing
