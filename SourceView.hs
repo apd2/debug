@@ -72,10 +72,33 @@ fontSrc    = "Courier 10 Pitch"
 
 instance D.Vals Store
 
+data ProcStackFrame = FrameCTask       {frScope::Front.Scope, frLoc::Loc} 
+                    | FrameRegular     {frScope::Front.Scope, frLoc::Loc}
+                    | FrameInteractive {frScope::Front.Scope, frLoc::Loc, frCFA::CFA}
+
+isFrameInteractive (FrameInteractive _ _ _) = True
+isFrameInteractive _                        = False
+
+instance PP ProcStackFrame where
+    pp f = (if' (isFrameInteractive f) (PP.text "(interactive)") PP.empty) PP.<+> (PP.text $ show $ frScope f) PP.<> PP.char ':' PP.<+> (PP.text $ show $ frLoc f)
+
+type ProcStack = [ProcStackFrame]
+
+instance PP ProcStack where
+    pp stack = PP.vcat $ map pp stack
+
+showStack :: ProcStack -> String
+showStack = PP.render . pp
+
+stackToProcStack :: Bool -> Stack -> ProcStack
+stackToProcStack True ((Frame sc loc):frames) = FrameCTask sc loc : stackToProcStack False frames
+stackToProcStack _    frames                  = map (\(Frame sc loc) -> FrameRegular sc loc) frames
+
 data TraceEntry = TraceEntry {
-    teStack :: Stack,
+    teStack :: ProcStack,
     teStore :: Store
 }
+
 
 instance PP TraceEntry where
     pp (TraceEntry stack _) = pp stack
@@ -118,7 +141,7 @@ data SourceView c a = SourceView {
 
     -- Stack view
     svStackView      :: G.TreeView,                 -- stack view
-    svStackStore     :: G.ListStore Frame,          -- store containing list of stack frames
+    svStackStore     :: G.ListStore ProcStackFrame, -- store containing list of stack frames
     svStackFrame     :: Int,                        -- selected stack frame (0 = top)
 
     -- Watch
@@ -301,7 +324,7 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
         modifyIORef ref (\sv -> sv { svState      = D.abstractState initstore
                                    , svTmp        = SStruct $ M.empty
                                    , svPID        = ["$init"]
-                                   , svTrace      = [TraceEntry { teStack = [FrameStatic (Front.ScopeTemplate (let ?spec = flatspec in tmMain)) (tranFrom $ fst $ tsInit $ specTran ?spec)]
+                                   , svTrace      = [TraceEntry { teStack = [FrameRegular (Front.ScopeTemplate (let ?spec = flatspec in tmMain)) (tranFrom $ fst $ tsInit $ specTran ?spec)]
                                                                 , teStore = initstore}]
                                    , svTracePos   = 0
                                    , svStackFrame = 0})
@@ -542,7 +565,7 @@ stackViewCreate ref = do
     G.cellLayoutSetAttributeFunc col rend store $ 
         (\iter -> do let idx = G.listStoreIterToIndex iter
                      frame <- G.listStoreGetValue store idx
-                     G.set rend [G.cellTextMarkup G.:= Just $ show $ fScope frame])
+                     G.set rend [G.cellTextMarkup G.:= Just $ show $ frScope frame])
     _ <- G.treeViewAppendColumn view col
 
     modifyIORef ref (\sv -> sv{svStackView = view, svStackStore = store, svStackFrame = 0})
@@ -666,7 +689,7 @@ traceViewUpdate ref = do
     G.widgetSetSensitive (svTraceCombo sv) True
 
 
-traceAppend :: SourceView c a -> Store -> Stack -> SourceView c a
+traceAppend :: SourceView c a -> Store -> ProcStack -> SourceView c a
 traceAppend sv store stack = sv {svTrace = tr, svTracePos = p}
     where tr = take (svTracePos sv + 1) (svTrace sv) ++ [TraceEntry stack store]
           p  = length tr - 1
@@ -718,7 +741,7 @@ watchCreate ref = do
                                                           $ case mexp of 
                                                                  Nothing  -> ""
                                                                  Just e -> case storeEvalStr svInputSpec svFlatSpec  
-                                                                                             (currentStore sv) svPID (fScope $ currentStack sv !! svStackFrame) e of
+                                                                                             (currentStore sv) svPID (frScope $ currentStack sv !! svStackFrame) e of
                                                                                 Left er -> er
                                                                                 Right v -> show v])
     _ <- G.treeViewAppendColumn view valcol
@@ -832,7 +855,7 @@ sourceWindowUpdate :: RSourceView c a -> IO ()
 sourceWindowUpdate ref = do
     sv <- readIORef ref
     let cfa = cfaAtFrame sv (svStackFrame sv)
-        loc = fLoc $ (currentStack sv) !! (svStackFrame sv)
+        loc = frLoc $ (currentStack sv) !! (svStackFrame sv)
     case locAct $ cfaLocLabel loc cfa of
          ActNone   -> do sourceClearPos sv
                          G.labelSetText (svFileLab sv) ""
@@ -1124,7 +1147,7 @@ actionSelectorRun ref = do
     text <- G.get buf G.textBufferText
     let fname = hash text
         fpath = "/tmp/" ++ show fname
-    case compileControllableAction svInputSpec svFlatSpec svPID (fScope $ head $ currentStack sv) text fpath of
+    case compileControllableAction svInputSpec svFlatSpec svPID (frScope $ head $ currentStack sv) text fpath of
          Left e    -> D.showMessage svModel G.MessageError e
          Right cfa -> do writeFile fpath text
                          runControllableCFA ref cfa
@@ -1149,7 +1172,7 @@ runControllableCFA :: RSourceView c a -> CFA -> IO ()
 runControllableCFA ref cfa = do
     -- Push controllable cfa on the stack
     modifyIORef ref (\sv -> let stack = currentStack sv
-                                stack' = (FrameInteractive (fScope $ head stack) cfaInitLoc cfa) : stack
+                                stack' = (FrameInteractive (frScope $ head stack) cfaInitLoc cfa) : stack
                             in traceAppend sv (currentStore sv) stack')
     updateDisplays ref
 
@@ -1185,15 +1208,15 @@ isWaitForMagicLabel _              = False
 
 -- Given a snapshot of the store at a pause location, compute
 -- process stack.
-stackFromStore :: SourceView c a -> Store -> PID -> Stack
+stackFromStore :: SourceView c a -> Store -> PID -> ProcStack
 stackFromStore sv s pid = stackFromStore' sv s pid Nothing
 
-stackFromStore' :: SourceView c a -> Store -> PID -> Maybe String -> Stack
+stackFromStore' :: SourceView c a -> Store -> PID -> Maybe String -> ProcStack
 stackFromStore' sv s pid methname = stack' ++ stack
     where cfa   = specGetCFA (svSpec sv) pid methname
           loc   = storeGetLoc s pid methname
           lab   = cfaLocLabel loc cfa
-          stack = locStack lab
+          stack = stackToProcStack (null pid) (locStack lab)
           -- If this location corresponds to a task call, recurse into task's CFA
           stack' = case lab of 
                         LPause _ _ e -> case isWaitForTask e of
@@ -1236,7 +1259,7 @@ isProcEnabled sv pid =
     let store = fromJust $ D.sConcrete $ svState sv
         stack = stackFromStore sv store pid
         frame = head stack
-        loc   = fLoc frame
+        loc   = frLoc frame
         cfa   = stackGetCFA sv pid stack
         lab   = cfaLocLabel loc cfa
     in case svTranPID sv of
@@ -1327,7 +1350,7 @@ modifyStore sv idx f = sv {svTrace = tr'}
 modifyCurrentStore :: SourceView c a -> (Store -> Store) -> SourceView c a
 modifyCurrentStore sv f = modifyStore sv (svTracePos sv) f
 
-currentStack :: SourceView c a -> Stack
+currentStack :: SourceView c a -> ProcStack
 currentStack sv = getStack sv (svTracePos sv)
 
 currentTmpExprTree :: SourceView c a -> Forest Expr
@@ -1350,18 +1373,19 @@ cfaAtFrame sv frame = trace ("cfaAtFrame " ++ showStack (drop frame $ currentSta
 getCFA :: SourceView c a -> Int -> CFA
 getCFA sv p = stackGetCFA sv (svPID sv) (getStack sv p)
 
-stackGetCFA :: SourceView c a -> PID -> Stack -> CFA
+stackGetCFA :: SourceView c a -> PID -> ProcStack -> CFA
 -- HACK
 stackGetCFA sv ["$init"] _                                                                                           = tranCFA $ fst $ tsInit $ specTran (svSpec sv)
-stackGetCFA sv pid ((FrameStatic (Front.ScopeMethod _ m) _):_)  | Front.methCat m == Front.Task Front.Controllable   = specGetCFA (svSpec sv) pid (Just $ sname m)
+stackGetCFA sv pid ((FrameCTask   (Front.ScopeMethod _ m) _):_)                                                      = specGetCFA (svSpec sv) []  (Just $ sname m)
+stackGetCFA sv pid ((FrameRegular (Front.ScopeMethod _ m) _):_) | Front.methCat m == Front.Task Front.Controllable   = specGetCFA (svSpec sv) pid (Just $ sname m)
                                                                 | Front.methCat m == Front.Task Front.Uncontrollable = specGetCFA (svSpec sv) pid (Just $ sname m) 
-stackGetCFA sv pid ((FrameStatic (Front.ScopeProcess _ _) _):_)                                                      = specGetCFA (svSpec sv) pid Nothing
+stackGetCFA sv pid ((FrameRegular (Front.ScopeProcess _ _) _):_)                                                     = specGetCFA (svSpec sv) pid Nothing
 stackGetCFA _  _   ((FrameInteractive _ _ cfa):_)                                                                    = cfa
 stackGetCFA sv pid (_:stack)                                                                                         = stackGetCFA sv pid stack
         
 
 getLoc :: SourceView c a -> Int -> Loc
-getLoc sv p = fLoc $ head $ getStack sv p
+getLoc sv p = frLoc $ head $ getStack sv p
 
 getLocLabel :: SourceView c a -> Int -> LocLabel
 getLocLabel sv p = cfaLocLabel (getLoc sv p) (getCFA sv p)
@@ -1373,7 +1397,7 @@ getStore :: SourceView c a -> Int -> Store
 getStore sv p | p >= (length $ svTrace sv) = SStruct $ M.empty
               | otherwise                  = teStore $ svTrace sv !! p
 
-getStack :: SourceView c a -> Int -> Stack
+getStack :: SourceView c a -> Int -> ProcStack
 getStack sv p = teStack $ svTrace sv !! p
 
 getTmpExprTree :: SourceView c a -> Int -> Forest Expr
@@ -1413,29 +1437,29 @@ microstep sv =
             (store, stack):_ -> trace ("microstep': stack=" ++ showStack stack) 
                                 $ Just $ traceAppend sv store stack
 
-microstep' :: SourceView c a -> (Loc, TranLabel) -> Maybe (Store, Stack)
+microstep' :: SourceView c a -> (Loc, TranLabel) -> Maybe (Store, ProcStack)
 microstep' sv (to, TranCall meth mretloc)  = -- insert new stack frame and mofify the old frame to point to return location,
                                              -- so that Return can be performed later
                                              let ?spec = svFlatSpec sv in
                                              let f0:frames = currentStack sv
                                                  stack' = case mretloc of
                                                                Nothing -> f0 : frames
-                                                               Just l  -> f0{fLoc = l} : frames
+                                                               Just l  -> f0{frLoc = l} : frames
                                                  sc = Front.ScopeMethod tmMain meth
-                                             in if fScope f0 == sc -- avoid creating duplicate frames (happens with task calls)
-                                                   then Just (currentStore sv, (FrameStatic sc to) : frames)
-                                                   else Just (currentStore sv, (FrameStatic sc to) : stack')
+                                             in if frScope f0 == sc -- avoid creating duplicate frames (happens with task calls)
+                                                   then Just (currentStore sv, f0{frLoc=to} : frames)
+                                                   else Just (currentStore sv, (FrameRegular sc to) : stack')
 microstep' sv (_ , TranReturn)             = Just (currentStore sv, tail $ currentStack sv)
-microstep' sv (to, TranNop)                = Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
+microstep' sv (to, TranNop)                = Just (currentStore sv, (head $ currentStack sv){frLoc = to} : (tail $ currentStack sv))
 microstep' sv (to, TranStat (SAssume e))   = if storeEvalBool (currentStore sv) e == True
-                                                then Just (currentStore sv, (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
+                                                then Just (currentStore sv, (head $ currentStack sv){frLoc = to} : (tail $ currentStack sv))
                                                 else Nothing
 microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=" ++ show r) $
                                              let rval = storeTryEval (currentStore sv) r
                                                  store' = storeSet (currentStore sv) l rval
                                              in case rval of 
                                                      Nothing -> Nothing
-                                                     _       -> Just (store', (head $ currentStack sv){fLoc = to} : (tail $ currentStack sv))
+                                                     _       -> Just (store', (head $ currentStack sv){frLoc = to} : (tail $ currentStack sv))
 
 ---- Actions taken upon reaching a delay location
 --maybeCompleteTransition :: SourceView c a -> SourceView c a
