@@ -328,7 +328,10 @@ stateStyle gv sid = do
 stateAnnots :: (D.Rel c v a s, ?m::c) => GraphView c a b -> a -> IO [GAnnotation]
 stateAnnots gv srel = do
     staterels <- D.modelStateRels (gvModel gv)
-    let supersets = map fst $ filter (\(_,r) -> (srel .-> r) .== t) staterels
+    let supersets = map fst 
+                    $ filter (\(_,r) -> (srel .-> r) .== t) 
+                    -- controllable states are already highlighted
+                    $ filter ((/= D.contRelName) . fst) staterels 
     return $ map (\n -> GAnnotation n AnnotRight stateAnnotStyle) supersets
 
 transitionAnnots :: (D.Rel c v a s, ?m::c) => GraphView c a b -> D.Transition a b -> IO [GAnnotation]

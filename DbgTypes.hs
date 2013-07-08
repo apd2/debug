@@ -63,7 +63,7 @@ import Implicit
 -- Constants
 ------------------------------------------------------
 
-contRelName = "Controllable states"
+contRelName = "controllable"
 
 ------------------------------------------------------
 -- Types

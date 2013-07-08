@@ -159,11 +159,11 @@ mkModel' sr@SynthesisRes{..} = model
     mStateVars            = srStateVars
     mUntrackedVars        = srUntrackedVars 
     mLabelVars            = srLabelVars
-    mStateRels            = [ ("controllable"  , srCont)
-                            , ("uncontrollable", let ?m = srCtx in nt srCont)
+    mStateRels            = [ (D.contRelName  , srCont)
+                            --, ("uncontrollable", let ?m = srCtx in nt srCont)
                             , ("init"          , srInit)] ++
-                            zip (map I.goalName $ I.tsGoal $ I.specTran ?spec) srGoals  ++ 
-                            zip (map I.fairName $ I.tsFair $ I.specTran ?spec) srFairs
+                            zip (map I.goalName $ I.tsGoal $ I.specTran ?spec) srGoals  {- ++ 
+                            zip (map I.fairName $ I.tsFair $ I.specTran ?spec) srFairs -}
     mTransRels            = [ (if' srWin "trel_win" "trel_lose" , mkTRel sr)
                             , ("trel"                           , srTran)
                             , ("c-c"                            , srCMinusC)
