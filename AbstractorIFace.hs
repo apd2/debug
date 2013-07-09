@@ -163,7 +163,7 @@ mkModel' sr@SynthesisRes{..} = model
     mStateRels            = [ (D.contRelName  , srCont)
                             , ("win"          , srWinningRegion)
                             --, ("uncontrollable", let ?m = srCtx in nt srCont)
-                            , ("init"          , srInit)] ++
+                            , ("init"          , if' srWin srInit (let ?m = srCtx in srInit .& (nt srWinningRegion)))] ++
                             zip (map I.goalName $ I.tsGoal $ I.specTran ?spec) srGoals  {- ++ 
                             zip (map I.fairName $ I.tsFair $ I.specTran ?spec) srFairs -}
     mTransRels            = [ (if' srWin "trel_win" "trel_lose" , mkTRel sr)

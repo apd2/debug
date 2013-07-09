@@ -78,9 +78,6 @@ concretiseLabel cstate alabel = do
 -- * Concrete next-state and label store, which
 --   can be used to compute other components of 
 --   the transition
---
--- Concretises label variables, $pid, and $cont using concretiseRel and then 
--- simulates the transition using the SourceView component
 concretiseTransition :: (D.Rel c v a s, ?flatspec::F.Spec, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => Store -> a -> a -> Maybe Store
 concretiseTransition cstate alabel anext = do
     -- concretise label

@@ -153,8 +153,6 @@ data SourceView c a = SourceView {
     svSourceBuf      :: G.TextBuffer,
     svSourceTag      :: G.TextTag,                  -- tag to mark current selection current selection
     svFileLab        :: G.Label,                    -- Status labels: file name
-    --svContTog        :: G.ToggleButton,             --                controllable/uncontrollable state
-    --svContLab        :: G.Label,                    --
     svInprogLab      :: G.Label,                    --                transition in progress
 
     -- Resolve view
@@ -374,7 +372,7 @@ stepAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
 stepAction ref = do 
     sv   <- readIORef ref
     -- sync PID
-    let sv0 = maybeSetLCont $ setLPID (svPID sv) sv
+    let sv0 = maybeSetLCont $ setLPID (currentPIDorCont sv) sv
     let msv' = step sv0
     when (isJust msv') $ do writeIORef ref (fromJust msv')
                             when (currentDelay $ fromJust msv') $ makeTransition ref
@@ -397,8 +395,8 @@ step sv =
 runAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
 runAction ref = do
     sv <- readIORef ref
-     -- sync PID
-    let sv0 = maybeSetLCont $ setLPID (svPID sv) sv
+    -- sync PID
+    let sv0 = maybeSetLCont $ setLPID (currentPIDorCont sv) sv
     case run sv0 of
          Nothing  -> return ()
          Just sv' -> do writeIORef ref sv'
@@ -1409,7 +1407,14 @@ stackGetCFA sv pid ((FrameRegular (Front.ScopeMethod _ m) _):_) | Front.methCat 
 stackGetCFA sv pid ((FrameRegular (Front.ScopeProcess _ _) _):_)                                                     = specGetCFA (svSpec sv) pid Nothing
 stackGetCFA _  _   ((FrameInteractive _ _ cfa):_)                                                                    = cfa
 stackGetCFA sv pid (_:stack)                                                                                         = stackGetCFA sv pid stack
-        
+
+currentPIDorCont :: SourceView c a -> PID
+currentPIDorCont sv = 
+    case mapMaybe (\fr -> case fr of
+                               FrameCTask (Front.ScopeMethod _ m) _ -> Just m
+                               _                                    -> Nothing) (currentStack sv) of
+         []    -> svPID sv
+         (m:_) -> [sname m]
 
 getLoc :: SourceView c a -> Int -> Loc
 getLoc sv p = frLoc $ head $ getStack sv p
