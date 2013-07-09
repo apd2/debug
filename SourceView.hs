@@ -316,7 +316,7 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
             ?absvars = absvars
             ?model   = model
             ?m       = D.mCtx model
-        initstore <- liftM storeExtendDefault
+        initstore <- liftM storeExtendDefaultState
                      $ case smtGetModel solver [let ?pred = [] in bexprToFormula $ snd $ tsInit $ specTran spec] of
                             Just (Right store) -> return store                      
                             _                  -> fail "Unsatisfiable initial condition"
@@ -451,7 +451,7 @@ simulateTransition flatspec spec absvars st lab =
                                                  , teStack = stackFromStore sv0 st pid}]} 
         msv2 = run sv1 
         mstore2 = case msv2 of
-                       Nothing  -> Nothing
+                       Nothing  -> trace ("simulateTransition: msv2 = Nothing") Nothing
                        Just sv2 -> if not $ currentDelay sv2
                                       then Nothing
                                       else Just $ currentStore sv2

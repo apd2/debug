@@ -47,7 +47,7 @@ concretiseRel mvars rel = do
 concretiseState :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => a -> Maybe (D.State a Store)
 concretiseState rel = case concretiseRel (D.mCurStateVars ?model) rel of
                            Nothing            -> Nothing
-                           Just (rel', store) -> Just $ D.State rel' (Just $ storeExtendDefault store)
+                           Just (rel', store) -> Just $ D.State rel' (Just $ storeExtendDefaultState store)
 
 -- Given a concrete state and an abstract label, compute concrete label.  
 -- The abstract label is assumed to be a cube.
@@ -66,7 +66,7 @@ concretiseLabel cstate alabel = do
    -- Check for model
    case smtGetModel ?solver $ map FPred $ lpreds ++ spreds of
         Just (Right (SStruct fs)) -> -- Keep temporary variables only
-                                     Just $ SStruct $ M.filterWithKey (\n _ -> (varCat $ getVar n) == VarTmp) fs 
+                                     Just $ storeExtendDefaultLabel $ SStruct $ M.filterWithKey (\n _ -> (varCat $ getVar n) == VarTmp) fs 
         _                         -> Nothing
 
 -- Inputs:

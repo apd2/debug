@@ -196,9 +196,10 @@ mkModel' sr@SynthesisRes{..} = model
         cstate <- D.sConcrete tranFrom
         cnext  <- D.concretiseTransition cstate tranAbstractLabel (D.sAbstract tranTo)
         let tr' = D.abstractTransition tranFrom cnext
-        if ((D.sAbstract $ D.tranTo tr') .-> (D.sAbstract tranTo)) .== t
-           then return tr'
-           else error "concretiseT: concretised next-state differs from abstract next-state"
+        return tr'
+--        if ((D.sAbstract $ D.tranTo tr') .-> (D.sAbstract tranTo)) .== t
+--           then return tr'
+--           else error "concretiseT: concretised next-state differs from abstract next-state"
                                  | otherwise = Nothing
 
 
