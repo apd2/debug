@@ -62,10 +62,9 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         pdb               = db
     srStrat <- if res
                   then do s0 <- strat ri
-                          mapM (mapM (\(u,s) -> do deref m u
-                                                   s' <- bor m s $ bnot cont
-                                                   deref m s
-                                                   return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
+                          mapM (mapM (\s -> do s' <- bor m s $ bnot cont
+                                               deref m s
+                                               return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
                   else do s0 <- cex ri
                           mapM (mapM (\s -> do s' <- bor m s cont
                                                deref m s
