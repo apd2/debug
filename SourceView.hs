@@ -437,7 +437,7 @@ simulateTransition flatspec spec absvars st lab =
                               , svTracePos   = 0
                               , svStackFrame = 0
                               }
-        pid = case parseEPIDEnumerator $ storeEvalEnum lab mkEPIDLVar of
+        pid = case parseEPIDEnumerator flatspec $ storeEvalEnum lab mkEPIDLVar of
                    EPIDProc p -> p
                    _          -> -- find process currently inside a magic block
                                  case findProcInsideMagic sv0 of 
@@ -1240,7 +1240,8 @@ isWaitForMagicLabel _              = False
 -- Given a snapshot of the store at a pause location, compute
 -- process stack.
 stackFromStore :: SourceView c a -> Store -> PrID -> ProcStack
-stackFromStore sv s pid = stackFromStore' sv s (UCID pid Nothing)
+stackFromStore sv s pid = trace ("stackFromStore " ++ show pid ++ ":\n" ++ showStack res) res
+    where res = stackFromStore' sv s (UCID pid Nothing)
 
 stackFromStore' :: SourceView c a -> Store -> CID -> ProcStack
 stackFromStore' sv s cid = stack' ++ stack
@@ -1252,16 +1253,19 @@ stackFromStore' sv s cid = stack' ++ stack
           stack' = case cid of
                         UCID pid _ -> case lab of
                                            LPause _ _ e -> case isWaitForTask e of
-                                                                Nothing  -> if isWaitForMagic e
+                                                                Nothing  -> trace ("isWaitForTask " ++ show e ++ "= Nothing") $
+                                                                            if isWaitForMagic e
                                                                                then let t = getTag s in
-                                                                                    if' (t==mkTagIdle) [] 
+                                                                                    if' (t==mkTagIdle) []
                                                                                         $ stackFromStore' sv s (CTCID $ methodByName t)
                                                                                else []
-                                                                Just nam -> let meth = methodByName nam in
+                                                                Just nam -> trace ("isWaitForMagic = " ++ nam)$ 
+                                                                            let meth = methodByName nam in
                                                                             if storeEvalBool s $ mkEnVar pid (Just meth)
                                                                                then stackFromStore' sv s (UCID pid (Just meth))
                                                                                else []
-                        _            -> []
+                                           _ -> []
+                        _          -> []
           methodByName n = let ?spec = svFlatSpec sv in 
                            snd $ Front.getMethod (Front.ScopeTemplate tmMain) (Front.MethodRef nopos [Ident nopos n])
 
@@ -1320,7 +1324,7 @@ isProcEnabled sv pid =
         cfa   = stackGetCFA sv pid stack
         lab   = cfaLocLabel loc cfa
     in case storeTryEvalEnum (svTmp sv) mkEPIDLVar of
-            Just e -> stackGetEPID pid stack == parseEPIDEnumerator e
+            Just e -> stackGetEPID pid stack == parseEPIDEnumerator (svFlatSpec sv) e
             _      -> -- The process is always enabled if it is inside a magic block
                       -- Otherwise, the process is enabled if its
                       -- pause condition holds
