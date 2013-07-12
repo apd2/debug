@@ -26,7 +26,7 @@ import Name
 import Pos
 import PP
 import PID
-import qualified Parse
+import qualified Grammar
 import Util hiding (name, trace)
 import TSLUtil
 import qualified DbgTypes      as D
@@ -1240,8 +1240,7 @@ isWaitForMagicLabel _              = False
 -- Given a snapshot of the store at a pause location, compute
 -- process stack.
 stackFromStore :: SourceView c a -> Store -> PrID -> ProcStack
-stackFromStore sv s pid = trace ("stackFromStore " ++ show pid ++ ":\n" ++ showStack res) res
-    where res = stackFromStore' sv s (UCID pid Nothing)
+stackFromStore sv s pid = stackFromStore' sv s (UCID pid Nothing)
 
 stackFromStore' :: SourceView c a -> Store -> CID -> ProcStack
 stackFromStore' sv s cid = stack' ++ stack
@@ -1253,14 +1252,12 @@ stackFromStore' sv s cid = stack' ++ stack
           stack' = case cid of
                         UCID pid _ -> case lab of
                                            LPause _ _ e -> case isWaitForTask e of
-                                                                Nothing  -> trace ("isWaitForTask " ++ show e ++ "= Nothing") $
-                                                                            if isWaitForMagic e
+                                                                Nothing  -> if isWaitForMagic e
                                                                                then let t = getTag s in
                                                                                     if' (t==mkTagIdle) []
                                                                                         $ stackFromStore' sv s (CTCID $ methodByName t)
                                                                                else []
-                                                                Just nam -> trace ("isWaitForMagic = " ++ nam)$ 
-                                                                            let meth = methodByName nam in
+                                                                Just nam -> let meth = methodByName nam in
                                                                             if storeEvalBool s $ mkEnVar pid (Just meth)
                                                                                then stackFromStore' sv s (UCID pid (Just meth))
                                                                                else []
@@ -1568,7 +1565,7 @@ storeEvalStr :: Front.Spec -> Front.Spec -> Store -> PrID -> Front.Scope -> Stri
 storeEvalStr inspec flatspec store pid sc str = do
     -- Apply all transformations that the input spec goes through to the expression:
     -- 1. parse
-    expr <- case parse (Parse.detexpr <* eof) "" str of
+    expr <- case parse (Grammar.detexpr <* eof) "" str of
                  Left  e  -> Left $ show e
                  Right ex -> Right ex
     let (scope, iid) = flatScopeToScope inspec sc
@@ -1604,7 +1601,7 @@ compileControllableAction inspec flatspec pid sc str fname = do
     -- Apply all transformations that the input spec goes through to the statement:
     -- 1. parse
     stat <- liftM (Front.sSeq nopos)
-            $ case parse (Parse.statements1 <* eof) fname str of
+            $ case parse (Grammar.statements1 <* eof) fname str of
                    Left  e  -> Left $ show e
                    Right st -> Right st
     let (scope,iid) = flatScopeToScope inspec sc
