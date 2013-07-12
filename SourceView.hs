@@ -771,7 +771,11 @@ watchCreate ref = do
                                                           $ case mexp of 
                                                                  Nothing  -> ""
                                                                  Just e -> case storeEvalStr svInputSpec svFlatSpec  
-                                                                                             (currentStore sv) svPID (frScope $ currentStack sv !! svStackFrame) e of
+                                                                                             (currentStore sv) 
+                                                                                             (case stackGetEPID svPID (drop svStackFrame $ currentStack sv) of
+                                                                                                   EPIDCTask _ -> Nothing
+                                                                                                   _           -> Just svPID) 
+                                                                                             (frScope $ currentStack sv !! svStackFrame) e of
                                                                                 Left er -> er
                                                                                 Right v -> show v])
     _ <- G.treeViewAppendColumn view valcol
@@ -1337,7 +1341,7 @@ isProcEnabled sv pid =
 
 
 isProcInsideMagic :: SourceView c a -> PrID -> Bool
-isProcInsideMagic sv pid = isInsideMagicBlock lab || (isFrameControllable frame)
+isProcInsideMagic sv pid = isInsideMagicBlock lab || isFrameControllable frame
     where
     store = fromJust $ D.sConcrete $ svState sv
     stack = stackFromStore sv store pid
@@ -1564,8 +1568,8 @@ maybeSetLCont sv | (isNothing $ storeTryEvalBool (currentStore sv) mkContLVar) =
                  | otherwise                                                  = sv
 
 -- Evaluate expression written in terms of variables in the original input spec.
-storeEvalStr :: Front.Spec -> Front.Spec -> Store -> PrID -> Front.Scope -> String -> Either String Store
-storeEvalStr inspec flatspec store pid sc str = do
+storeEvalStr :: Front.Spec -> Front.Spec -> Store -> Maybe PrID -> Front.Scope -> String -> Either String Store
+storeEvalStr inspec flatspec store mpid sc str = do
     -- Apply all transformations that the input spec goes through to the expression:
     -- 1. parse
     expr <- case parse (Grammar.detexpr <* eof) "" str of
@@ -1586,7 +1590,7 @@ storeEvalStr inspec flatspec store pid sc str = do
                          in evalState (Front.exprSimplify flatexpr) (0,[])
     when (not $ null ss) $ throwError "Expression too complex"
     -- 5. inline
-    let lmap = scopeLMap (Just pid) sc
+    let lmap = scopeLMap mpid sc
     let ctx = CFACtx { ctxCID     = Nothing
                      , ctxStack   = [(sc, error "evalStr: return", Nothing, lmap)]
                      , ctxCFA     = error "evalStr: CFA undefined"
