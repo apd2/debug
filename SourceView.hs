@@ -80,6 +80,9 @@ data ProcStackFrame = FrameCTask        {frScope::Front.Scope, frLoc::Loc}
 isFrameControllable (FrameControllable _ _ _) = True
 isFrameControllable _                         = False
 
+isFrameCTask (FrameCTask _ _) = True
+isFrameCTask _                = False
+
 instance PP ProcStackFrame where
     pp f = (if' (isFrameControllable f) (PP.text "(interactive)") PP.empty) PP.<+> (PP.text $ show $ frScope f) PP.<> PP.char ':' PP.<+> (PP.text $ show $ frLoc f)
 
@@ -974,7 +977,7 @@ commandButtonsUpdate ref = do
     G.widgetSetSensitive (svStepButton sv)    en
     G.widgetSetSensitive (svRunButton sv)     en
     G.widgetSetSensitive (svMagExitButton sv) $  (currentMagic sv)                       -- we're inside a magic block
-                                              && (svTracePos sv == 0)                    -- there is not transition in progress
+                                              && (svTracePos sv == 0)                    -- there is no transition in progress
                                               && (not $ currentControllable sv)          -- we're in an uncontrollable state
                                               && isInsideMagicBlock (currentLocLabel sv) -- current process is inside the MB
 
@@ -1334,7 +1337,7 @@ isProcEnabled sv pid =
 
 
 isProcInsideMagic :: SourceView c a -> PrID -> Bool
-isProcInsideMagic sv pid = isInsideMagicBlock lab
+isProcInsideMagic sv pid = isInsideMagicBlock lab || (isFrameControllable frame)
     where
     store = fromJust $ D.sConcrete $ svState sv
     stack = stackFromStore sv store pid
