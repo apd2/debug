@@ -194,7 +194,7 @@ mkModel' sr@SynthesisRes{..} = model
             ?model   = model
             ?absvars = srAbsVars
         cstate <- D.sConcrete tranFrom
-        cnext  <- D.concretiseTransition cstate tranAbstractLabel (D.sAbstract tranTo)
+        cnext  <- D.concretiseTransition cstate tranAbstractLabel
         let tr' = D.abstractTransition tranFrom cnext
         return tr'
 --        if ((D.sAbstract $ D.tranTo tr') .-> (D.sAbstract tranTo)) .== t

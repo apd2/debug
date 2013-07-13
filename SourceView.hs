@@ -451,11 +451,11 @@ simulateTransition flatspec spec absvars st lab =
                  then -- execute controllable CFA
                       sv0 { svPID   = pid
                           , svTrace = [TraceEntry { teStore = storeUnion st lab
-                                                 , teStack = [FrameControllable Front.ScopeTop cfaInitLoc (specCAct spec)]}]}
+                                                  , teStack = [FrameControllable Front.ScopeTop cfaInitLoc (specCAct spec)]}]}
                  else -- execute uncontrollable process from its current location
                       sv0 { svPID   = pid
                           , svTrace = [TraceEntry { teStore = storeUnion st lab 
-                                                 , teStack = stackFromStore sv0 st pid}]} 
+                                                  , teStack = stackFromStore sv0 st pid}]} 
         msv2 = run sv1 
         mstore2 = case msv2 of
                        Nothing  -> trace ("simulateTransition: msv2 = Nothing") Nothing
@@ -1278,10 +1278,13 @@ stackFromStore' sv s cid = stack' ++ stack
 stackGetEPID :: PrID -> ProcStack -> EPID
 stackGetEPID pid stack = stackGetEPID' (EPIDProc pid) (reverse stack) 
 
-stackGetEPID' epid []                                           = epid
-stackGetEPID' _    ((FrameCTask   (Front.ScopeMethod _ m) _):_) = EPIDCTask m
-stackGetEPID' _    ((FrameControllable _ _ _):_)                = EPIDCont
-stackGetEPID' epid (_:s)                                        = stackGetEPID' epid s
+stackGetEPID' epid []                                         = epid
+stackGetEPID' _    ((FrameCTask (Front.ScopeMethod _ m) _):_) = EPIDCTask m
+stackGetEPID' _    ((FrameControllable _ _ _):_)              = EPIDCont
+
+stackGetEPID' epid (_:s)                                      = stackGetEPID' epid s
+
+stackGetEPID' epid (_:s)                                      = stackGetEPID' epid s
 
 
 stackGetCFA :: SourceView c a -> PrID -> ProcStack -> CFA
@@ -1327,17 +1330,20 @@ isProcEnabled sv pid =
         loc   = frLoc frame
         cfa   = stackGetCFA sv pid stack
         lab   = cfaLocLabel loc cfa
+        cont  = storeEvalBool store (EVar mkContVarName)
     in case storeTryEvalEnum (svTmp sv) mkEPIDLVar of
-            Just e -> stackGetEPID pid stack == parseEPIDEnumerator (svFlatSpec sv) e
+            Just e -> case parseEPIDEnumerator (svFlatSpec sv) e of
+                           EPIDCont -> isInsideMagicBlock lab
+                           epid     -> stackGetEPID pid stack == epid
             _      -> -- The process is always enabled if it is inside a magic block
-                      -- Otherwise, the process is enabled if its
-                      -- pause condition holds
-                      if isInsideMagicBlock lab
-                         then True
-                         else case lab of
-                                   LPause _ _ cond -> storeEvalBool store cond == True
-                                   LFinal _ _      -> not $ null $ Graph.lsuc cfa loc
-                                   _               -> True
+                      -- Otherwise, the process is enabled if we are in an uncontrollable 
+                      -- state and its pause condition holds
+                      if' (isInsideMagicBlock lab) True $
+                      if' cont False $
+                      case lab of
+                           LPause _ _ cond -> storeEvalBool store cond == True
+                           LFinal _ _      -> not $ null $ Graph.lsuc cfa loc
+                           _               -> True
 
 
 isProcInsideMagic :: SourceView c a -> PrID -> Bool
