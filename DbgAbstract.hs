@@ -38,7 +38,8 @@ abstractTransition from to = D.Transition {
         tranAbstractLabel = abstractLabel     to,
         -- project "to" state on "tmp" variables
         tranConcreteLabel = Just $ storeProject to (map varName $ specTmpVar ?spec),
-        tranTo            = abstractState to
+        tranTo            = abstractState to,
+        tranSrc           = Nothing
     }
 
 

@@ -128,4 +128,5 @@ executeTransition ref = do
                                     , sConcrete = case vvSelectionTo vv of
                                                        Nothing -> Nothing
                                                        Just st -> if D.sAbstract st  .== tabs then D.sConcrete st else Nothing}
+        tranSrc           = Nothing
     D.modelAddTransition vvModel D.Transition{..}

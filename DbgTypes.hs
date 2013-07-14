@@ -159,6 +159,7 @@ data Transition a b = Transition {
     tranUntracked     :: a,
     tranAbstractLabel :: a,
     tranConcreteLabel :: Maybe b,
+    tranSrc           :: Maybe String,
     tranTo            :: State a b
 }
 

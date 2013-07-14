@@ -31,6 +31,7 @@ import qualified DbgTypes       as D
 import qualified DbgConcretise  as D
 import qualified DbgAbstract    as D
 import qualified StrategyView   as D
+import qualified SourceView     as D
 
 instance D.Rel DdManager VarData DdNode [[SatBit]]
 
@@ -144,16 +145,18 @@ quant_dis1 rel (var, envar) =
     in rel1 .| rel2
 
 mkModel :: F.Spec -> 
+           F.Spec ->
            I.Spec -> 
            SMTSolver -> 
            SynthesisRes DdManager DdNode ->
            D.Model DdManager DdNode Store
-mkModel flatspec spec solver sr = let ?spec     = spec 
-                                      ?flatspec = flatspec
-                                      ?solver   = solver
-                                  in mkModel' sr
+mkModel inspec flatspec spec solver sr = let ?spec     = spec 
+                                             ?flatspec = flatspec
+                                             ?inspec   = inspec
+                                             ?solver   = solver
+                                         in mkModel' sr
 
-mkModel' :: (?flatspec::F.Spec, ?spec::I.Spec, ?solver::SMTSolver) => SynthesisRes DdManager DdNode -> D.Model DdManager DdNode Store
+mkModel' :: (?inspec::F.Spec, ?flatspec::F.Spec, ?spec::I.Spec, ?solver::SMTSolver) => SynthesisRes DdManager DdNode -> D.Model DdManager DdNode Store
 mkModel' sr@SynthesisRes{..} = model
     where
     mCtx                  = srCtx
@@ -196,7 +199,8 @@ mkModel' sr@SynthesisRes{..} = model
         cstate <- D.sConcrete tranFrom
         cnext  <- D.concretiseTransition cstate tranAbstractLabel
         let tr' = D.abstractTransition tranFrom cnext
-        return tr'
+        let msrc = D.contTransToSource ?inspec ?flatspec ?spec tr'
+        return tr'{D.tranSrc = msrc}
 --        if ((D.sAbstract $ D.tranTo tr') .-> (D.sAbstract tranTo)) .== t
 --           then return tr'
 --           else error "concretiseT: concretised next-state differs from abstract next-state"

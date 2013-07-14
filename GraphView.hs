@@ -339,7 +339,9 @@ transitionAnnots gv tran = do
     model <- readIORef $ gvModel gv
     let tranrels = D.mTransRels model
         relnames = map fst $ filter (\(_,r) -> (D.tranRel model tran .& r) ./= b) tranrels
-    labstr <- transitionLabel (gvModel gv) (D.tranAbstractLabel tran)
+    labstr <- case D.tranSrc tran of
+                   Nothing  -> transitionLabel (gvModel gv) (D.tranAbstractLabel tran)
+                   Just str -> return str
     return $ GAnnotation labstr AnnotRight labelStyle
            : map (\n -> GAnnotation n AnnotLeft tranAnnotStyle) relnames
 

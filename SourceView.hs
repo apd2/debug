@@ -1,7 +1,8 @@
 {-# LANGUAGE ImplicitParams, RecordWildCards, ScopedTypeVariables, TupleSections #-}
 
 module SourceView(sourceViewNew, 
-                  simulateTransition) where
+                  simulateTransition,
+                  contTransToSource) where
 
 import Data.Maybe
 import Data.List
@@ -22,8 +23,6 @@ import Control.Applicative
 import qualified Text.PrettyPrint           as PP
 import Debug.Trace
 
-import Name
-import Pos
 import PP
 import PID
 import qualified Grammar
@@ -45,20 +44,24 @@ import Store
 import SMTSolver
 import TSLAbsGame
 
-import qualified NS              as Front
-import qualified Method          as Front
-import qualified Process         as Front
-import qualified InstTree        as Front
-import qualified TemplateOps     as Front
-import qualified ExprInline      as Front
-import qualified Spec            as Front
-import qualified Expr            as Front
-import qualified ExprFlatten     as Front
-import qualified ExprOps         as Front
-import qualified ExprValidate    as Front
-import qualified Statement       as Front
-import qualified StatementOps    as Front
-import qualified StatementInline as Front
+import qualified NS              as F
+import qualified Method          as F
+import qualified Process         as F
+import qualified InstTree        as F
+import qualified TemplateOps     as F
+import qualified ExprInline      as F
+import qualified Spec            as F
+import qualified Expr            as F
+import qualified ExprFlatten     as F
+import qualified ExprOps         as F
+import qualified ExprValidate    as F
+import qualified Statement       as F
+import qualified StatementOps    as F
+import qualified StatementInline as F
+import qualified Name            as F
+import qualified Type            as F
+import qualified Pos             as F
+import qualified TypeOps         as F
 
 --------------------------------------------------------------
 -- Constants
@@ -73,15 +76,12 @@ fontSrc    = "Courier 10 Pitch"
 
 instance D.Vals Store
 
-data ProcStackFrame = FrameCTask        {frScope::Front.Scope, frLoc::Loc} 
-                    | FrameRegular      {frScope::Front.Scope, frLoc::Loc}
-                    | FrameControllable {frScope::Front.Scope, frLoc::Loc, frCFA::CFA}
+data ProcStackFrame = FrameCTask        {frScope::F.Scope, frLoc::Loc} 
+                    | FrameRegular      {frScope::F.Scope, frLoc::Loc}
+                    | FrameControllable {frScope::F.Scope, frLoc::Loc, frCFA::CFA}
 
 isFrameControllable (FrameControllable _ _ _) = True
 isFrameControllable _                         = False
-
-isFrameCTask (FrameCTask _ _) = True
-isFrameCTask _                = False
 
 instance PP ProcStackFrame where
     pp f = (if' (isFrameControllable f) (PP.text "(interactive)") PP.empty) PP.<+> (PP.text $ show $ frScope f) PP.<> PP.char ':' PP.<+> (PP.text $ show $ frLoc f)
@@ -121,8 +121,8 @@ showTrace = PP.render . pp
 data SourceView c a = SourceView {
     svModel          :: D.RModel c a Store,
     svSpec           :: Spec,
-    svInputSpec      :: Front.Spec,
-    svFlatSpec       :: Front.Spec,
+    svInputSpec      :: F.Spec,
+    svFlatSpec       :: F.Spec,
     svAbsVars        :: M.Map String AbsVar,
     svState          :: D.State a Store,            -- current state set via view callback
     svTmp            :: Store,                      -- temporary variables store
@@ -168,7 +168,8 @@ data SourceView c a = SourceView {
 
     -- Action selector
     svActSelectText  :: G.TextView,                 -- user-edited controllable action
-    svActSelectBAdd  :: G.Button                    -- perform controllable action button
+    svActSelectBAdd  :: G.Button,                   -- perform controllable action button
+    svFromSrc        :: Bool                        -- executing transition from action selector
 }
 
 type RSourceView c a = IORef (SourceView c a)
@@ -207,6 +208,7 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svAutoResolveTog = error "SourceView: svAutoResolveTog undefined"
                              , svActSelectText  = error "SourceView: svActSelectText undefined"
                              , svActSelectBAdd  = error "SourceView: svActSelectBAdd undefined"
+                             , svFromSrc        = False
                              }
 
 
@@ -214,7 +216,7 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
 -- View callbacks
 --------------------------------------------------------------
 
-sourceViewNew :: (D.Rel c v a s) => Front.Spec -> Front.Spec -> Spec -> M.Map String AbsVar -> SMTSolver -> D.RModel c a Store -> IO (D.View a Store)
+sourceViewNew :: (D.Rel c v a s) => F.Spec -> F.Spec -> Spec -> M.Map String AbsVar -> SMTSolver -> D.RModel c a Store -> IO (D.View a Store)
 sourceViewNew inspec flatspec spec absvars solver rmodel = do
 
     ref <- newIORef $ sourceViewEmpty { svModel          = rmodel
@@ -327,7 +329,7 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
         modifyIORef ref (\sv -> sv { svState      = D.abstractState initstore
                                    , svTmp        = SStruct $ M.empty
                                    , svPID        = PrID "$init" []
-                                   , svTrace      = [TraceEntry { teStack = [FrameRegular (Front.ScopeTemplate (let ?spec = flatspec in tmMain)) (tranFrom $ fst $ tsInit $ specTran ?spec)]
+                                   , svTrace      = [TraceEntry { teStack = [FrameRegular (F.ScopeTemplate (let ?spec = flatspec in tmMain)) (tranFrom $ fst $ tsInit $ specTran ?spec)]
                                                                 , teStore = initstore}]
                                    , svTracePos   = 0
                                    , svStackFrame = 0})
@@ -363,6 +365,9 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
     putStrLn "sourceViewTransitionSelected"
     modifyIORef ref (\sv -> sv { svState    = D.tranFrom tran
                                , svTmp      = fromJust $ D.tranConcreteLabel tran})
+    when (isJust $ D.tranSrc tran) $ do txt <- getIORef svActSelectText ref
+                                        buf <- G.textViewGetBuffer txt
+                                        G.set buf [G.textBufferText G.:= fromJust $ D.tranSrc tran]
     processSelectorChooseUniqueEnabled ref
     reset ref
     putStrLn "sourceViewTransitionSelected done"
@@ -427,7 +432,7 @@ exitMagicBlock ref = do
     makeTransition ref
 
 -- simulate transition without GUI 
-simulateTransition :: Front.Spec -> Spec -> M.Map String AbsVar -> Store -> Store -> Maybe Store
+simulateTransition :: F.Spec -> Spec -> M.Map String AbsVar -> Store -> Store -> Maybe Store
 simulateTransition flatspec spec absvars st lab =
     let -- create enough of source view to call run
         sv0 :: SourceView () ()
@@ -451,7 +456,7 @@ simulateTransition flatspec spec absvars st lab =
                  then -- execute controllable CFA
                       sv0 { svPID   = pid
                           , svTrace = [TraceEntry { teStore = storeUnion st lab
-                                                  , teStack = [FrameControllable Front.ScopeTop cfaInitLoc (specCAct spec)]}]}
+                                                  , teStack = [FrameControllable F.ScopeTop cfaInitLoc (specCAct spec)]}]}
                  else -- execute uncontrollable process from its current location
                       sv0 { svPID   = pid
                           , svTrace = [TraceEntry { teStore = storeUnion st lab 
@@ -464,6 +469,13 @@ simulateTransition flatspec spec absvars st lab =
                                       else Just $ currentStore sv2
     in trace ("simulateTransition\nlabel: " ++ show lab ++ "\nstate: " ++ show st)
        $ mstore2
+
+contTransToSource :: F.Spec -> F.Spec -> Spec -> D.Transition a Store -> Maybe String
+contTransToSource inspec flatspec spec D.Transition{..} = do
+    iid <- findActiveMagicBlock flatspec spec (fromJust $ D.sConcrete tranFrom)
+    act <- transitionToAction inspec spec (fromJust $ D.sConcrete tranTo)
+    doc <- ppContAction inspec iid act
+    return $ PP.render doc
 
 --------------------------------------------------------------
 -- GUI components
@@ -893,15 +905,15 @@ sourceWindowUpdate ref = do
     case locAct $ cfaLocLabel loc cfa of
          ActNone   -> do sourceClearPos sv
                          G.labelSetText (svFileLab sv) ""
-         ActExpr e -> do sourceSetPos sv (pos e) colorUCont
-                         G.labelSetText (svFileLab sv) (sourceName $ fst $ pos e)
-         ActStat (Front.SMagic p mp _) -> do let col = if' (currentControllable sv) colorCont colorUCont
-                                             if currentMagic sv 
-                                                then sourceSetPos sv mp col
-                                                else sourceSetPos sv p  col
-                                             G.labelSetText (svFileLab sv) (sourceName $ fst p)
-         ActStat s -> do sourceSetPos sv (pos s) colorUCont
-                         G.labelSetText (svFileLab sv) (sourceName $ fst $ pos s)
+         ActExpr e -> do sourceSetPos sv (F.pos e) colorUCont
+                         G.labelSetText (svFileLab sv) (sourceName $ fst $ F.pos e)
+         ActStat (F.SMagic p mp _) -> do let col = if' (currentControllable sv) colorCont colorUCont
+                                         if currentMagic sv 
+                                            then sourceSetPos sv mp col
+                                            else sourceSetPos sv p  col
+                                         G.labelSetText (svFileLab sv) (sourceName $ fst p)
+         ActStat s -> do sourceSetPos sv (F.pos s) colorUCont
+                         G.labelSetText (svFileLab sv) (sourceName $ fst $ F.pos s)
 --    if currentControllable sv
 --       then do G.toggleButtonSetActive (svContTog sv) True
 --               G.labelSetMarkup (svContLab sv) "<span color=\"green\"> CONTROLLABLE </span>"
@@ -934,7 +946,7 @@ sourceClearPos sv = do
        G.textBufferRemoveTag buf (svSourceTag sv) istart iend
     `catchIOError` (\_ -> return ())
 
-sourceSetPos :: SourceView c a -> Pos -> String -> IO ()
+sourceSetPos :: SourceView c a -> F.Pos -> String -> IO ()
 sourceSetPos sv (from, to) color = do
     putStrLn $ "sourceSetPos " ++ show (from, to)
     let fname = sourceName from
@@ -1211,7 +1223,7 @@ runControllableCFA ref cfa = do
     -- Push controllable cfa on the stack
     modifyIORef ref (\sv -> let stack = currentStack sv
                                 stack' = (FrameControllable (frScope $ head stack) cfaInitLoc cfa) : stack
-                            in traceAppend sv (currentStore sv) stack')
+                            in (traceAppend sv (currentStore sv) stack'){svFromSrc = True})
     updateDisplays ref
 
 actionSelectorUpdate :: RSourceView c a -> IO ()
@@ -1234,6 +1246,88 @@ actionSelectorEnable :: RSourceView c a -> IO ()
 actionSelectorEnable ref = do
     SourceView{..} <- readIORef ref
     G.widgetSetSensitive svActSelectBAdd  True
+
+
+--------------------------------------------------------------
+-- Generating source code for controllable transitions
+--------------------------------------------------------------
+
+-- TODO: add idle action
+data ContAction = ActExit  -- exit magic block
+                | ActCall {caIID :: F.IID, caTask :: F.Method, caArgs :: [(String, F.Expr)]}
+
+ppContAction :: F.Spec ->  F.IID -> ContAction -> Maybe PP.Doc
+ppContAction _      _   ActExit                = Just $ PP.text "exit"
+ppContAction inspec iid (ActCall methiid t as) = do 
+    path <- let ?spec = inspec in F.itreeAbsToRelPath iid methiid
+    return $ (PP.hcat $ PP.punctuate (PP.char '.') $ (map (PP.text . F.sname) path) ++ [PP.text $ F.sname t]) PP.<>
+             (PP.parens $ PP.hcat $ PP.punctuate PP.comma $ map (\a -> if' (F.argDir a == F.ArgOut) (PP.char '_') (pp $ fromJust $ lookup (F.sname a) as)) $ F.methArg t) PP.<>
+             PP.semi
+    
+-- Translate an abstract transition into a controllable action
+-- cstate - concrete state before the transition
+-- alabel - abstract transition label
+transitionToAction :: F.Spec -> Spec -> Store -> Maybe ContAction
+transitionToAction inspec spec cnstate = do
+    let ?spec = inspec
+    let tag = storeEvalEnum cnstate mkTagVar
+    if tag == mkTagIdle
+       then if not $ storeEvalBool cnstate mkMagicVar
+               then return ActExit
+               else Nothing
+       else do let (caIID, methname) = F.itreeParseName (F.Ident F.nopos tag)
+                   Just (F.ObjMethod tm caTask) = F.lookupGlobal ((F.Ident F.nopos "main"):caIID++[methname])
+               let caArgs = map (\a -> (F.sname a, let ?scope = F.ScopeTemplate tm in storeToFExpr a
+                                                   $ storeEval cnstate 
+                                                   $ (EVar $ mkVarNameS (NSID Nothing (Just $ taskMethod $ specGetCTask spec tag)) $ F.sname a)))
+                            $ filter ((== F.ArgIn) . F.argDir)
+                            $ F.methArg caTask
+               return ActCall{..}
+
+
+storeToFExpr :: (?spec::F.Spec, F.WithType a) => a -> Store -> F.Expr
+storeToFExpr x s = 
+    let F.Type xsc  ts  = F.typ x
+        F.Type xsc' ts' = F.typ' x
+    in case ts' of
+            F.StructSpec _ fs  -> F.EStruct F.nopos tname' (Left $ map (\f -> (F.name f, let ?scope = xsc' in storeToFExpr f (sfs M.! F.sname f))) fs)
+                                  where F.UserTypeSpec _ tname = ts
+                                        (decl, tsc) = F.getTypeDecl xsc tname
+                                        tname' = case tsc of 
+                                                      F.ScopeTop         -> [F.name decl]
+                                                      F.ScopeTemplate tm -> [F.name tm, F.name decl]
+                                        SStruct sfs = s
+            F.ArraySpec  _ _ _ -> error "storeToFExpr does not support array arguments"
+            _                  -> valToFExpr (F.tspec $ F.typ' x) v
+                                  where SVal v = s
+
+valToFExpr :: F.TypeSpec -> Val -> F.Expr
+valToFExpr (F.BoolSpec _)   (BoolVal True)  = F.EBool F.nopos True
+valToFExpr (F.BoolSpec _)   (BoolVal False) = F.EBool F.nopos False
+valToFExpr (F.SIntSpec _ w) (SIntVal _ i)   = F.ELit  F.nopos w True  F.Rad10 i
+valToFExpr (F.UIntSpec _ w) (UIntVal _ i)   = F.ELit  F.nopos w False F.Rad10 i
+valToFExpr (F.EnumSpec _ _) (EnumVal e)     = F.ETerm F.nopos (F.unflattenName $ F.Ident F.nopos e)
+valToFExpr ts               _               = error $ "valToFExpr: type " ++ show ts ++ " not supported"
+
+-- Given a controllable state, find template instance that contains 
+-- currently active magic block
+findActiveMagicBlock :: F.Spec -> Spec -> Store -> Maybe F.IID
+findActiveMagicBlock flatspec spec st = 
+   let sv0 :: SourceView () ()
+       sv0 = sourceViewEmpty { svSpec       = spec
+                             , svFlatSpec   = flatspec
+                             , svState      = D.State { sAbstract = error "findMagicBlock: sAbstract is undefined"
+                                                      , sConcrete = Just st}
+                             , svTracePos   = 0
+                             , svStackFrame = 0
+                             }
+   in (fmap (\pid -> let stack = stackFromStore sv0 st pid
+                         sc = frScope $ head stack
+                         tm = case sc of
+                                   F.ScopeProcess tm' _ -> tm'
+                                   F.ScopeMethod  tm' _ -> tm'
+                      in fst $ F.itreeParseName (F.name tm) )) 
+      $ findProcInsideMagic sv0
 
 
 --------------------------------------------------------------
@@ -1271,7 +1365,7 @@ stackFromStore' sv s cid = stack' ++ stack
                                            _ -> []
                         _          -> []
           methodByName n = let ?spec = svFlatSpec sv in 
-                           snd $ Front.getMethod (Front.ScopeTemplate tmMain) (Front.MethodRef nopos [Ident nopos n])
+                           snd $ F.getMethod (F.ScopeTemplate tmMain) (F.MethodRef F.nopos [F.Ident F.nopos n])
 
 -- Find out what the process is about to do (or is currently doing) based on its stack:
 -- run a normal transition, a controllable task, or a controllable transition
@@ -1279,23 +1373,19 @@ stackGetEPID :: PrID -> ProcStack -> EPID
 stackGetEPID pid stack = stackGetEPID' (EPIDProc pid) (reverse stack) 
 
 stackGetEPID' epid []                                         = epid
-stackGetEPID' _    ((FrameCTask (Front.ScopeMethod _ m) _):_) = EPIDCTask m
+stackGetEPID' _    ((FrameCTask (F.ScopeMethod _ m) _):_)     = EPIDCTask m
 stackGetEPID' _    ((FrameControllable _ _ _):_)              = EPIDCont
-
 stackGetEPID' epid (_:s)                                      = stackGetEPID' epid s
-
-stackGetEPID' epid (_:s)                                      = stackGetEPID' epid s
-
 
 stackGetCFA :: SourceView c a -> PrID -> ProcStack -> CFA
 stackGetCFA sv pid stack = stackGetCFA' sv (reverse stack) (UCID pid Nothing)
 
 stackGetCFA' :: SourceView c a -> [ProcStackFrame] -> CID -> CFA
 stackGetCFA' sv []                                            cid                                                               = specGetCFA (svSpec sv) cid
-stackGetCFA' sv ((FrameRegular (Front.ScopeProcess _ _) _):s) cid                                                               = stackGetCFA' sv s cid
-stackGetCFA' sv ((FrameCTask   (Front.ScopeMethod _ m)  _):_) _                                                                 = specGetCFA (svSpec sv) (CTCID m)
-stackGetCFA' sv ((FrameRegular (Front.ScopeMethod _ m)  _):s) (UCID pid _) | Front.methCat m == Front.Task Front.Controllable   = stackGetCFA' sv s (UCID pid (Just m))
-                                                                           | Front.methCat m == Front.Task Front.Uncontrollable = stackGetCFA' sv s (UCID pid (Just m))
+stackGetCFA' sv ((FrameRegular (F.ScopeProcess _ _) _):s) cid                                                               = stackGetCFA' sv s cid
+stackGetCFA' sv ((FrameCTask   (F.ScopeMethod _ m)  _):_) _                                                                 = specGetCFA (svSpec sv) (CTCID m)
+stackGetCFA' sv ((FrameRegular (F.ScopeMethod _ m)  _):s) (UCID pid _) | F.methCat m == F.Task F.Controllable   = stackGetCFA' sv s (UCID pid (Just m))
+                                                                           | F.methCat m == F.Task F.Uncontrollable = stackGetCFA' sv s (UCID pid (Just m))
 stackGetCFA' _  ((FrameControllable _ _ cfa):_)               _                                                                 = cfa
 stackGetCFA' sv _                                             cid                                                               = specGetCFA (svSpec sv) cid
 
@@ -1303,13 +1393,13 @@ stackGetCFA' sv _                                             cid               
 -- Extract the last controllable or uncontrollable task call 
 -- from the stack or return Nothing if the stack does not 
 -- contain a task call
---stackTask :: Stack -> Int -> Maybe Front.Method
+--stackTask :: Stack -> Int -> Maybe F.Method
 --stackTask stack frame = stackTask' $ drop frame stack
 --
---stackTask' :: Stack -> Maybe Front.Method
+--stackTask' :: Stack -> Maybe F.Method
 --stackTask' []      = Nothing
 --stackTask' (fr:st) = case fScope fr of
---                          Front.ScopeMethod _ m -> if Front.methCat m == Front.Task Front.Uncontrollable 
+--                          F.ScopeMethod _ m -> if F.methCat m == F.Task F.Uncontrollable 
 --                                                      then Just m
 --                                                      else stackTask' st
 --                          _               -> stackTask' st
@@ -1392,7 +1482,7 @@ reset ref = do
     -- initialise trace
     let tr = [TraceEntry { teStack = stackFromStore sv1 (fromJust $ D.sConcrete $ svState sv1) (svPID sv1)
                          , teStore = store}]
-    writeIORef ref sv1{svTrace = tr, svTracePos = 0, svStackFrame = 0}
+    writeIORef ref sv1{svTrace = tr, svTracePos = 0, svStackFrame = 0, svFromSrc = False}
     updateDisplays ref
 
 -- Disable all controls
@@ -1520,7 +1610,7 @@ microstep' sv (to, TranCall meth mretloc)  = -- insert new stack frame and mofif
                                                  stack' = case mretloc of
                                                                Nothing -> f0 : frames
                                                                Just l  -> f0{frLoc = l} : frames
-                                                 sc = Front.ScopeMethod tmMain meth
+                                                 sc = F.ScopeMethod tmMain meth
                                              in if frScope f0 == sc -- avoid creating duplicate frames (happens with task calls)
                                                    then Just (currentStore sv, f0{frLoc=to} : frames)
                                                    else Just (currentStore sv, (FrameRegular sc to) : stack')
@@ -1549,16 +1639,20 @@ microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=
 makeTransition :: (D.Rel c v a s) => RSourceView c a -> IO ()
 makeTransition ref = do
     putStrLn "makeTransition"
-    sv <- readIORef ref
-    model <- readIORef $ svModel sv
-    let ?spec    = svSpec sv
-        ?absvars = svAbsVars sv
+    sv@SourceView{..} <- readIORef ref
+    model <- readIORef svModel
+    let ?spec    = svSpec
+        ?absvars = svAbsVars
         ?model   = model
         ?m       = D.mCtx model
     -- abstract final state
-    let trans = D.abstractTransition (svState sv) (currentStore sv) 
+    let trans = D.abstractTransition svState (currentStore sv) 
+    trans' <- if' svFromSrc (do buf  <- G.textViewGetBuffer svActSelectText
+                                text <- G.get buf G.textBufferText
+                                return $ trans{D.tranSrc = Just text})
+                            (return trans)
     -- add transition
-    D.modelAddTransition (svModel sv) trans
+    D.modelAddTransition svModel trans'
 --    D.modelSelectState (svModel sv) (Just $ D.tranTo trans)
 
 
@@ -1574,7 +1668,7 @@ maybeSetLCont sv | (isNothing $ storeTryEvalBool (currentStore sv) mkContLVar) =
                  | otherwise                                                  = sv
 
 -- Evaluate expression written in terms of variables in the original input spec.
-storeEvalStr :: Front.Spec -> Front.Spec -> Store -> Maybe PrID -> Front.Scope -> String -> Either String Store
+storeEvalStr :: F.Spec -> F.Spec -> Store -> Maybe PrID -> F.Scope -> String -> Either String Store
 storeEvalStr inspec flatspec store mpid sc str = do
     -- Apply all transformations that the input spec goes through to the expression:
     -- 1. parse
@@ -1585,15 +1679,15 @@ storeEvalStr inspec flatspec store mpid sc str = do
     -- 2. validate
     let ?spec  = inspec
         ?privoverride = True 
-    Front.validateExpr scope expr
+    F.validateExpr scope expr
     let ?scope = scope
-        in when (not $ Front.exprNoSideEffects expr) $ throwError "Expression has side effects"
+        in when (not $ F.exprNoSideEffects expr) $ throwError "Expression has side effects"
     -- 3. flatten
-    let flatexpr = Front.exprFlatten iid scope expr
+    let flatexpr = F.exprFlatten iid scope expr
     -- 4. simplify
     let ?spec = flatspec
     let (ss, simpexpr) = let ?scope = sc
-                         in evalState (Front.exprSimplify flatexpr) (0,[])
+                         in evalState (F.exprSimplify flatexpr) (0,[])
     when (not $ null ss) $ throwError "Expression too complex"
     -- 5. inline
     let lmap = scopeLMap mpid sc
@@ -1604,16 +1698,16 @@ storeEvalStr inspec flatspec store mpid sc str = do
                      , ctxGNMap   = globalNMap
                      , ctxLastVar = 0
                      , ctxVar     = []}
-        iexpr = evalState (Front.exprToIExprDet simpexpr) ctx
+        iexpr = evalState (F.exprToIExprDet simpexpr) ctx
     -- 6. evaluate
     return $ storeEval store iexpr
 
-compileControllableAction :: Front.Spec -> Front.Spec -> PrID -> Front.Scope -> String -> FilePath -> Either String CFA
+compileControllableAction :: F.Spec -> F.Spec -> PrID -> F.Scope -> String -> FilePath -> Either String CFA
 compileControllableAction inspec flatspec pid sc str fname = do
     trace ("compileControllableAction" ++ show pid) $ return ()
     -- Apply all transformations that the input spec goes through to the statement:
     -- 1. parse
-    stat <- liftM (Front.sSeq nopos)
+    stat <- liftM (F.sSeq F.nopos)
             $ case parse (Grammar.statements1 <* eof) fname str of
                    Left  e  -> Left $ show e
                    Right st -> Right st
@@ -1621,17 +1715,17 @@ compileControllableAction inspec flatspec pid sc str fname = do
     -- 2. validate
     let ?spec = inspec
         ?privoverride = False
-    Front.validateStat scope stat
+    F.validateStat scope stat
     validateControllableStat scope stat
     -- 3. flatten
-    let flatstat = Front.statFlatten iid scope stat
+    let flatstat = F.statFlatten iid scope stat
     -- 4. simplify
     let ?spec = flatspec
     let (simpstat, (_, vars)) = let ?scope = sc
-                                in runState (Front.statSimplify flatstat) (0,[])
-    assert (null vars) (pos stat) "Statement too complex"
+                                in runState (F.statSimplify flatstat) (0,[])
+    assert (null vars) (F.pos stat) "Statement too complex"
     -- 5. inline
-    let ctx = CFACtx { ctxCID     = Nothing
+    let ctx = CFACtx { ctxCID     = Just CCID
                      , ctxStack   = []
                      , ctxCFA     = newCFA sc simpstat true
                      , ctxBrkLocs = []
@@ -1641,20 +1735,20 @@ compileControllableAction inspec flatspec pid sc str fname = do
         ctx' = let ?procs =[] in execState (do -- create final state and make it the return location
                                                aftret <- ctxInsLocLab (LFinal ActNone [])
                                                ctxPushScope sc aftret Nothing (scopeLMap (Just pid) sc)
-                                               aftstat <- Front.procStatToCFA simpstat cfaInitLoc
+                                               aftstat <- F.procStatToCFA simpstat cfaInitLoc
                                                -- switch to uncontrollable state
                                                aftucont <- ctxInsTrans' aftstat $ TranStat $ mkContVar =: false
                                                aftpid <- ctxInsTrans' aftucont $ TranStat $ mkEPIDVar =: (EConst $ EnumVal $ mkEPIDEnumeratorName EPIDCont)
                                                -- add return after the statement to pop FrameInteractive off the stack
                                                ctxInsTrans aftpid aftret TranReturn
                                                ) ctx
-    assert (null $ ctxVar ctx') (pos stat) "Cannot perform non-deterministic controllable action"
+    assert (null $ ctxVar ctx') (F.pos stat) "Cannot perform non-deterministic controllable action"
     -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
     let cfa   = ctxCFA ctx'
         cfar  = cfaPruneUnreachable cfa [cfaInitLoc]
         reach = cfaReachInst cfar cfaInitLoc
         cfa'  = cfaPrune cfar (S.insert cfaInitLoc reach)
-    assert (Graph.noNodes cfar == Graph.noNodes cfa') (pos stat) "Controllable action must be an instantaneous statement"
+    assert (Graph.noNodes cfar == Graph.noNodes cfa') (F.pos stat) "Controllable action must be an instantaneous statement"
     return $ cfaTraceFile cfa' "action" cfa'
     
 -- Check whether statement specifies a valid controllable action:
@@ -1664,34 +1758,34 @@ compileControllableAction inspec flatspec pid sc str fname = do
 -- * No pause or stop statements
 -- * No assert or assume
 -- * No magic blocks
-validateControllableStat :: (?spec::Front.Spec) => Front.Scope -> Front.Statement -> Either String ()
+validateControllableStat :: (?spec::F.Spec) => F.Scope -> F.Statement -> Either String ()
 validateControllableStat sc stat = do
-    _ <- mapM (\(p,(_,m)) -> do assert (Front.methCat m /= Front.Task Front.Uncontrollable) p "Uncontrollable task invocations are not allowed inside controllable actions"
-                                assert (Front.methCat m /= Front.Task Front.Invisible)      p "Invisible task invocations are not allowed inside controllable actions")
-         $ Front.statCallees sc stat
-    _ <- Front.mapStatM (\_ st -> case st of
-                                       Front.SVarDecl p _   -> err p "Variable declarations are not allowed inside controllable actions"
-                                       Front.SReturn  p _   -> err p "Return statements are not allowed inside controllable actions"
-                                       Front.SPar     p _   -> err p "Fork statements are not allowed inside controllable actions"
-                                       Front.SPause   p     -> err p "Pause statements are not allowed inside controllable actions"
-                                       Front.SWait    p _   -> err p "Wait statements are not allowed inside controllable actions"
-                                       Front.SStop    p     -> err p "Stop statements are not allowed inside controllable actions"
-                                       Front.SAssert  p _   -> err p "Assertions are not allowed inside controllable actions"
-                                       Front.SAssume  p _   -> err p "Assume statements are not allowed inside controllable actions"
-                                       Front.SMagic   p _ _ -> err p "Magic blocks are not allowed inside controllable actions"
+    _ <- mapM (\(p,(_,m)) -> do assert (F.methCat m /= F.Task F.Uncontrollable) p "Uncontrollable task invocations are not allowed inside controllable actions"
+                                assert (F.methCat m /= F.Task F.Invisible)      p "Invisible task invocations are not allowed inside controllable actions")
+         $ F.statCallees sc stat
+    _ <- F.mapStatM (\_ st -> case st of
+                                       F.SVarDecl p _   -> err p "Variable declarations are not allowed inside controllable actions"
+                                       F.SReturn  p _   -> err p "Return statements are not allowed inside controllable actions"
+                                       F.SPar     p _   -> err p "Fork statements are not allowed inside controllable actions"
+                                       F.SPause   p     -> err p "Pause statements are not allowed inside controllable actions"
+                                       F.SWait    p _   -> err p "Wait statements are not allowed inside controllable actions"
+                                       F.SStop    p     -> err p "Stop statements are not allowed inside controllable actions"
+                                       F.SAssert  p _   -> err p "Assertions are not allowed inside controllable actions"
+                                       F.SAssume  p _   -> err p "Assume statements are not allowed inside controllable actions"
+                                       F.SMagic   p _ _ -> err p "Magic blocks are not allowed inside controllable actions"
                                        _                    -> return st) sc stat
     return ()
 
-flatScopeToScope :: Front.Spec -> Front.Scope -> (Front.Scope, Front.IID)
+flatScopeToScope :: F.Spec -> F.Scope -> (F.Scope, F.IID)
 flatScopeToScope inspec sc = 
     let ?spec = inspec in
     case sc of
-         Front.ScopeMethod   _ meth -> let (i, mname) = Front.itreeParseName $ name meth
-                                           tm = Front.itreeTemplate i
-                                           meth' = fromJust $ find ((== mname) . Front.methName) $ Front.tmAllMethod tm
-                                       in (Front.ScopeMethod tm meth', i)
-         Front.ScopeProcess  _ proc -> let (i, pname) = Front.itreeParseName $ name proc
-                                           tm = Front.itreeTemplate i
-                                           proc' = fromJust $ find ((== pname) . Front.procName) $ Front.tmAllProcess tm
-                                       in (Front.ScopeProcess tm proc', i)
-         Front.ScopeTemplate _      -> (Front.ScopeTop, [])
+         F.ScopeMethod   _ meth -> let (i, mname) = F.itreeParseName $ F.name meth
+                                       tm = F.itreeTemplate i
+                                       meth' = fromJust $ find ((== mname) . F.methName) $ F.tmAllMethod tm
+                                   in (F.ScopeMethod tm meth', i)
+         F.ScopeProcess  _ proc -> let (i, pname) = F.itreeParseName $ F.name proc
+                                       tm = F.itreeTemplate i
+                                       proc' = fromJust $ find ((== pname) . F.procName) $ F.tmAllProcess tm
+                                   in (F.ScopeProcess tm proc', i)
+         F.ScopeTemplate _      -> (F.ScopeTop, [])
