@@ -23,7 +23,7 @@ import GraphDraw
 --------------------------------------------------------------
 
 initLocation        = (200, 50)
-childYOffset        = 50
+childYOffset        = 80
 graphSearchStep     = 30
 
 tranAnnotStyle      =   GC {gcFG = (65535, 0, 0),         gcLW=0, gcLS=True}

@@ -134,6 +134,7 @@ data SourceView c a = SourceView {
     svStepButton     :: G.ToolButton,
     svRunButton      :: G.ToolButton,
     svMagExitButton  :: G.ToolButton,               -- exit magic block
+    svContButton     :: G.ToolButton,               -- switch to controllable state
 
     -- Trace
     svTrace          :: Trace,                      -- steps from the current state
@@ -187,6 +188,7 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svStepButton     = error "SourceView: svStepButton undefined"
                              , svRunButton      = error "SourceView: svRunButton undefined"
                              , svMagExitButton  = error "SourceView: svMagExitButton undefined"
+                             , svContButton     = error "SourceView: svContButton undefined"
                              , svTrace          = []
                              , svTracePos       = 0
                              , svTraceCombo     = error "SourceView: svTraceCombo undefined"
@@ -267,9 +269,16 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
     G.widgetShow bexit
     G.toolbarInsert tbar bexit (-1)    
 
+    bcont <- G.toolButtonNewFromStock G.stockIndex
+    G.set bcont [G.widgetTooltipText G.:= Just "Switch to Controllable State"]
+    _ <- G.onToolButtonClicked bcont (switchToControllable ref)
+    G.widgetShow bcont
+    G.toolbarInsert tbar bcont (-1)    
+
     modifyIORef ref (\sv -> sv { svRunButton     = butrun
                                , svStepButton    = butstep
-                               , svMagExitButton = bexit})
+                               , svMagExitButton = bexit
+                               , svContButton    = bcont})
 
     sep2 <- G.separatorToolItemNew
     G.widgetShow sep2
@@ -518,7 +527,6 @@ processSelectorChanged ref = do
     when (isJust miter) $ 
         do path <- G.treeModelGetPath (svProcessStore sv) (fromJust miter)
            (pid, _) <- G.treeStoreGetValue (svProcessStore sv) path
-           putStrLn $ "setting PID to " ++ show pid
            modifyIORef ref (\_sv -> _sv{svPID = pid})
            --cfaShow (specGetCFA (svSpec sv) pid Nothing) (pidToName pid)
            reset ref
@@ -720,7 +728,7 @@ traceViewDisable ref = do
 traceViewUpdate :: RSourceView c a -> IO ()
 traceViewUpdate ref = do
     sv <- readIORef ref
-    putStrLn $ "traceViewUpdate:\n" ++ (showTrace $ svTrace sv)
+    --putStrLn $ "traceViewUpdate:\n" ++ (showTrace $ svTrace sv)
     -- update store
     G.listStoreClear $ svTraceStore sv
     _ <- mapM (G.listStoreAppend (svTraceStore sv)) $ svTraceVisible sv
@@ -857,7 +865,7 @@ sourceWindowCreate ref = do
     view <- G.textViewNew
     font <- G.fontDescriptionFromString fontSrc
     G.widgetModifyFont view $ Just font
-    G.widgetSetSizeRequest view 600 300
+    G.widgetSetSizeRequest view 600 600
     G.widgetShow view
     G.containerAdd scroll view
     G.textViewSetEditable view False
@@ -1000,8 +1008,11 @@ commandButtonsUpdate ref = do
     G.widgetSetSensitive (svRunButton sv)     en
     G.widgetSetSensitive (svMagExitButton sv) $  (currentMagic sv)                       -- we're inside a magic block
                                               && (svTracePos sv == 0)                    -- there is no transition in progress
-                                              && (not $ currentControllable sv)          -- we're in an uncontrollable state
                                               && isInsideMagicBlock (currentLocLabel sv) -- current process is inside the MB
+    G.widgetSetSensitive (svContButton sv) $  (currentMagic sv)                       -- we're inside a magic block
+                                           && (svTracePos sv == 0)                    -- there is no transition in progress
+                                           && (not $ currentControllable sv)          -- we're in an uncontrollable state
+                                           && isInsideMagicBlock (currentLocLabel sv) -- current process is inside the MB
 
 commandButtonsDisable :: RSourceView c a -> IO ()
 commandButtonsDisable ref = do
@@ -1010,7 +1021,7 @@ commandButtonsDisable ref = do
     G.widgetSetSensitive (svStepButton sv)    False
     G.widgetSetSensitive (svRunButton sv)     False
     G.widgetSetSensitive (svMagExitButton sv) False
-
+    G.widgetSetSensitive (svContButton sv)    False
 
 -- Resolve --
 
@@ -1236,10 +1247,10 @@ runControllableCFA ref cfa = do
 actionSelectorUpdate :: RSourceView c a -> IO ()
 actionSelectorUpdate ref = do
     sv <- readIORef ref
-    putStrLn $ "actionSelectorUpdate: controllable=" ++ 
-               (show $ currentControllable sv) ++ 
-               " waitformagic=" ++ 
-               (show $ isWaitForMagicLabel $ currentLocLabel sv)
+--    putStrLn $ "actionSelectorUpdate: controllable=" ++ 
+--               (show $ currentControllable sv) ++ 
+--               " waitformagic=" ++ 
+--               (show $ isWaitForMagicLabel $ currentLocLabel sv)
     if (isWaitForMagicLabel $ currentLocLabel sv)
        then actionSelectorEnable ref
        else actionSelectorDisable ref
@@ -1549,7 +1560,7 @@ currentError :: SourceView c a -> Bool
 currentError sv = storeEvalBool (currentStore sv) mkErrVar
 
 cfaAtFrame :: SourceView c a -> Int -> CFA
-cfaAtFrame sv frame = trace ("cfaAtFrame " ++ showStack (drop frame $ currentStack sv)) $ stackGetCFA sv (svPID sv) (drop frame $ currentStack sv)
+cfaAtFrame sv frame = stackGetCFA sv (svPID sv) (drop frame $ currentStack sv)
 
 -- Access arbitrary location in the trace 
 

@@ -53,6 +53,7 @@ varViewNew rmodel = do
     -- Top-level vbox
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox
+    G.widgetSetSizeRequest vbox 300 300
 
     G.boxPackStart vbox w G.PackGrow 0
     

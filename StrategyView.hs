@@ -50,6 +50,7 @@ strategyViewNew strat@Strategy{..} model = do
 
     scroll <- G.scrolledWindowNew Nothing Nothing
     G.widgetShow scroll
+    G.widgetSetSizeRequest scroll 300 300
 
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox
@@ -196,9 +197,3 @@ autoSchedule ref st = do
          when (not $ avl !! fromJust gen !! fromJust fen) $
               maybe (return ()) (\i -> G.toggleButtonSetActive (svFairButs !! i) True)
               $ findIndex (==True) (avl !! fromJust gen)
-
---------------------------------------------------------------
--- Private helpers
---------------------------------------------------------------
-
-
