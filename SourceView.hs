@@ -83,6 +83,9 @@ data ProcStackFrame = FrameCTask        {frScope::F.Scope, frLoc::Loc}
 isFrameControllable (FrameControllable _ _ _) = True
 isFrameControllable _                         = False
 
+isFrameCTask (FrameCTask _ _) = True
+isFrameCTask _                = False
+
 instance PP ProcStackFrame where
     pp f = (if' (isFrameControllable f) (PP.text "(interactive)") PP.empty) PP.<+> (PP.text $ show $ frScope f) PP.<> PP.char ':' PP.<+> (PP.text $ show $ frLoc f)
 
@@ -365,9 +368,11 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
     putStrLn "sourceViewTransitionSelected"
     modifyIORef ref (\sv -> sv { svState    = D.tranFrom tran
                                , svTmp      = fromJust $ D.tranConcreteLabel tran})
-    when (isJust $ D.tranSrc tran) $ do txt <- getIORef svActSelectText ref
-                                        buf <- G.textViewGetBuffer txt
-                                        G.set buf [G.textBufferText G.:= fromJust $ D.tranSrc tran]
+    let cont = storeEvalBool (fromJust $ D.sConcrete $ D.tranFrom tran) mkContVar
+    when (cont) $ maybe (return ()) (\str -> do txt <- getIORef svActSelectText ref
+                                                buf <- G.textViewGetBuffer txt
+                                                G.set buf [G.textBufferText G.:= str])
+                        (D.tranSrc tran)
     processSelectorChooseUniqueEnabled ref
     reset ref
     putStrLn "sourceViewTransitionSelected done"
@@ -1439,7 +1444,7 @@ isProcEnabled sv pid =
 
 
 isProcInsideMagic :: SourceView c a -> PrID -> Bool
-isProcInsideMagic sv pid = isInsideMagicBlock lab || isFrameControllable frame
+isProcInsideMagic sv pid = isInsideMagicBlock lab || isFrameControllable frame || isFrameCTask frame
     where
     store = fromJust $ D.sConcrete $ svState sv
     stack = stackFromStore sv store pid
@@ -1652,7 +1657,7 @@ makeTransition ref = do
     trans' <- if' svFromSrc (do buf  <- G.textViewGetBuffer svActSelectText
                                 text <- G.get buf G.textBufferText
                                 return $ trans{D.tranSrc = Just text})
-                            (return trans)
+                            (return $ trans{D.tranSrc = Just $ show svPID})
     -- add transition
     D.modelAddTransition svModel trans'
 --    D.modelSelectState (svModel sv) (Just $ D.tranTo trans)
