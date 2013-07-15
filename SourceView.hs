@@ -669,11 +669,12 @@ traceViewCreate ref = do
         (\iter -> do let storeidx = G.listStoreIterToIndex iter
                      idx  <- G.listStoreGetValue store storeidx
                      sv   <- readIORef ref
-                     let txt = take 48 $ show $ replace "\n" " " $
-                               case locAct $ getLocLabel sv idx of
-                                    ActStat s -> show s
-                                    ActExpr e -> show e
-                                    _         -> "?"
+                     let txt = take 48  
+                               $ replace "\r" " " $ replace "\n" " " 
+                               $ case locAct $ getLocLabel sv idx of
+                                      ActStat s -> show s
+                                      ActExpr e -> show e
+                                      _         -> "?"
                      G.set rend [G.cellTextMarkup G.:= Just $ "<span weight=\"" ++ (if idx == svTracePos sv then "bold" else "normal") ++ "\">" ++ txt ++ "</span>"])
     _ <- G.on combo G.changed (tracePosChanged ref)
 

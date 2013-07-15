@@ -116,20 +116,23 @@ strategyViewNew strat@Strategy{..} model = do
     _ <- mapM (\bt -> G.radioButtonSetGroup bt $ head gbuts) $ tail gbuts
     _ <- mapM (\bt -> G.radioButtonSetGroup bt $ head fbuts) $ tail fbuts
 
-    -- TODO: Automatic scheduling
     return $ D.View { D.viewName      = stratName
                     , D.viewDefAlign  = D.AlignLeft
                     , D.viewShow      = return ()
                     , D.viewHide      = G.toggleButtonSetActive apply False
                     , D.viewGetWidget = return $ G.toWidget scroll
-                    , D.viewCB        = D.ViewEvents { D.evtStateSelected      = strategyViewStateSelected ref 
-                                                     , D.evtTransitionSelected = (\_ -> strategyViewStateSelected ref Nothing)
+                    , D.viewCB        = D.ViewEvents { D.evtStateSelected      = (\mst -> do {highlightActive ref mst; maybe (return ()) (autoSchedule ref) mst})
+                                                     , D.evtTransitionSelected = (\_   -> highlightActive ref Nothing)
                                                      , D.evtTRelUpdated        = return ()
                                                      }
                     }
 
-strategyViewStateSelected :: (D.Rel c v a s) => RStrategyView c a b -> Maybe (D.State a b) -> IO ()
-strategyViewStateSelected ref mst = do
+--------------------------------------------------------------
+-- GUI Actions
+--------------------------------------------------------------
+
+highlightActive :: (D.Rel c v a s) => RStrategyView c a b -> Maybe (D.State a b) -> IO ()
+highlightActive ref mst = do
     let (Just st) = mst
     StrategyView{..} <- readIORef ref
     let Strategy{..} = svStrat
@@ -144,10 +147,6 @@ strategyViewStateSelected ref mst = do
                               G.labelSetMarkup lab $ "<span weight=\"" ++ w ++ "\">" ++ (fst $ stratFair !! i) ++ "</span>") 
                  svFairButs
     return ()
-
---------------------------------------------------------------
--- GUI Actions
---------------------------------------------------------------
 
 goalToggled :: (D.Rel c v a s) => RStrategyView c a b -> Int -> IO ()
 goalToggled ref i = do
@@ -174,3 +173,32 @@ update ref = do
                $ if' (isNothing gen || isNothing fen) Nothing
                $ Just $ stratRel !! fromJust gen !! fromJust fen
     D.modelSetConstraint svModel stratName constr
+
+--------------------------------------------------------------
+-- Automatic scheduling of goals and fair regions
+--------------------------------------------------------------
+
+autoSchedule :: (D.Rel c v a s) => RStrategyView c a b -> D.State a b -> IO ()
+autoSchedule ref st = do
+    StrategyView{..} <- readIORef ref
+    let Strategy{..} = svStrat
+    ctx <- D.modelCtx svModel
+    let ?m = ctx
+    gen <- (liftM $ findIndex (==True)) $ mapM G.toggleButtonGetActive svGoalButs
+    fen <- (liftM $ findIndex (==True)) $ mapM G.toggleButtonGetActive svFairButs
+  
+    -- find all non-empty substrategies for the selected state 
+    let avl = map (map (\r -> (r .& D.sAbstract st) ./= b)) stratRel
+
+    -- If the current fair region does not have strategy for the current state,
+    -- select a different fair region.
+    when (isJust gen || isJust fen) $
+         when (not $ avl !! fromJust gen !! fromJust fen) $
+              maybe (return ()) (\i -> G.toggleButtonSetActive (svFairButs !! i) True)
+              $ findIndex (==True) (avl !! fromJust gen)
+
+--------------------------------------------------------------
+-- Private helpers
+--------------------------------------------------------------
+
+
