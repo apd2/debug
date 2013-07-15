@@ -1215,8 +1215,9 @@ switchToControllable ref = do
     let Just pid = findProcInsideMagic sv0
     let sv1 = modifyCurrentStore sv0 (\st0 -> storeSet st0 mkContVar (Just $ SVal $ BoolVal True))
         sv2 = setEPID (EPIDProc pid) sv1
-    writeIORef ref sv2
-    makeTransition ref
+    when (not $ storeEvalBool (currentStore sv0) mkContVar) $ do
+        writeIORef ref sv2
+        makeTransition ref
 
 runControllableCFA :: RSourceView c a -> CFA -> IO ()
 runControllableCFA ref cfa = do
