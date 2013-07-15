@@ -170,11 +170,12 @@ mkModel' sr@SynthesisRes{..} = model
                             zip (map I.goalName $ I.tsGoal $ I.specTran ?spec) srGoals  {- ++ 
                             zip (map I.fairName $ I.tsFair $ I.specTran ?spec) srFairs -}
     mTransRels            = [ (if' srWin "trel_win" "trel_lose" , mkTRel sr)
-                            , ("trel"                           , srTran)
-                            , ("c-c"                            , srCMinusC)
-                            , ("c+c"                            , srCPlusC)
-                            , ("c-u"                            , srCMinusU)
-                            , ("c+u"                            , srCPlusU)]
+                            --, ("trel"                           , srTran)
+                            --, ("c-c"                            , srCMinusC)
+                            --, ("c+c"                            , srCPlusC)
+                            --, ("c-u"                            , srCMinusU)
+                            --, ("c+u"                            , srCPlusU)
+                            ]
     mViews                = []
     mConcretiseState      = concretiseS
     mConcretiseTransition = concretiseT
