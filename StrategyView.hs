@@ -58,7 +58,7 @@ strategyViewNew strat@Strategy{..} model = do
     G.scrolledWindowAddWithViewport scroll vbox
 
     -- Apply strategy check box
-    apply <- G.checkButtonNewWithLabel "Apply strategy"
+    apply <- G.checkButtonNewWithLabel "Use strategy"
     _ <- G.on apply G.toggled (update ref)
     G.widgetShow apply
     G.boxPackStart vbox apply G.PackNatural 0

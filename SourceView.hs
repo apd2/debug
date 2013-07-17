@@ -129,6 +129,7 @@ data SourceView c a = SourceView {
     svAbsVars        :: M.Map String AbsVar,
     svState          :: D.State a Store,            -- current state set via view callback
     svTmp            :: Store,                      -- temporary variables store
+    svSolver         :: SMTSolver,
 
     -- Command buttons
     svStepButton     :: G.ToolButton,
@@ -185,6 +186,7 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svAbsVars        = error "SourceView: svAbsVars undefined"
                              , svState          = error "SourceView: svState undefined"
                              , svTmp            = error "SourceView: svTmp undefined"
+                             , svSolver         = error "SourceView: svSolver undefined"
                              , svStepButton     = error "SourceView: svStepButton undefined"
                              , svRunButton      = error "SourceView: svRunButton undefined"
                              , svMagExitButton  = error "SourceView: svMagExitButton undefined"
@@ -229,6 +231,7 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
                                       , svFlatSpec       = flatspec
                                       , svSpec           = specInlineWireAlways spec
                                       , svAbsVars        = absvars
+                                      , svSolver         = solver
                                       }
 
     vbox <- G.vBoxNew False 0
@@ -1210,7 +1213,7 @@ actionSelectorRun ref = do
     text <- G.get buf G.textBufferText
     let fname = hash text
         fpath = "/tmp/" ++ show fname
-    case compileControllableAction svInputSpec svFlatSpec svPID (frScope $ head $ currentStack sv) text fpath of
+    case compileControllableAction svSolver svInputSpec svFlatSpec svPID (frScope $ head $ currentStack sv) text fpath of
          Left e    -> D.showMessage svModel G.MessageError e
          Right cfa -> do switchToControllable ref 
                          writeFile fpath text
@@ -1720,8 +1723,8 @@ storeEvalStr inspec flatspec store mpid sc str = do
     -- 6. evaluate
     return $ storeEval store iexpr
 
-compileControllableAction :: F.Spec -> F.Spec -> PrID -> F.Scope -> String -> FilePath -> Either String CFA
-compileControllableAction inspec flatspec pid sc str fname = do
+compileControllableAction :: SMTSolver -> F.Spec -> F.Spec -> PrID -> F.Scope -> String -> FilePath -> Either String CFA
+compileControllableAction solver inspec flatspec pid sc str fname = do
     trace ("compileControllableAction" ++ show pid) $ return ()
     -- Apply all transformations that the input spec goes through to the statement:
     -- 1. parse
@@ -1753,7 +1756,7 @@ compileControllableAction inspec flatspec pid sc str fname = do
         ctx' = let ?procs =[] in execState (do -- create final state and make it the return location
                                                aftret <- ctxInsLocLab (LFinal ActNone [])
                                                ctxPushScope sc aftret Nothing (scopeLMap (Just pid) sc)
-                                               aftstat <- F.procStatToCFA simpstat cfaInitLoc
+                                               aftstat <- let ?solver = solver in F.procStatToCFA simpstat cfaInitLoc
                                                -- switch to uncontrollable state
                                                aftucont <- ctxInsTrans' aftstat $ TranStat $ mkContVar =: false
                                                aftpid <- ctxInsTrans' aftucont $ TranStat $ mkEPIDVar =: (EConst $ EnumVal $ mkEPIDEnumeratorName EPIDCont)
