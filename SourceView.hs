@@ -33,7 +33,6 @@ import qualified IDE           as D
 import qualified DbgAbstract   as D
 --import qualified DbgConcretise as D
 import ISpec
-import TranSpec
 import IExpr
 import IVar
 import IType
@@ -42,12 +41,12 @@ import Inline
 import Predicate
 import Store
 import SMTSolver
-import TSLAbsGame
 
 import qualified NS              as F
 import qualified Method          as F
 import qualified Process         as F
 import qualified InstTree        as F
+import qualified Template        as F
 import qualified TemplateOps     as F
 import qualified ExprInline      as F
 import qualified Spec            as F
@@ -76,15 +75,11 @@ fontSrc    = "Courier 10 Pitch"
 
 instance D.Vals Store
 
-data ProcStackFrame = FrameCTask        {frScope::F.Scope, frLoc::Loc} 
-                    | FrameRegular      {frScope::F.Scope, frLoc::Loc}
+data ProcStackFrame = FrameRegular      {frScope::F.Scope, frLoc::Loc}
                     | FrameControllable {frScope::F.Scope, frLoc::Loc, frCFA::CFA}
 
 isFrameControllable (FrameControllable _ _ _) = True
 isFrameControllable _                         = False
-
-isFrameCTask (FrameCTask _ _) = True
-isFrameCTask _                = False
 
 instance PP ProcStackFrame where
     pp f = (if' (isFrameControllable f) (PP.text "(interactive)") PP.empty) PP.<+> (PP.text $ show $ frScope f) PP.<> PP.char ':' PP.<+> (PP.text $ show $ frLoc f)
@@ -97,12 +92,8 @@ instance PP ProcStack where
 showStack :: ProcStack -> String
 showStack = PP.render . pp
 
-stackToProcStack :: CID -> Stack -> ProcStack
-stackToProcStack (CTCID _) ((Frame sc loc):frames) = FrameCTask sc loc : stackToProcStack' frames
-stackToProcStack _         frames                  = stackToProcStack' frames
-
-stackToProcStack' :: Stack -> ProcStack
-stackToProcStack' frames = map (\(Frame sc loc) -> FrameRegular sc loc) frames
+stackToProcStack :: Stack -> ProcStack
+stackToProcStack frames = map (\(Frame sc loc) -> FrameRegular sc loc) frames
 
 data TraceEntry = TraceEntry {
     teStack :: ProcStack,
@@ -490,7 +481,7 @@ simulateTransition flatspec spec absvars st lab =
 contTransToSource :: F.Spec -> F.Spec -> Spec -> D.Transition a Store -> Maybe String
 contTransToSource inspec flatspec spec D.Transition{..} = do
     iid <- findActiveMagicBlock flatspec spec (fromJust $ D.sConcrete tranFrom)
-    act <- transitionToAction inspec spec (fromJust $ D.sConcrete tranTo)
+    act <- transitionToAction inspec flatspec spec (storeUnion (fromJust $ D.sConcrete tranTo) (fromJust tranConcreteLabel))
     doc <- ppContAction inspec iid act
     return $ PP.render doc
 
@@ -801,9 +792,7 @@ watchCreate ref = do
                                                                  Nothing  -> ""
                                                                  Just e -> case storeEvalStr svInputSpec svFlatSpec  
                                                                                              (currentStore sv) 
-                                                                                             (case stackGetEPID svPID (drop svStackFrame $ currentStack sv) of
-                                                                                                   EPIDCTask _ -> Nothing
-                                                                                                   _           -> Just svPID) 
+                                                                                             (Just svPID) 
                                                                                              (frScope $ currentStack sv !! svStackFrame) e of
                                                                                 Left er -> er
                                                                                 Right v -> show v])
@@ -1251,19 +1240,20 @@ ppContAction inspec iid (ActCall methiid t as) = do
 -- Translate an abstract transition into a controllable action
 -- cstate - concrete state before the transition
 -- alabel - abstract transition label
-transitionToAction :: F.Spec -> Spec -> Store -> Maybe ContAction
-transitionToAction inspec spec cnstate = do
+transitionToAction :: F.Spec -> F.Spec -> Spec -> Store -> Maybe ContAction
+transitionToAction inspec flatspec spec cnstate = do
     let ?spec = inspec
     let tag = storeEvalEnum cnstate mkTagVar
     if tag == mkTagIdle
        then if not $ storeEvalBool cnstate mkMagicVar
                then return ActExit
                else Nothing
-       else do let (caIID, methname) = F.itreeParseName (F.Ident F.nopos tag)
+       else do let flatmeth = let ?spec = flatspec in fromJust $ find ((== tag) . F.sname) $ F.tmMethod tmMain
+               let (caIID, methname) = F.itreeParseName (F.Ident F.nopos tag)
                    Just (F.ObjMethod tm caTask) = F.lookupGlobal ((F.Ident F.nopos "main"):caIID++[methname])
                let caArgs = map (\a -> (F.sname a, let ?scope = F.ScopeTemplate tm in storeToFExpr a
                                                    $ storeEval cnstate 
-                                                   $ (EVar $ mkVarNameS (NSID Nothing (Just $ taskMethod $ specGetCTask spec tag)) $ F.sname a)))
+                                                   $ (EVar $ mkVarNameS (NSID Nothing (Just flatmeth)) $ F.sname a)))
                             $ filter ((== F.ArgIn) . F.argDir)
                             $ F.methArg caTask
                return ActCall{..}
@@ -1325,31 +1315,13 @@ isWaitForMagicLabel _              = False
 -- Given a snapshot of the store at a pause location, compute
 -- process stack.
 stackFromStore :: SourceView c a -> Store -> PrID -> ProcStack
-stackFromStore sv s pid = stackFromStore' sv s (UCID pid Nothing)
+stackFromStore sv s pid = stackFromStore' sv s pid
 
-stackFromStore' :: SourceView c a -> Store -> CID -> ProcStack
-stackFromStore' sv s cid = stack' ++ stack
-    where cfa   = specGetCFA (svSpec sv) cid
-          loc   = storeGetLoc s cid
+stackFromStore' :: SourceView c a -> Store -> PrID -> ProcStack
+stackFromStore' sv s pid = stackToProcStack (locStack lab)
+    where cfa   = specGetCFA (svSpec sv) (EPIDProc pid)
+          loc   = storeGetLoc s pid
           lab   = cfaLocLabel loc cfa
-          stack = stackToProcStack cid (locStack lab)
-          -- If this location corresponds to a task call, recurse into task's CFA
-          stack' = case cid of
-                        UCID pid _ -> case lab of
-                                           LPause _ _ e -> case isWaitForTask e of
-                                                                Nothing  -> if isWaitForMagic e
-                                                                               then let t = getTag s in
-                                                                                    if' (t==mkTagIdle) []
-                                                                                        $ stackFromStore' sv s (CTCID $ methodByName t)
-                                                                               else []
-                                                                Just nam -> let meth = methodByName nam in
-                                                                            if storeEvalBool s $ mkEnVar pid (Just meth)
-                                                                               then stackFromStore' sv s (UCID pid (Just meth))
-                                                                               else []
-                                           _ -> []
-                        _          -> []
-          methodByName n = let ?spec = svFlatSpec sv in 
-                           snd $ F.getMethod (F.ScopeTemplate tmMain) (F.MethodRef F.nopos [F.Ident F.nopos n])
 
 -- Find out what the process is about to do (or is currently doing) based on its stack:
 -- run a normal transition, a controllable task, or a controllable transition
@@ -1357,30 +1329,21 @@ stackGetEPID :: PrID -> ProcStack -> EPID
 stackGetEPID pid stack = stackGetEPID' (EPIDProc pid) (reverse stack) 
 
 stackGetEPID' epid []                                         = epid
-stackGetEPID' _    ((FrameCTask (F.ScopeMethod _ m) _):_)     = EPIDCTask m
 stackGetEPID' _    ((FrameControllable _ _ _):_)              = EPIDCont
 stackGetEPID' epid (_:s)                                      = stackGetEPID' epid s
 
 stackGetCFA :: SourceView c a -> PrID -> ProcStack -> CFA
-stackGetCFA sv pid stack = stackGetCFA' sv (reverse stack) (UCID pid Nothing)
+stackGetCFA sv pid stack = stackGetCFA' sv (reverse stack) (EPIDProc pid)
 
-stackGetCFA' :: SourceView c a -> [ProcStackFrame] -> CID -> CFA
-stackGetCFA' sv []                                            cid                                                               = specGetCFA (svSpec sv) cid
-stackGetCFA' sv ((FrameRegular (F.ScopeProcess _ _) _):s) cid                                                               = stackGetCFA' sv s cid
-stackGetCFA' sv ((FrameCTask   (F.ScopeMethod _ m)  _):_) _                                                                 = specGetCFA (svSpec sv) (CTCID m)
-stackGetCFA' sv ((FrameRegular (F.ScopeMethod _ m)  _):s) (UCID pid _) | F.methCat m == F.Task F.Controllable   = stackGetCFA' sv s (UCID pid (Just m))
-                                                                           | F.methCat m == F.Task F.Uncontrollable = stackGetCFA' sv s (UCID pid (Just m))
-stackGetCFA' _  ((FrameControllable _ _ cfa):_)               _                                                                 = cfa
-stackGetCFA' sv _                                             cid                                                               = specGetCFA (svSpec sv) cid
+stackGetCFA' :: SourceView c a -> [ProcStackFrame] -> EPID -> CFA
+stackGetCFA' sv []                              epid                                                              = specGetCFA (svSpec sv) epid
+stackGetCFA' sv ((FrameRegular _ _):s)          epid                                                              = stackGetCFA' sv s epid
+stackGetCFA' _  ((FrameControllable _ _ cfa):_) _                                                                 = cfa
 
-
-storeGetLoc :: Store -> CID -> Loc
-storeGetLoc s cid = pcEnumToLoc pc
-    where pcvar = mkPCVar cid
+storeGetLoc :: Store -> PrID -> Loc
+storeGetLoc s pid = pcEnumToLoc pc
+    where pcvar = mkPCVar pid
           pc    = storeEvalEnum s pcvar
-
-getTag :: Store -> String
-getTag s = storeEvalEnum s mkTagVar
 
 isProcEnabled :: SourceView c a -> PrID -> Bool
 isProcEnabled sv pid = 
@@ -1407,7 +1370,7 @@ isProcEnabled sv pid =
 
 
 isProcInsideMagic :: SourceView c a -> PrID -> Bool
-isProcInsideMagic sv pid = isInsideMagicBlock lab || isFrameControllable frame || isFrameCTask frame
+isProcInsideMagic sv pid = isInsideMagicBlock lab || isFrameControllable frame 
     where
     store = fromJust $ D.sConcrete $ svState sv
     stack = stackFromStore sv store pid
@@ -1651,7 +1614,7 @@ storeEvalStr inspec flatspec store mpid sc str = do
     when (not $ null ss) $ throwError "Expression too complex"
     -- 5. inline
     let lmap = scopeLMap mpid sc
-    let ctx = CFACtx { ctxCID     = Nothing
+    let ctx = CFACtx { ctxEPID    = Nothing
                      , ctxStack   = [(sc, error "evalStr: return", Nothing, lmap)]
                      , ctxCFA     = error "evalStr: CFA undefined"
                      , ctxBrkLocs = []
@@ -1685,7 +1648,7 @@ compileControllableAction solver inspec flatspec pid sc str fname = do
                                 in runState (F.statSimplify flatstat) (0,[])
     assert (null vars) (F.pos stat) "Statement too complex"
     -- 5. inline
-    let ctx = CFACtx { ctxCID     = Just CCID
+    let ctx = CFACtx { ctxEPID    = Just EPIDCont
                      , ctxStack   = []
                      , ctxCFA     = newCFA sc simpstat true
                      , ctxBrkLocs = []
