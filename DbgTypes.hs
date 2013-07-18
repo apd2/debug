@@ -23,6 +23,7 @@ module DbgTypes(Rel,
                 mNextV, 
                 mUntrackedV, 
                 mLabelV,
+                mInitV,
                 mDumpIndices,
                 mUpdateTRel,
                 contRelName,
@@ -37,6 +38,7 @@ module DbgTypes(Rel,
                 modelCtx,
                 modelStateVars,
                 modelLabelVars,
+                modelInitVars,
                 modelUntrackedVars,
                 modelStateRels,
                 modelTransRels,
@@ -188,8 +190,10 @@ isConcreteTransition Transition{..} = isConcreteState tranFrom
 
 data ModelVar = ModelVar { mvarName :: String
                          , mvarType :: Type
-                         , mvarIdx  ::[Int]
+                         , mvarIdx  :: [Int]
                          }
+instance Eq ModelVar where
+    (==) v1 v2 = mvarName v1 == mvarName v2 && mvarIdx v1 == mvarIdx v2
 
 type ModelStateVar = (String, Type, ([Int],[Int]))
 
@@ -202,6 +206,7 @@ data Model c a b = Model {
     mStateVars            :: [ModelStateVar],
     mUntrackedVars        :: [ModelVar],
     mLabelVars            :: [ModelVar],
+    mInitVars             :: [ModelVar],
 
     -- State and transition relations being debugged
     mStateRels            :: [(String, a)],
@@ -227,11 +232,12 @@ mNextStateVars = map (\(n,tp,(_,i)) -> ModelVar n tp i) . mStateVars
 mvarToVS :: (Rel c v a s, ?m::c) => ModelVar -> v
 mvarToVS = idxToVS . mvarIdx
 
-mStateV, mNextV, mUntrackedV, mLabelV :: (Rel c v a s, ?m::c) => Model c a b -> v
+mStateV, mNextV, mUntrackedV, mLabelV, mInitV :: (Rel c v a s, ?m::c) => Model c a b -> v
 mStateV     = idxToVS . concatMap mvarIdx . mCurStateVars
 mNextV      = idxToVS . concatMap mvarIdx . mNextStateVars
 mUntrackedV = idxToVS . concatMap mvarIdx . mUntrackedVars
 mLabelV     = idxToVS . concatMap mvarIdx . mLabelVars
+mInitV      = idxToVS . concatMap mvarIdx . mInitVars
 
 mSetConstraint :: (Rel c v a s) => Model c a b -> String -> Maybe a -> Model c a b
 mSetConstraint m cname Nothing  = mUpdateTRel $ m {mConstraints = M.delete cname   $ mConstraints m}
@@ -260,6 +266,9 @@ modelUntrackedVars ref = getIORef mUntrackedVars ref
 
 modelLabelVars :: RModel c a b -> IO [ModelVar]
 modelLabelVars ref = getIORef mLabelVars ref
+
+modelInitVars :: RModel c a b -> IO [ModelVar]
+modelInitVars ref = getIORef mInitVars ref
 
 modelTransRels :: RModel c a b -> IO [(String, a)]
 modelTransRels ref = getIORef mTransRels ref
@@ -326,7 +335,7 @@ oneSatVal rel vars = do
     let support = supportIndices rel
     asn <- satOne rel
     let supvars = filter (any (\idx -> elem idx support) . mvarIdx) vars
-    return $ map (\v -> (v, boolArrToBitsBe $ extract (mvarToVS v) asn)) supvars
+    return $ map (\v -> (v, boolArrToBitsBe $ extract (mvarToVS v) asn)) $ nub supvars
 
 -- Message boxes
 showMessage :: RModel c a b -> G.MessageType -> String -> IO ()

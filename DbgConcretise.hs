@@ -28,7 +28,8 @@ import ISpec
 -- Output: a single concrete assignment or Nothing if a 
 -- satisfying assignment could not be found
 concretiseRel :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?absvars::M.Map String AbsVar) => [D.ModelVar] -> a -> Maybe (a, Store)
-concretiseRel mvars rel = do
+concretiseRel mvars0 rel = do
+    let mvars = nub mvars0
     -- Find one satisfying assignment of rel (return Nothing
     -- if one does not exist)
     qb <- oneCube (D.idxToVS $ concatMap D.mvarIdx mvars) rel
@@ -47,7 +48,7 @@ concretiseRel mvars rel = do
          Just (Right store) -> return (qb, store)
 
 concretiseState :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => a -> Maybe (D.State a Store)
-concretiseState rel = case concretiseRel (D.mCurStateVars ?model) rel of
+concretiseState rel = case concretiseRel (D.mCurStateVars ?model ++ D.mInitVars ?model) rel of
                            Nothing            -> Nothing
                            Just (rel', store) -> Just $ D.State rel' (Just $ storeExtendDefaultState store)
 

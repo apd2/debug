@@ -329,30 +329,30 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
     -- disable everything until we get a state to start from
     disable ref
 
-    -- HACK: create an initial state
-    model <- readIORef rmodel
-    when (isNothing $ find ((== "init") . fst) $ D.mStateRels model) $ do
-        let ?spec    = spec
-            ?absvars = absvars
-            ?model   = model
-            ?m       = D.mCtx model
-        initstore <- liftM storeExtendDefaultState
-                     $ case smtGetModel solver [let ?pred = [] in bexprToFormula $ snd $ tsInit $ specTran spec] of
-                            Just (Right store) -> return store                      
-                            _                  -> fail "Unsatisfiable initial condition"
-        -- more hack: simulate init transition
-        modifyIORef ref (\sv -> sv { svState      = D.abstractState initstore
-                                   , svTmp        = SStruct $ M.empty
-                                   , svPID        = PrID "$init" []
-                                   , svTrace      = [TraceEntry { teStack = [FrameRegular (F.ScopeTemplate (let ?spec = flatspec in tmMain)) (tranFrom $ fst $ tsInit $ specTran ?spec)]
-                                                                , teStore = initstore}]
-                                   , svTracePos   = 0
-                                   , svStackFrame = 0})
-
-        runAction ref
-        initstore' <- getIORef currentStore ref
-        D.modelSelectState rmodel (Just $ D.abstractState initstore') 
-    -- END HACK
+--    -- HACK: create an initial state
+--    model <- readIORef rmodel
+--    when (isNothing $ find ((== "init") . fst) $ D.mStateRels model) $ do
+--        let ?spec    = spec
+--            ?absvars = absvars
+--            ?model   = model
+--            ?m       = D.mCtx model
+--        initstore <- liftM storeExtendDefaultState
+--                     $ case smtGetModel solver [let ?pred = [] in bexprToFormula $ snd $ tsInit $ specTran spec] of
+--                            Just (Right store) -> return store                      
+--                            _                  -> fail "Unsatisfiable initial condition"
+--        -- more hack: simulate init transition
+--        modifyIORef ref (\sv -> sv { svState      = D.abstractState initstore
+--                                   , svTmp        = SStruct $ M.empty
+--                                   , svPID        = PrID "$init" []
+--                                   , svTrace      = [TraceEntry { teStack = [FrameRegular (F.ScopeTemplate (let ?spec = flatspec in tmMain)) (tranFrom $ fst $ tsInit $ specTran ?spec)]
+--                                                                , teStore = initstore}]
+--                                   , svTracePos   = 0
+--                                   , svStackFrame = 0})
+--
+--        runAction ref
+--        initstore' <- getIORef currentStore ref
+--        D.modelSelectState rmodel (Just $ D.abstractState initstore') 
+--    -- END HACK
 
     return $ D.View { D.viewName      = "Source"
                     , D.viewDefAlign  = D.AlignCenter
@@ -885,14 +885,6 @@ sourceWindowCreate ref = do
     lfile <- G.labelNew Nothing
     G.widgetShow lfile
     G.boxPackStart sbar lfile G.PackGrow 0
---    -- cont/ucont switcher
---    bcont <- G.toggleButtonNew
---    G.widgetShow bcont
---    G.boxPackStart sbar bcont G.PackGrow 0
---    lcont <- G.labelNew Nothing
---    G.widgetShow lcont
---    G.containerAdd bcont lcont
---    _ <- G.on bcont G.toggled (contToggled ref)
     -- transition-in-progress label
     lprog <- G.labelNew Nothing
     G.widgetShow lprog
@@ -906,13 +898,6 @@ sourceWindowCreate ref = do
                                --, svContLab    = lcont
                                , svInprogLab  = lprog})
     return $ G.toWidget vbox
-
---contToggled :: (D.Rel c v a s) => RSourceView c a -> IO ()
---contToggled ref = do
---    putStrLn "contToggled"
---    sv <- readIORef ref
---    c <- G.toggleButtonGetActive (svContTog sv)
---    when (c && (not $ currentControllable sv)) $ switchToControllable ref
 
 sourceWindowUpdate :: RSourceView c a -> IO ()
 sourceWindowUpdate ref = do
@@ -931,12 +916,6 @@ sourceWindowUpdate ref = do
                                          G.labelSetText (svFileLab sv) (sourceName $ fst p)
          ActStat s -> do sourceSetPos sv (F.pos s) colorUCont
                          G.labelSetText (svFileLab sv) (sourceName $ fst $ F.pos s)
---    if currentControllable sv
---       then do G.toggleButtonSetActive (svContTog sv) True
---               G.labelSetMarkup (svContLab sv) "<span color=\"green\"> CONTROLLABLE </span>"
---       else do G.toggleButtonSetActive (svContTog sv) False
---               G.labelSetMarkup (svContLab sv) "<span color=\"blue\">  UNCONTROLLABLE </span>"
-
     G.labelSetMarkup (svInprogLab sv) $ if svTracePos sv == 0
                                            then if currentError sv
                                                    then "<span color=\"red\" weight=\"bold\">ERROR</span>"
@@ -1188,12 +1167,6 @@ actionSelectorCreate ref = do
     G.widgetShow bbox
     G.boxPackStart vbox bbox G.PackNatural 0
 
---    ---- Exit magic block button
---    bexit <- G.buttonNewWithLabel "Exit Magic Block"
---    G.widgetShow bexit
---    G.containerAdd bbox bexit
---    _ <- G.on bexit G.buttonActivated (actionSelectorExit ref)
-
     -- Add transition button
     badd <- G.buttonNewWithLabel "Perform controllable action"
     G.widgetShow badd
@@ -1219,16 +1192,6 @@ actionSelectorRun ref = do
                          writeFile fpath text
                          runControllableCFA ref cfa
     
-
-
---actionSelectorExit :: (D.Rel c v a s) => RSourceView c a -> IO ()
---actionSelectorExit ref = do
---    modifyIORef ref (\sv -> setPID pidCont 
---                            $ modifyCurrentStore sv (\st0 -> let st1 = storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)
---                                                                 st2 = storeSet st1 mkContVar  (Just $ SVal $ BoolVal False)
---                                                             in st2))
---    makeTransition ref
-
 switchToControllable :: (D.Rel c v a s) => RSourceView c a -> IO ()
 switchToControllable ref = do
     sv0 <- readIORef ref
@@ -1410,20 +1373,6 @@ stackGetCFA' sv ((FrameRegular (F.ScopeMethod _ m)  _):s) (UCID pid _) | F.methC
 stackGetCFA' _  ((FrameControllable _ _ cfa):_)               _                                                                 = cfa
 stackGetCFA' sv _                                             cid                                                               = specGetCFA (svSpec sv) cid
 
-
--- Extract the last controllable or uncontrollable task call 
--- from the stack or return Nothing if the stack does not 
--- contain a task call
---stackTask :: Stack -> Int -> Maybe F.Method
---stackTask stack frame = stackTask' $ drop frame stack
---
---stackTask' :: Stack -> Maybe F.Method
---stackTask' []      = Nothing
---stackTask' (fr:st) = case fScope fr of
---                          F.ScopeMethod _ m -> if F.methCat m == F.Task F.Uncontrollable 
---                                                      then Just m
---                                                      else stackTask' st
---                          _               -> stackTask' st
 
 storeGetLoc :: Store -> CID -> Loc
 storeGetLoc s cid = pcEnumToLoc pc
@@ -1646,16 +1595,6 @@ microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=
                                              in case rval of 
                                                      Nothing -> Nothing
                                                      _       -> Just (store', (head $ currentStack sv){frLoc = to} : (tail $ currentStack sv))
-
----- Actions taken upon reaching a delay location
---maybeCompleteTransition :: SourceView c a -> SourceView c a
---maybeCompleteTransition sv | currentDelay sv && currentControllable sv = sv
---                           | currentDelay sv                           = setPC pid pc sv
---                           | otherwise                                 = sv
---    -- update PC and PID variables
---    where pc = currentLoc sv
---          mmeth = fmap sname $ stackTask (currentStack sv) 0
---          pid = svPID sv ++ (maybeToList mmeth)
 
 makeTransition :: (D.Rel c v a s) => RSourceView c a -> IO ()
 makeTransition ref = do

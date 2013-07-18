@@ -42,6 +42,7 @@ data SynthesisRes c a = SynthesisRes { srWin           :: Bool
                                      , srStateVars     :: [D.ModelStateVar]
                                      , srUntrackedVars :: [D.ModelVar]
                                      , srLabelVars     :: [D.ModelVar]
+                                     , srInitVars      :: [D.ModelVar]
                                      , srAbsVars       :: M.Map String AbsVar
                                      , srCont          :: a
                                      , srInit          :: a
@@ -83,7 +84,9 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
             where toModelVarUntracked (p, (_, is, _, _)) = D.ModelVar (show p) (avarType p) is
         srLabelVars     = concatMap toModelVarLabel $ M.toList _labelVars
             where toModelVarLabel     (p, (_, is, _, ie)) = [D.ModelVar (show p) (avarType p) is, D.ModelVar (show p ++ ".en") D.Bool [ie]]
-        srAbsVars       = M.fromList $ map (\v -> (show v,v)) $ (M.keys _stateVars) ++ (M.keys _labelVars)
+        srInitVars      = map toModelVarInit $ M.toList _initVars
+            where toModelVarInit      (p, (_, is, _, _)) = D.ModelVar (show p) (avarType p) is
+        srAbsVars       = M.fromList $ map (\v -> (show v,v)) $ (M.keys _stateVars) ++ (M.keys _labelVars) ++ (M.keys _initVars)
         srWinningRegion = toDdNode srCtx wn
         srCont          = toDdNode srCtx cont
         srInit          = toDdNode srCtx init
@@ -163,6 +166,7 @@ mkModel' sr@SynthesisRes{..} = model
     mStateVars            = srStateVars
     mUntrackedVars        = srUntrackedVars 
     mLabelVars            = srLabelVars
+    mInitVars             = srInitVars
     mStateRels            = [ (D.contRelName  , srCont)
                             , ("win"          , srWinningRegion)
                             --, ("uncontrollable", let ?m = srCtx in nt srCont)

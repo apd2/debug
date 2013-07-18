@@ -114,8 +114,8 @@ strategyViewNew strat@Strategy{..} model = do
                                 , svGoalButs = gbuts
                                 , svFairButs = fbuts}
 
-    _ <- mapM (\bt -> G.radioButtonSetGroup bt $ head gbuts) $ tail gbuts
-    _ <- mapM (\bt -> G.radioButtonSetGroup bt $ head fbuts) $ tail fbuts
+    _ <- mapM (\bt -> G.radioButtonSetGroup bt $ head gbuts) $ drop 1 gbuts
+    _ <- mapM (\bt -> G.radioButtonSetGroup bt $ head fbuts) $ drop 1 fbuts
 
     return $ D.View { D.viewName      = stratName
                     , D.viewDefAlign  = D.AlignLeft
