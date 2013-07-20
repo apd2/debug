@@ -134,16 +134,15 @@ mkTRel sr@SynthesisRes{..} =
 
 quant_dis :: (D.Rel c v a s, ?m :: c) => SynthesisRes c a -> a -> a
 quant_dis SynthesisRes{..} rel = 
-    trace "quant_dis"
-    $ foldl' quant_dis1 rel
+    foldl' quant_dis1 rel
     $ map (\(v,ev) -> trace ("quant_dis " ++ D.mvarName v ++ "(" ++ show (D.mvarIdx v) ++ ") " ++ D.mvarName ev ++ "(" ++ show (D.mvarIdx ev) ++ ")") $ (D.mvarToVS v, D.mvarToVS ev))
     $ mapMaybe (\v -> fmap (v,) (find ((== (D.mkEnVarName $ D.mvarName v)) . D.mvarName) srLabelVars))
     $ srLabelVars
 
 quant_dis1 :: (D.Rel c v a s, ?m :: c) => a -> (v,v) -> a
 quant_dis1 rel (var, envar) = 
-    let rel1 = trace "quant_dis1 rel1" $ ((eqConst envar (1::Int)) .& rel)
-        rel2 = trace "quant_dis1 rel2" $ ((eqConst envar (0::Int)) .& exists var rel)
+    let rel1 = ((eqConst envar (1::Int)) .& rel)
+        rel2 = ((eqConst envar (0::Int)) .& exists var rel)
         --rel3 = rel1 .| rel2
     in rel1 .| rel2
 

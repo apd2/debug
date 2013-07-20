@@ -50,7 +50,8 @@ concretiseRel mvars0 rel = do
 concretiseState :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store, ?absvars::M.Map String AbsVar) => a -> Maybe (D.State a Store)
 concretiseState rel = case concretiseRel (D.mCurStateVars ?model ++ D.mInitVars ?model) rel of
                            Nothing            -> Nothing
-                           Just (rel', store) -> Just $ D.State rel' (Just $ storeExtendDefaultState store)
+                           Just (rel', store) -> do rel'' <- oneCube (D.mStateV ?model) rel'
+                                                    return $ D.State rel'' (Just $ storeExtendDefaultState store)
 
 -- Given a concrete state and an abstract label, compute concrete label.  
 -- The abstract label is assumed to be a cube.
