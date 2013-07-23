@@ -23,6 +23,7 @@ import qualified Spec        as F
 
 import IVar
 import ISpec
+import IExpr hiding (conj)
 
 -- Input: relation over a set of abstract variables
 -- Output: a single concrete assignment or Nothing if a 
@@ -34,9 +35,9 @@ concretiseRel mvars0 rel = do
     -- if one does not exist)
     qb <- oneCube (D.idxToVS $ concatMap D.mvarIdx mvars) rel
     asn <- D.oneSatVal qb mvars
-    let preds = map (\(mvar, val) -> avarAsnToPred (?absvars M.! D.mvarName mvar) val) asn
+    let fs = map (\(mvar, val) -> avarAsnToFormula (?absvars M.! D.mvarName mvar) val) asn
     -- Try to concretise this assignment
-    case smtGetModel ?solver $ map FPred preds of
+    case smtGetModel ?solver fs of
          Nothing            -> Nothing
          Just (Left core)   -> do -- Remove unsat core from rel and repeat
                 let unsatcube = trace ("concretiseRel (" ++ (show $ length mvars) ++ " vars): core = " ++ show core)
@@ -59,16 +60,16 @@ concretiseLabel :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?mode
 concretiseLabel cstate alabel = do
    -- extract predicates from abstract label
    asn <- D.oneSatVal alabel (D.mCurStateVars ?model ++ D.mLabelVars ?model)
-   let lpreds = map (\(mvar, val) -> avarAsnToPred (?absvars M.! D.mvarName mvar) val) 
-                $ filter (not . D.isEnVarName . D.mvarName . fst) asn
+   let lfs = map (\(mvar, val) -> avarAsnToFormula (?absvars M.! D.mvarName mvar) val) 
+             $ filter (not . D.isEnVarName . D.mvarName . fst) asn
        -- extract values of relevant state variables from concrete 
        -- state and transform them into additional predicates
-       spreds = map (\term -> PAtom REq term $ (valToTerm $ storeEvalScalar cstate $ termToExpr term))
-                $ nub 
-                $ filter ((== VarState) . termCategory) 
-                $ concatMap predTerm lpreds
+       sfs = map (\term -> fRel REq (termToExpr term) $ (EConst $ storeEvalScalar cstate $ termToExpr term))
+             $ nub 
+             $ filter ((== VarState) . termCategory) 
+             $ concatMap (concatMap avarTerms . fAbsVars) lfs
    -- Check for model
-   case smtGetModel ?solver $ map FPred $ lpreds ++ spreds of
+   case smtGetModel ?solver $ lfs ++ sfs of
         Just (Right (SStruct fs)) -> -- Keep temporary variables only
                                      Just $ storeExtendDefaultLabel $ SStruct $ M.filterWithKey (\n _ -> (varCat $ getVar n) == VarTmp) fs
         _                         -> Nothing

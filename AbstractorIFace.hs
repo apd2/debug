@@ -102,9 +102,9 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
 -- Extract type information from AbsVar
 avarType :: (?spec::I.Spec) => AbsVar -> D.Type
 avarType (AVarPred _)  = D.Bool
-avarType (AVarTerm tr) = case I.typ tr of
-                              I.Bool   -> D.Bool
-                              I.Enum n -> D.Enum $ (I.enumEnums $ I.getEnumeration n)
+avarType (AVarBool tr) = D.Bool
+avarType (AVarEnum tr) = D.Enum $ (I.enumEnums $ I.getEnumeration n) where I.Enum n = I.typ tr
+avarType (AVarInt  tr) = case I.typ tr of
                               I.SInt w -> D.SInt w
                               I.UInt w -> D.UInt w
 

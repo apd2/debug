@@ -972,7 +972,7 @@ commandButtonsUpdate ref = do
              -- (all scalar tmp variables that affect the next transition must be assigned)
              (all isJust           
               $ map (storeTryEval (currentStore sv))
-              $ filter isTypeScalar
+              $ filter isScalar
               $ concatMap flatten 
               $ currentTmpExprTree sv)
     G.widgetSetSensitive (svStepButton sv)    en
@@ -1042,7 +1042,7 @@ resolveViewCreate ref = do
         (\iter -> do sv   <- readIORef ref
                      path <- G.treeModelGetPath store iter
                      e    <- G.treeStoreGetValue store path
-                     G.set textrend [ G.cellVisible      G.:= isTypeInt e
+                     G.set textrend [ G.cellVisible      G.:= isInt e
                                     , G.cellTextEditable G.:= True
                                     , G.cellText         G.:= case storeTryEval (currentStore sv) e of
                                                                    Nothing -> "*"
@@ -1056,7 +1056,7 @@ resolveViewCreate ref = do
                      path            <- G.treeModelGetPath store iter
                      e               <- G.treeStoreGetValue store path
                      (tmodel, colid) <- comboTextModel $ typ e
-                     G.set combrend [ G.cellVisible        G.:= isTypeScalar e && not (isTypeInt e)
+                     G.set combrend [ G.cellVisible        G.:= isScalar e && not (isInt e)
                                     , G.cellComboTextModel G.:= (tmodel, colid)
                                     , G.cellTextEditable   G.:= True
                                     , G.cellComboHasEntry  G.:= False
@@ -1123,7 +1123,7 @@ autoResolve ref = do
      sv <- readIORef ref
      let ?spec = svSpec sv
      _ <- mapM (autoResolve1 ref)
-          $ filter isTypeScalar
+          $ filter isScalar
           $ concatMap flatten 
           $ currentTmpExprTree sv
      return ()
