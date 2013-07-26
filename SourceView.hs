@@ -220,7 +220,7 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
     ref <- newIORef $ sourceViewEmpty { svModel          = rmodel
                                       , svInputSpec      = inspec
                                       , svFlatSpec       = flatspec
-                                      , svSpec           = specInlineWireAlways spec
+                                      , svSpec           = specInlineWirePrefix spec
                                       , svAbsVars        = absvars
                                       , svSolver         = solver
                                       }
@@ -319,31 +319,6 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
 
     -- disable everything until we get a state to start from
     disable ref
-
---    -- HACK: create an initial state
---    model <- readIORef rmodel
---    when (isNothing $ find ((== "init") . fst) $ D.mStateRels model) $ do
---        let ?spec    = spec
---            ?absvars = absvars
---            ?model   = model
---            ?m       = D.mCtx model
---        initstore <- liftM storeExtendDefaultState
---                     $ case smtGetModel solver [let ?pred = [] in bexprToFormula $ snd $ tsInit $ specTran spec] of
---                            Just (Right store) -> return store                      
---                            _                  -> fail "Unsatisfiable initial condition"
---        -- more hack: simulate init transition
---        modifyIORef ref (\sv -> sv { svState      = D.abstractState initstore
---                                   , svTmp        = SStruct $ M.empty
---                                   , svPID        = PrID "$init" []
---                                   , svTrace      = [TraceEntry { teStack = [FrameRegular (F.ScopeTemplate (let ?spec = flatspec in tmMain)) (tranFrom $ fst $ tsInit $ specTran ?spec)]
---                                                                , teStore = initstore}]
---                                   , svTracePos   = 0
---                                   , svStackFrame = 0})
---
---        runAction ref
---        initstore' <- getIORef currentStore ref
---        D.modelSelectState rmodel (Just $ D.abstractState initstore') 
---    -- END HACK
 
     return $ D.View { D.viewName      = "Source"
                     , D.viewDefAlign  = D.AlignCenter
@@ -460,7 +435,7 @@ simulateTransition flatspec spec absvars st lab =
                                       Just p -> p
                                       _      -> error $ "simulateTransition no process inside a magic block"
 
-        sv1 = if storeEvalBool st (EVar mkContVarName)
+        sv1 = if storeEvalBool st mkContVar
                  then -- execute controllable CFA
                       sv0 { svPID   = pid
                           , svTrace = [TraceEntry { teStore = storeUnion st lab
@@ -476,6 +451,7 @@ simulateTransition flatspec spec absvars st lab =
                                       then Nothing
                                       else Just $ currentStore sv2
     in trace ("simulateTransition\nlabel: " ++ show lab ++ "\nstate: " ++ show st)
+       $ trace ("simulateTransitions returns " ++ show mstore2) 
        $ mstore2
 
 contTransToSource :: F.Spec -> F.Spec -> Spec -> D.Transition a Store -> Maybe String
@@ -1353,7 +1329,7 @@ isProcEnabled sv pid =
         loc   = frLoc frame
         cfa   = stackGetCFA sv pid stack
         lab   = cfaLocLabel loc cfa
-        cont  = storeEvalBool store (EVar mkContVarName)
+        cont  = storeEvalBool store mkContVar
     in case storeTryEvalEnum (svTmp sv) mkEPIDLVar of
             Just e -> case parseEPIDEnumerator (svFlatSpec sv) e of
                            EPIDCont -> isInsideMagicBlock lab
@@ -1466,7 +1442,7 @@ currentTmpExprTree :: SourceView c a -> Forest Expr
 currentTmpExprTree sv = getTmpExprTree sv (svTracePos sv)
 
 currentControllable :: SourceView c a -> Bool
-currentControllable sv = storeEvalBool (currentStore sv) (EVar mkContVarName)
+currentControllable sv = storeEvalBool (currentStore sv) mkContVar
 
 currentMagic :: SourceView c a -> Bool
 currentMagic sv = storeEvalBool (currentStore sv) (EVar mkMagicVarName)
@@ -1530,7 +1506,7 @@ microstep sv =
     -- Try all transitions from the current location; choose the first successful one
     let transitions = Graph.lsuc (currentCFA sv) (currentLoc sv)
     in case mapMaybe (microstep' sv) transitions of
-            []               -> trace "microstep' returns false" 
+            []               -> trace ("microstep' returns false (currentLoc="  ++ (show $ currentLoc sv) ++ ")")
                                 $ Nothing
             (store, stack):_ -> trace ("microstep': stack=" ++ showStack stack) 
                                 $ Just $ traceAppend sv store stack
