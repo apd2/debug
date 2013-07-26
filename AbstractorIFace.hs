@@ -11,6 +11,7 @@ import qualified Data.Map as M
 import Data.List
 import Data.Maybe
 import Control.Monad.ST
+import Control.Monad.Trans
 
 import Util
 import Cudd
@@ -32,6 +33,7 @@ import qualified DbgConcretise  as D
 import qualified DbgAbstract    as D
 import qualified StrategyView   as D
 import qualified SourceView     as D
+import Resource hiding (trace)
 
 instance D.Rel DdManager VarData DdNode [[SatBit]]
 
@@ -55,7 +57,7 @@ data SynthesisRes c a = SynthesisRes { srWin           :: Bool
                                      , srCMinusU       :: a
                                      }
 
-mkSynthesisRes :: I.Spec -> STDdManager s u -> (Bool, RefineInfo s u AbsVar AbsVar) -> ST s (SynthesisRes DdManager DdNode)
+mkSynthesisRes :: I.Spec -> STDdManager s u -> (Bool, RefineInfo s u AbsVar AbsVar) -> ResourceT (DDNode s u) (ST s) (SynthesisRes DdManager DdNode) 
 mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
     let ?spec = spec 
         ?m    = toDdManager m
@@ -64,13 +66,13 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         pdb               = db
     srStrat <- if res
                   then do s0 <- strat ri
-                          mapM (mapM (\s -> do s' <- bor m s $ bnot cont
-                                               deref m s
-                                               return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
+                          lift $ mapM (mapM (\s -> do s' <- bor m s $ bnot cont
+                                                      deref m s
+                                                      return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
                   else do s0 <- cex ri
-                          mapM (mapM (\s -> do s' <- bor m s cont
-                                               deref m s
-                                               return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
+                          lift $ mapM (mapM (\s -> do s' <- bor m s cont
+                                                      deref m s
+                                                      return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
     let SectionInfo{..} = _sections pdb
         SymbolInfo{..}  = _symbolTable pdb
         (state, untracked) = partition func $ M.toList _stateVars
