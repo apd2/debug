@@ -1318,8 +1318,8 @@ stackGetCFA' _  ((FrameControllable _ _ cfa):_) _                               
 
 storeGetLoc :: Store -> PrID -> Loc
 storeGetLoc s pid = pcEnumToLoc pc
-    where pcvar = mkPCVar pid
-          pc    = storeEvalEnum s pcvar
+    where pcvar = EVar $ mkPCVarName pid
+          pc    = maybe (mkPCEnum pid cfaInitLoc) id $ storeTryEvalEnum s pcvar
 
 isProcEnabled :: SourceView c a -> PrID -> Bool
 isProcEnabled sv pid = 
