@@ -193,7 +193,7 @@ autoSchedule ref st = do
 
     -- If the current fair region does not have strategy for the current state,
     -- select a different fair region.
-    when (isJust gen || isJust fen) $
+    when (isJust gen && isJust fen) $
          when (not $ avl !! fromJust gen !! fromJust fen) $
               maybe (return ()) (\i -> G.toggleButtonSetActive (svFairButs !! i) True)
               $ findIndex (==True) (avl !! fromJust gen)
