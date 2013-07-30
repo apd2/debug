@@ -24,20 +24,20 @@ import CuddSymTab
 import Predicate
 import Store
 import SMTSolver
-import qualified Spec           as F
-import qualified ISpec          as I
-import qualified TranSpec       as I
-import qualified IType          as I
-import qualified DbgTypes       as D
-import qualified DbgConcretise  as D
-import qualified DbgAbstract    as D
-import qualified StrategyView   as D
-import qualified SourceView     as D
-import Resource hiding (trace)
+import qualified Spec          as F
+import qualified ISpec         as I
+import qualified TranSpec      as I
+import qualified IType         as I
+import qualified DbgTypes      as D
+import qualified DbgConcretise as D
+import qualified DbgAbstract   as D
+import qualified StrategyView  as D
+import qualified SourceView    as D
+import Resource hiding (trace,d)
 
 instance D.Rel DdManager VarData DdNode [[SatBit]]
 
-data SynthesisRes c a = SynthesisRes { srWin           :: Bool
+data SynthesisRes c a = SynthesisRes { srWin           :: Maybe Bool
                                      , srWinningRegion :: DdNode
                                      , srStrat         :: [[DdNode]]  -- winning strategy or counterexample
                                      , srCtx           :: c
@@ -57,22 +57,23 @@ data SynthesisRes c a = SynthesisRes { srWin           :: Bool
                                      , srCMinusU       :: a
                                      }
 
-mkSynthesisRes :: I.Spec -> STDdManager s u -> (Bool, RefineInfo s u AbsVar AbsVar) -> ResourceT (DDNode s u) (ST s) (SynthesisRes DdManager DdNode) 
+mkSynthesisRes :: I.Spec -> STDdManager s u -> (Maybe Bool, RefineInfo s u AbsVar AbsVar) -> ResourceT (DDNode s u) (ST s) (SynthesisRes DdManager DdNode) 
 mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
     let ?spec = spec 
         ?m    = toDdManager m
     let RefineStatic{..}  = rs
         RefineDynamic{..} = rd
         pdb               = db
-    srStrat <- if res
-                  then do s0 <- strat ri
-                          lift $ mapM (mapM (\s -> do s' <- bor m s $ bnot cont
-                                                      deref m s
-                                                      return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
-                  else do s0 <- cex ri
-                          lift $ mapM (mapM (\s -> do s' <- bor m s cont
-                                                      deref m s
-                                                      return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
+    srStrat <- case res of
+                  Just True -> do s0 <- strat ri
+                                  lift $ mapM (mapM (\s -> do s' <- bor m s $ bnot cont
+                                                              deref m s
+                                                              return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
+                  Just False -> do s0 <- cex ri
+                                   lift $ mapM (mapM (\s -> do s' <- bor m s cont
+                                                               deref m s
+                                                               return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
+                  Nothing    -> return []
     let SectionInfo{..} = _sections pdb
         SymbolInfo{..}  = _symbolTable pdb
         (state, untracked) = partition func $ M.toList _stateVars
@@ -130,9 +131,10 @@ mkTRel sr@SynthesisRes{..} =
     let tcont  = srTran .& srCont
         tucont = srTran .& (nt srCont)
     in trace "mkTRel"
-       $ if srWin
-            then (quant_dis sr (tcont .& srCMinusC)) .| (tucont .& srCPlusU)
-            else (tcont .& srCPlusC)                 .| (quant_dis sr (tucont .& srCMinusU))
+       $ case srWin of
+            Just True  -> (quant_dis sr (tcont .& srCMinusC)) .| (tucont .& srCPlusU)
+            Just False -> (tcont .& srCPlusC)                 .| (quant_dis sr (tucont .& srCMinusU))
+            Nothing    -> srTran
 
 quant_dis :: (D.Rel c v a s, ?m :: c) => SynthesisRes c a -> a -> a
 quant_dis SynthesisRes{..} rel = 
@@ -171,10 +173,14 @@ mkModel' sr@SynthesisRes{..} = model
     mStateRels            = [ (D.contRelName  , srCont)
                             , ("win"          , srWinningRegion)
                             --, ("uncontrollable", let ?m = srCtx in nt srCont)
-                            , ("init"          , if' srWin srInit (let ?m = srCtx in srInit .& (nt srWinningRegion)))] ++
+                            , ("init"          , if' (srWin == Just True || srWin == Nothing) srInit (let ?m = srCtx in srInit .& (nt srWinningRegion)))] ++
                             zip (map I.goalName $ I.tsGoal $ I.specTran ?spec) srGoals  {- ++ 
                             zip (map I.fairName $ I.tsFair $ I.specTran ?spec) srFairs -}
-    mTransRels            = [ (if' srWin "trel_win" "trel_lose" , mkTRel sr)
+    mTransRels            = [ (case srWin of 
+                                    Just True  -> "trel_win" 
+                                    Just False -> "trel_lose" 
+                                    Nothing    -> "trel", 
+                               mkTRel sr)
                             --, ("trel"                           , srTran)
                             --, ("c-c"                            , srCMinusC)
                             --, ("c+c"                            , srCPlusC)
@@ -213,10 +219,10 @@ mkModel' sr@SynthesisRes{..} = model
                                  | otherwise = Nothing
 
 
-mkStrategy :: I.Spec -> SynthesisRes DdManager DdNode -> D.Strategy DdNode
-mkStrategy spec SynthesisRes{..} = D.Strategy{..}
+mkStrategy :: I.Spec -> SynthesisRes DdManager DdNode -> Maybe (D.Strategy DdNode)
+mkStrategy spec SynthesisRes{..} = maybe Nothing (\_ -> Just D.Strategy{..}) srWin
     where
-    stratName  = if' srWin "Winning strategy" "Counterexample strategy"
+    stratName  = if' (srWin == Just True) "Winning strategy" "Counterexample strategy"
     stratGoals = zip (map I.goalName $ I.tsGoal $ I.specTran spec) srGoals
     stratFair  = zip (map I.fairName $ I.tsFair $ I.specTran spec) srFairs
     stratRel   = srStrat
