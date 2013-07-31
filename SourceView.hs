@@ -1525,7 +1525,7 @@ microstep' sv (to, TranCall meth mretloc)  = -- insert new stack frame and mofif
                                                    else Just (currentStore sv, (FrameRegular sc to) : stack')
 microstep' sv (_ , TranReturn)             = Just (currentStore sv, tail $ currentStack sv)
 microstep' sv (to, TranNop)                = Just (currentStore sv, (head $ currentStack sv){frLoc = to} : (tail $ currentStack sv))
-microstep' sv (to, TranStat (SAssume e))   = if storeEvalBool (currentStore sv) e == True
+microstep' sv (to, TranStat (SAssume e))   = if storeTryEvalBool (currentStore sv) e == Just True
                                                 then Just (currentStore sv, (head $ currentStack sv){frLoc = to} : (tail $ currentStack sv))
                                                 else Nothing
 microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=" ++ show r) $
