@@ -590,7 +590,7 @@ stackViewCreate ref = do
     G.cellLayoutSetAttributeFunc col rend store $ 
         (\iter -> do let idx = G.listStoreIterToIndex iter
                      frame <- G.listStoreGetValue store idx
-                     G.set rend [G.cellTextMarkup G.:= Just $ show $ frScope frame])
+                     G.set rend [G.cellTextMarkup G.:= Just $ G.escapeMarkup $ show $ frScope frame])
     _ <- G.treeViewAppendColumn view col
 
     modifyIORef ref (\sv -> sv{svStackView = view, svStackStore = store, svStackFrame = 0})
@@ -658,7 +658,7 @@ traceViewCreate ref = do
                                       ActStat s -> show s
                                       ActExpr e -> show e
                                       _         -> "?"
-                     G.set rend [G.cellTextMarkup G.:= Just $ "<span weight=\"" ++ (if idx == svTracePos sv then "bold" else "normal") ++ "\">" ++ txt ++ "</span>"])
+                     G.set rend [G.cellTextMarkup G.:= Just $ "<span weight=\"" ++ (if idx == svTracePos sv then "bold" else "normal") ++ "\">" ++ (G.escapeMarkup txt) ++ "</span>"])
     _ <- G.on combo G.changed (tracePosChanged ref)
 
     -- redo button
@@ -763,7 +763,7 @@ watchCreate ref = do
         (\iter -> do sv@SourceView{..} <- readIORef ref
                      let idx = G.listStoreIterToIndex iter
                      mexp <- G.listStoreGetValue store idx
-                     G.set valrend [G.cellTextMarkup G.:= Just 
+                     G.set valrend [G.cellTextMarkup G.:= Just $ G.escapeMarkup 
                                                           $ case mexp of 
                                                                  Nothing  -> ""
                                                                  Just e -> case storeEvalStr svInputSpec svFlatSpec  
@@ -1004,7 +1004,7 @@ resolveViewCreate ref = do
                      path <- G.treeModelGetPath store iter
                      e    <- G.treeStoreGetValue store path
                      let hl = isNothing $ storeTryEval (currentStore sv) e
-                     G.set namerend [G.cellTextMarkup G.:= Just $ if' hl ("<span background=\"red\">" ++ show e ++ "</span>") (show e)])
+                     G.set namerend [G.cellTextMarkup G.:= Just $ G.escapeMarkup $ if' hl ("<span background=\"red\">" ++ show e ++ "</span>") (show e)])
     _ <- G.treeViewAppendColumn view namecol
 
     -- Variable assignment column
