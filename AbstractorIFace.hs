@@ -176,12 +176,12 @@ mkModel' sr@SynthesisRes{..} = model
                             , ("init"          , if' (srWin == Just True || srWin == Nothing) srInit (let ?m = srCtx in srInit .& (nt srWinningRegion)))] ++
                             zip (map I.goalName $ I.tsGoal $ I.specTran ?spec) srGoals  {- ++ 
                             zip (map I.fairName $ I.tsFair $ I.specTran ?spec) srFairs -}
-    mTransRels            = [ (case srWin of 
+    mTransRels            = [ {- (case srWin of 
                                     Just True  -> "trel_win" 
                                     Just False -> "trel_lose" 
                                     Nothing    -> "trel", 
-                               mkTRel sr)
-                            --, ("trel"                           , srTran)
+                               mkTRel sr)-}
+                              ("trel"                           , srTran)
                             --, ("c-c"                            , srCMinusC)
                             --, ("c+c"                            , srCPlusC)
                             --, ("c-u"                            , srCMinusU)

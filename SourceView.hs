@@ -1219,20 +1219,18 @@ ppContAction inspec iid (ActCall methiid t as) = do
 transitionToAction :: F.Spec -> F.Spec -> Spec -> Store -> Maybe ContAction
 transitionToAction inspec flatspec spec cnstate = do
     let ?spec = inspec
-    let tag = storeEvalEnum cnstate mkTagVar
-    if tag == mkTagIdle
-       then if not $ storeEvalBool cnstate mkMagicVar
-               then return ActExit
-               else Nothing
-       else do let flatmeth = let ?spec = flatspec in fromJust $ find ((== tag) . F.sname) $ F.tmMethod tmMain
-               let (caIID, methname) = F.itreeParseName (F.Ident F.nopos tag)
-                   Just (F.ObjMethod tm caTask) = F.lookupGlobal ((F.Ident F.nopos "main"):caIID++[methname])
-               let caArgs = map (\a -> (F.sname a, let ?scope = F.ScopeTemplate tm in storeToFExpr a
-                                                   $ storeEval cnstate 
-                                                   $ (EVar $ mkVarNameS (NSID Nothing (Just flatmeth)) $ F.sname a)))
-                            $ filter ((== F.ArgIn) . F.argDir)
-                            $ F.methArg caTask
-               return ActCall{..}
+    let tag = storeEvalEnum cnstate mkTagVar 
+    (if' (tag == mkTagNone) Nothing
+     $ if' (tag == mkTagIdle) (if' (not $ storeEvalBool cnstate mkMagicVar) (return ActExit) Nothing)
+     $ do let flatmeth = let ?spec = flatspec in fromJust $ find ((== tag) . F.sname) $ F.tmMethod tmMain
+          let (caIID, methname) = F.itreeParseName (F.Ident F.nopos tag)
+              Just (F.ObjMethod tm caTask) = F.lookupGlobal ((F.Ident F.nopos "main"):caIID++[methname])
+          let caArgs = map (\a -> (F.sname a, let ?scope = F.ScopeTemplate tm in storeToFExpr a
+                                              $ storeEval cnstate 
+                                              $ (EVar $ mkVarNameS (NSID Nothing (Just flatmeth)) $ F.sname a)))
+                       $ filter ((== F.ArgIn) . F.argDir)
+                       $ F.methArg caTask
+          return ActCall{..})
 
 
 storeToFExpr :: (?spec::F.Spec, F.WithType a) => a -> Store -> F.Expr
