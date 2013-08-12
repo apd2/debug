@@ -51,6 +51,7 @@ data SynthesisRes c a = SynthesisRes { srWin           :: Maybe Bool
                                      , srGoals         :: [a]
                                      , srFairs         :: [a]
                                      , srTran          :: a
+                                     , srStateLabConstr:: a
                                      , srCPlusC        :: a
                                      , srCMinusC       :: a
                                      , srCPlusU        :: a
@@ -96,6 +97,7 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         srGoals         = map (toDdNode srCtx) goal
         srFairs         = map (toDdNode srCtx) fair
         srTran          = conj $ map (toDdNode srCtx . snd) trans
+        srStateLabConstr = toDdNode srCtx slRel
         srCMinusC       = toDdNode srCtx consistentMinusCULCont
         srCPlusC        = toDdNode srCtx consistentPlusCULCont
         srCMinusU       = toDdNode srCtx consistentMinusCULUCont
@@ -181,7 +183,7 @@ mkModel' sr@SynthesisRes{..} = model
                                     Just False -> "trel_lose" 
                                     Nothing    -> "trel", 
                                mkTRel sr)-}
-                              ("trel"                           , srTran)
+                              ("trel"                           , let ?m = srCtx in srTran .& srStateLabConstr)
                             --, ("c-c"                            , srCMinusC)
                             --, ("c+c"                            , srCPlusC)
                             --, ("c-u"                            , srCMinusU)
