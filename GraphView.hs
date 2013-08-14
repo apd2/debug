@@ -348,5 +348,5 @@ transitionAnnots gv tran = do
 transitionLabel :: (D.Rel c v a s, ?m::c) => D.RModel c a b -> a -> IO String
 transitionLabel rmodel rel = do
     lvars <- D.modelLabelVars rmodel
-    let vals = map (\(v,i) -> (v, D.valStrFromInt (D.mvarType v) i)) $ fromJust $ D.oneSatVal rel lvars
+    let vals = maybe [] (map (\(v,i) -> (v, D.valStrFromInt (D.mvarType v) i))) (D.oneSatVal rel lvars)
     return $ intercalate "," $ map (\(var,val) -> D.mvarName var ++ "=" ++ val) vals
