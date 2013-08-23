@@ -1,6 +1,6 @@
 {-# LANGUAGE ImplicitParams, RecordWildCards, ScopedTypeVariables, TupleSections #-}
 
-module SourceView(sourceViewNew, 
+module SourceView(SourceView.sourceViewNew, 
                   simulateTransition,
                   contTransToSource) where
 
@@ -14,6 +14,8 @@ import Data.IORef
 import Data.Hashable
 import qualified Data.Graph.Inductive.Graph as Graph
 import qualified Graphics.UI.Gtk            as G
+import Graphics.UI.Gtk.SourceView           as G
+
 import Control.Monad
 import Control.Monad.State
 import Control.Monad.Error
@@ -69,6 +71,7 @@ import qualified TypeOps         as F
 colorCont  = "#80c080"
 colorUCont = "#8080c0"
 fontSrc    = "Courier 10 Pitch"
+--fontSrc    = "Monospace 9 Pitch"
 --------------------------------------------------------------
 -- Types
 --------------------------------------------------------------
@@ -151,8 +154,8 @@ data SourceView c a = SourceView {
     svWatchStore     :: G.ListStore (Maybe String), -- store containing watch expressions
 
     -- Source window
-    svSourceView     :: G.TextView,
-    svSourceBuf      :: G.TextBuffer,
+    svSourceView     :: G.SourceView,
+    svSourceBuf      :: G.SourceBuffer,
     svSourceTag      :: G.TextTag,                  -- tag to mark current selection current selection
     svFileLab        :: G.Label,                    -- Status labels: file name
     svInprogLab      :: G.Label,                    --                transition in progress
@@ -163,14 +166,14 @@ data SourceView c a = SourceView {
     svAutoResolveTog :: G.CheckButton,              -- toggle auto-resolve mode button
 
     -- Action selector
-    svActSelectText  :: G.TextView,                 -- user-edited controllable action
+    svActSelectText  :: G.SourceView,                 -- user-edited controllable action
     svActSelectBAdd  :: G.Button,                   -- perform controllable action button
     svFromSrc        :: Bool                        -- executing transition from action selector
 }
 
-type RSourceView c a = IORef (SourceView c a)
+type RSourceView c a = IORef (SourceView.SourceView c a)
 
-sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel undefined"
+sourceViewEmpty = SourceView.SourceView { svModel          = error "SourceView: svModel undefined"
                              , svInputSpec      = error "SourceView: svInputSpec undefined"
                              , svFlatSpec       = error "SourceView: svFlatSpec undefined"
                              , svSpec           = error "SourceView: svSpec undefined" 
@@ -370,7 +373,7 @@ stepAction ref = do
                             updateDisplays ref
 
 -- Execute one statement
-step :: SourceView c a -> Maybe (SourceView c a)
+step :: SourceView.SourceView c a -> Maybe (SourceView.SourceView c a)
 step sv = 
     let sv0 = sv {svStackFrame = 0} in
     case microstep sv0 of
@@ -396,7 +399,7 @@ runAction ref = do
     
 
 -- run until pause or nondeterministic choice
-run :: SourceView c a -> Maybe (SourceView c a)
+run :: SourceView.SourceView c a -> Maybe (SourceView.SourceView c a)
 run sv = case step sv of
               Nothing  -> Nothing
               Just sv' -> if currentDelay sv' 
@@ -418,7 +421,7 @@ exitMagicBlock ref = do
 simulateTransition :: F.Spec -> Spec -> M.Map String AbsVar -> Store -> Store -> Maybe Store
 simulateTransition flatspec spec absvars st lab =
     let -- create enough of source view to call run
-        sv0 :: SourceView () ()
+        sv0 :: SourceView.SourceView () ()
         sv0 = sourceViewEmpty { svSpec       = spec
                               , svFlatSpec   = flatspec
                               , svAbsVars    = absvars
@@ -502,7 +505,7 @@ processSelectorChanged ref = do
            reset ref
 
 
-pidtree :: SourceView c a -> Forest PrID 
+pidtree :: SourceView.SourceView c a -> Forest PrID 
 pidtree sv = map (\p -> procTree (PrID (procName p) []) p) (specProc $ svSpec sv)
     where procTree pid p = Node { rootLabel = pid
                                 , subForest = map (\p' -> procTree (childPID pid (procName p')) p') (procChildren p)}
@@ -621,7 +624,7 @@ stackViewDisable ref = do
 -- Trace --
 
 -- indices of visible states in the trace
-svTraceVisible :: SourceView c a -> [Int]
+svTraceVisible :: SourceView.SourceView c a -> [Int]
 svTraceVisible sv = 
     filter (\i -> case locAct (getLocLabel sv i) of
                        ActNone -> False
@@ -715,12 +718,12 @@ traceViewUpdate ref = do
     G.widgetSetSensitive (svTraceCombo sv) True
 
 
-traceAppend :: SourceView c a -> Store -> ProcStack -> SourceView c a
+traceAppend :: SourceView.SourceView c a -> Store -> ProcStack -> SourceView.SourceView c a
 traceAppend sv store stack = sv {svTrace = tr, svTracePos = p}
     where tr = take (svTracePos sv + 1) (svTrace sv) ++ [TraceEntry stack store]
           p  = length tr - 1
 
-traceSetPos :: SourceView c a -> Int -> SourceView c a
+traceSetPos :: SourceView.SourceView c a -> Int -> SourceView.SourceView c a
 traceSetPos sv i | (i >= (length $ svTrace sv)) || (i < 0) = sv
                  | otherwise = sv {svTracePos = i, svStackFrame = 0}
 
@@ -760,7 +763,7 @@ watchCreate ref = do
     valrend <- G.cellRendererTextNew
     G.cellLayoutPackStart valcol valrend True
     G.cellLayoutSetAttributeFunc valcol valrend store $ 
-        (\iter -> do sv@SourceView{..} <- readIORef ref
+        (\iter -> do sv@SourceView.SourceView{..} <- readIORef ref
                      let idx = G.listStoreIterToIndex iter
                      mexp <- G.listStoreGetValue store idx
                      G.set valrend [G.cellTextMarkup G.:= Just $ G.escapeMarkup 
@@ -830,18 +833,28 @@ sourceWindowCreate ref = do
     G.widgetShow scroll
     G.boxPackStart vbox scroll G.PackGrow 0
 
-    view <- G.textViewNew
+    slm <- G.sourceLanguageManagerGetDefault
+    mlng <- G.sourceLanguageManagerGetLanguage slm "tsl"
+    lng <- case mlng of
+              Nothing -> error "Can't find TSL Language Definition"
+              Just x  -> return x
+
+    table <- G.textTagTableNew
+    buf <- G.sourceBufferNew (Just table)
+    table <- G.textBufferGetTagTable buf
+    tag <- G.textTagNew Nothing
+    G.textTagTableAdd table tag
+    --G.textViewSetBuffer view buf
+
+    G.sourceBufferSetLanguage buf (Just lng)
+    G.sourceBufferSetHighlightSyntax buf True
+    view <- G.sourceViewNewWithBuffer buf
     font <- G.fontDescriptionFromString fontSrc
     G.widgetModifyFont view $ Just font
     G.widgetSetSizeRequest view 600 600
     G.widgetShow view
     G.containerAdd scroll view
     G.textViewSetEditable view False
-    tag <- G.textTagNew Nothing
-    buf <- G.textBufferNew Nothing
-    table <- G.textBufferGetTagTable buf
-    G.textTagTableAdd table tag
-    G.textViewSetBuffer view buf
     -- Status bar at the bottom
     sbar <- G.hBoxNew True 0
     G.widgetShow sbar
@@ -898,7 +911,7 @@ sourceWindowDisable ref = do
     --G.labelSetText       (svContLab sv)   ""
     --G.widgetSetSensitive (svContTog sv)   False
 
-sourceClearPos :: SourceView c a -> IO ()
+sourceClearPos :: SourceView.SourceView c a -> IO ()
 sourceClearPos sv = do
     putStrLn "sourceClearPos"
     let buf   = svSourceBuf sv
@@ -907,7 +920,7 @@ sourceClearPos sv = do
        G.textBufferRemoveTag buf (svSourceTag sv) istart iend
     `catchIOError` (\_ -> return ())
 
-sourceSetPos :: SourceView c a -> F.Pos -> String -> IO ()
+sourceSetPos :: SourceView.SourceView c a -> F.Pos -> String -> IO ()
 sourceSetPos sv (from, to) color = do
     putStrLn $ "sourceSetPos " ++ show (from, to)
     let fname = sourceName from
@@ -1119,14 +1132,27 @@ actionSelectorCreate ref = do
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox
 
-    -- Text view for specifying controllable action
-    tview <- G.textViewNew
+    -- Set TSL as target language for syntax colorizer
+    slm <- G.sourceLanguageManagerGetDefault
+    mlng <- G.sourceLanguageManagerGetLanguage slm "tsl"
+    lng <- case mlng of
+              Nothing -> error "Can't find TSL Language Definition"
+              Just x  -> return x
+
+    -- Get a new SourceBuffer and enable syntax coloring
+    buf <- G.sourceBufferNew Nothing
+    G.sourceBufferSetLanguage buf (Just lng)
+    G.sourceBufferSetHighlightSyntax buf True
+    -- now get the actual view
+    tview <- G.sourceViewNewWithBuffer buf
     G.textViewSetEditable tview True
+    -- set a default font
     font <- G.fontDescriptionFromString fontSrc
     G.widgetModifyFont tview $ Just font
     G.widgetShow tview
     G.boxPackStart vbox tview G.PackGrow 0
 
+    -- Add button-box for transition button
     bbox <- G.hButtonBoxNew
     G.buttonBoxSetLayout bbox G.ButtonboxStart
     G.widgetShow bbox
@@ -1144,18 +1170,27 @@ actionSelectorCreate ref = do
     panel <- D.framePanelNew (G.toWidget vbox) "Controllable action" (return ())
     D.panelGetWidget panel
 
+
+actionSelGetAction :: (D.Rel c v a s) => RSourceView c a -> IO String
+actionSelGetAction ref = do
+    sv@SourceView.SourceView{..} <- readIORef ref
+    buf <- G.textViewGetBuffer svActSelectText
+    rawtext <- G.get buf G.textBufferText 
+    let stripws (x:xs) = if' (x == ' ') (stripws xs) (x:xs) 
+    let text = stripws rawtext
+    return text
+
 actionSelectorRun :: (D.Rel c v a s) => RSourceView c a -> IO ()
 actionSelectorRun ref = do
-    sv@SourceView{..} <- readIORef ref
-    buf <- G.textViewGetBuffer svActSelectText
-    text <- G.get buf G.textBufferText
+    sv@SourceView.SourceView{..} <- readIORef ref
+    text <- actionSelGetAction ref
     let fname = hash text
         fpath = "/tmp/" ++ show fname
     case compileControllableAction svSolver svInputSpec svFlatSpec svPID (frScope $ head $ currentStack sv) text fpath of
-         Left e    -> D.showMessage svModel G.MessageError e
-         Right cfa -> do switchToControllable ref 
-                         writeFile fpath text
-                         runControllableCFA ref cfa
+        Left e    -> D.showMessage svModel G.MessageError e
+        Right cfa -> do switchToControllable ref 
+                        writeFile fpath text
+                        runControllableCFA ref cfa
     
 switchToControllable :: (D.Rel c v a s) => RSourceView c a -> IO ()
 switchToControllable ref = do
@@ -1188,12 +1223,12 @@ actionSelectorUpdate ref = do
 
 actionSelectorDisable :: RSourceView c a -> IO ()
 actionSelectorDisable ref = do
-    SourceView{..} <- readIORef ref
+    SourceView.SourceView{..} <- readIORef ref
     G.widgetSetSensitive svActSelectBAdd False
 
 actionSelectorEnable :: RSourceView c a -> IO ()
 actionSelectorEnable ref = do
-    SourceView{..} <- readIORef ref
+    SourceView.SourceView{..} <- readIORef ref
     G.widgetSetSensitive svActSelectBAdd  True
 
 
@@ -1261,7 +1296,7 @@ valToFExpr ts               _               = error $ "valToFExpr: type " ++ sho
 -- currently active magic block
 findActiveMagicBlock :: F.Spec -> Spec -> Store -> Maybe F.IID
 findActiveMagicBlock flatspec spec st = 
-   let sv0 :: SourceView () ()
+   let sv0 :: SourceView.SourceView () ()
        sv0 = sourceViewEmpty { svSpec       = spec
                              , svFlatSpec   = flatspec
                              , svState      = D.State { sAbstract = error "findMagicBlock: sAbstract is undefined"
@@ -1288,10 +1323,10 @@ isWaitForMagicLabel _              = False
 
 -- Given a snapshot of the store at a pause location, compute
 -- process stack.
-stackFromStore :: SourceView c a -> Store -> PrID -> ProcStack
+stackFromStore :: SourceView.SourceView c a -> Store -> PrID -> ProcStack
 stackFromStore sv s pid = stackFromStore' sv s pid
 
-stackFromStore' :: SourceView c a -> Store -> PrID -> ProcStack
+stackFromStore' :: SourceView.SourceView c a -> Store -> PrID -> ProcStack
 stackFromStore' sv s pid = stackToProcStack (locStack lab)
     where cfa   = specGetCFA (svSpec sv) (EPIDProc pid)
           loc   = storeGetLoc s pid
@@ -1306,10 +1341,10 @@ stackGetEPID' epid []                                         = epid
 stackGetEPID' _    ((FrameControllable _ _ _):_)              = EPIDCont
 stackGetEPID' epid (_:s)                                      = stackGetEPID' epid s
 
-stackGetCFA :: SourceView c a -> PrID -> ProcStack -> CFA
+stackGetCFA :: SourceView.SourceView c a -> PrID -> ProcStack -> CFA
 stackGetCFA sv pid stack = stackGetCFA' sv (reverse stack) (EPIDProc pid)
 
-stackGetCFA' :: SourceView c a -> [ProcStackFrame] -> EPID -> CFA
+stackGetCFA' :: SourceView.SourceView c a -> [ProcStackFrame] -> EPID -> CFA
 stackGetCFA' sv []                              epid                                                              = specGetCFA (svSpec sv) epid
 stackGetCFA' sv ((FrameRegular _ _):s)          epid                                                              = stackGetCFA' sv s epid
 stackGetCFA' _  ((FrameControllable _ _ cfa):_) _                                                                 = cfa
@@ -1319,7 +1354,7 @@ storeGetLoc s pid = pcEnumToLoc pc
     where pcvar = EVar $ mkPCVarName pid
           pc    = maybe (mkPCEnum pid cfaInitLoc) id $ storeTryEvalEnum s pcvar
 
-isProcEnabled :: SourceView c a -> PrID -> Bool
+isProcEnabled :: SourceView.SourceView c a -> PrID -> Bool
 isProcEnabled sv pid = 
     let store = fromJust $ D.sConcrete $ svState sv
         stack = stackFromStore sv store pid
@@ -1343,7 +1378,7 @@ isProcEnabled sv pid =
                            _               -> True
 
 
-isProcInsideMagic :: SourceView c a -> PrID -> Bool
+isProcInsideMagic :: SourceView.SourceView c a -> PrID -> Bool
 isProcInsideMagic sv pid = isInsideMagicBlock lab || isFrameControllable frame 
     where
     store = fromJust $ D.sConcrete $ svState sv
@@ -1353,7 +1388,7 @@ isProcInsideMagic sv pid = isInsideMagicBlock lab || isFrameControllable frame
     cfa   = stackGetCFA sv pid stack
     lab   = cfaLocLabel loc cfa
 
-findProcInsideMagic :: SourceView c a -> Maybe PrID
+findProcInsideMagic :: SourceView.SourceView c a -> Maybe PrID
 findProcInsideMagic sv = find (isProcInsideMagic sv)
                          $ concatMap flatten $ pidtree sv
 
@@ -1408,71 +1443,71 @@ disable ref = do
 
 -- Access current location in the trace 
 
-currentCFA :: SourceView c a -> CFA
+currentCFA :: SourceView.SourceView c a -> CFA
 currentCFA sv = getCFA sv (svTracePos sv)
 
-currentLoc :: SourceView c a -> Loc
+currentLoc :: SourceView.SourceView c a -> Loc
 currentLoc sv = getLoc sv (svTracePos sv)
 
-currentLocLabel :: SourceView c a -> LocLabel
+currentLocLabel :: SourceView.SourceView c a -> LocLabel
 currentLocLabel sv = getLocLabel sv (svTracePos sv)
 
-currentDelay :: SourceView c a -> Bool
+currentDelay :: SourceView.SourceView c a -> Bool
 currentDelay sv = getDelay sv (svTracePos sv)
 
-currentStore :: SourceView c a -> Store
+currentStore :: SourceView.SourceView c a -> Store
 currentStore sv = getStore sv (svTracePos sv)
 
-modifyStore :: SourceView c a -> Int -> (Store -> Store) -> SourceView c a
+modifyStore :: SourceView.SourceView c a -> Int -> (Store -> Store) -> SourceView.SourceView c a
 modifyStore sv idx f = sv {svTrace = tr'}
     where tr     = svTrace sv
           entry  = tr !! idx
           entry' = entry {teStore = (f $ teStore entry)}
           tr'    = take idx tr ++ [entry'] ++ drop (idx+1) tr
 
-modifyCurrentStore :: SourceView c a -> (Store -> Store) -> SourceView c a
+modifyCurrentStore :: SourceView.SourceView c a -> (Store -> Store) -> SourceView.SourceView c a
 modifyCurrentStore sv f = modifyStore sv (svTracePos sv) f
 
-currentStack :: SourceView c a -> ProcStack
+currentStack :: SourceView.SourceView c a -> ProcStack
 currentStack sv = getStack sv (svTracePos sv)
 
-currentTmpExprTree :: SourceView c a -> Forest Expr
+currentTmpExprTree :: SourceView.SourceView c a -> Forest Expr
 currentTmpExprTree sv = getTmpExprTree sv (svTracePos sv)
 
-currentControllable :: SourceView c a -> Bool
+currentControllable :: SourceView.SourceView c a -> Bool
 currentControllable sv = storeEvalBool (currentStore sv) mkContVar
 
-currentMagic :: SourceView c a -> Bool
+currentMagic :: SourceView.SourceView c a -> Bool
 currentMagic sv = storeEvalBool (currentStore sv) (EVar mkMagicVarName)
 
-currentError :: SourceView c a -> Bool
+currentError :: SourceView.SourceView c a -> Bool
 currentError sv = storeEvalBool (currentStore sv) mkErrVar
 
-cfaAtFrame :: SourceView c a -> Int -> CFA
+cfaAtFrame :: SourceView.SourceView c a -> Int -> CFA
 cfaAtFrame sv frame = stackGetCFA sv (svPID sv) (drop frame $ currentStack sv)
 
 -- Access arbitrary location in the trace 
 
-getCFA :: SourceView c a -> Int -> CFA
+getCFA :: SourceView.SourceView c a -> Int -> CFA
 getCFA sv p = stackGetCFA sv (svPID sv) $ getStack sv p
 
-getLoc :: SourceView c a -> Int -> Loc
+getLoc :: SourceView.SourceView c a -> Int -> Loc
 getLoc sv p = frLoc $ head $ getStack sv p
 
-getLocLabel :: SourceView c a -> Int -> LocLabel
+getLocLabel :: SourceView.SourceView c a -> Int -> LocLabel
 getLocLabel sv p = cfaLocLabel (getLoc sv p) (getCFA sv p)
 
-getDelay :: SourceView c a -> Int -> Bool
+getDelay :: SourceView.SourceView c a -> Int -> Bool
 getDelay sv p = isDelayLabel $ getLocLabel sv p
 
-getStore :: SourceView c a -> Int -> Store
+getStore :: SourceView.SourceView c a -> Int -> Store
 getStore sv p | p >= (length $ svTrace sv) = SStruct $ M.empty
               | otherwise                  = teStore $ svTrace sv !! p
 
-getStack :: SourceView c a -> Int -> ProcStack
+getStack :: SourceView.SourceView c a -> Int -> ProcStack
 getStack sv p = teStack $ svTrace sv !! p
 
-getTmpExprTree :: SourceView c a -> Int -> Forest Expr
+getTmpExprTree :: SourceView.SourceView c a -> Int -> Forest Expr
 getTmpExprTree sv p =
     let ?spec = svSpec sv in
     let -- collect tmp variables from all transitions from the current location
@@ -1499,7 +1534,7 @@ getTmpExprTree sv p =
 -- Returns True if the step was performed successfully and
 -- False otherwise (i.e., the user did not provide values
 -- for nondeterministic arguments)
-microstep :: SourceView c a -> Maybe (SourceView c a)
+microstep :: SourceView.SourceView c a -> Maybe (SourceView.SourceView c a)
 microstep sv = 
     -- Try all transitions from the current location; choose the first successful one
     let transitions = Graph.lsuc (currentCFA sv) (currentLoc sv)
@@ -1509,7 +1544,7 @@ microstep sv =
             (store, stack):_ -> trace ("microstep': stack=" ++ showStack stack) 
                                 $ Just $ traceAppend sv store stack
 
-microstep' :: SourceView c a -> (Loc, TranLabel) -> Maybe (Store, ProcStack)
+microstep' :: SourceView.SourceView c a -> (Loc, TranLabel) -> Maybe (Store, ProcStack)
 microstep' sv (to, TranCall meth mretloc)  = -- insert new stack frame and mofify the old frame to point to return location,
                                              -- so that Return can be performed later
                                              let ?spec = svFlatSpec sv in
@@ -1536,7 +1571,7 @@ microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=
 makeTransition :: (D.Rel c v a s) => RSourceView c a -> IO ()
 makeTransition ref = do
     putStrLn "makeTransition"
-    sv@SourceView{..} <- readIORef ref
+    sv@SourceView.SourceView{..} <- readIORef ref
     model <- readIORef svModel
     let ?spec    = svSpec
         ?absvars = svAbsVars
@@ -1544,8 +1579,7 @@ makeTransition ref = do
         ?m       = D.mCtx model
     -- abstract final state
     let trans = D.abstractTransition svState (currentStore sv) 
-    trans' <- if' svFromSrc (do buf  <- G.textViewGetBuffer svActSelectText
-                                text <- G.get buf G.textBufferText
+    trans' <- if' svFromSrc (do text <- actionSelGetAction ref
                                 return $ trans{D.tranSrc = Just text})
                             (return $ trans{D.tranSrc = Just $ show svPID})
     -- add transition
@@ -1553,13 +1587,13 @@ makeTransition ref = do
 --    D.modelSelectState (svModel sv) (Just $ D.tranTo trans)
 
 
-setEPID :: EPID -> SourceView c a -> SourceView c a
+setEPID :: EPID -> SourceView.SourceView c a -> SourceView.SourceView c a
 setEPID epid sv = modifyCurrentStore sv (\s -> storeSet s mkEPIDVar (Just $ SVal $ EnumVal $ mkEPIDEnumeratorName epid))
     
-setLEPID :: EPID -> SourceView c a -> SourceView c a
+setLEPID :: EPID -> SourceView.SourceView c a -> SourceView.SourceView c a
 setLEPID epid sv = modifyCurrentStore sv (\s -> storeSet s mkEPIDLVar (Just $ SVal $ EnumVal $ mkEPIDEnumeratorName epid))
 
-maybeSetLCont :: SourceView c a -> SourceView c a
+maybeSetLCont :: SourceView.SourceView c a -> SourceView.SourceView c a
 maybeSetLCont sv | (isNothing $ storeTryEvalBool (currentStore sv) mkContLVar) = 
                    modifyCurrentStore sv (\s -> storeSet s mkContLVar $ Just $ SVal $ BoolVal False)
                  | otherwise                                                  = sv
