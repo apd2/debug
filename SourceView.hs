@@ -1603,7 +1603,7 @@ storeEvalStr :: F.Spec -> F.Spec -> Store -> Maybe PrID -> F.Scope -> String -> 
 storeEvalStr inspec flatspec store mpid sc str = do
     -- Apply all transformations that the input spec goes through to the expression:
     -- 1. parse
-    expr <- case parse (Grammar.detexpr <* eof) "" str of
+    expr <- case parse (Grammar.detexprParser <* eof) "" str of
                  Left  e  -> Left $ show e
                  Right ex -> Right ex
     let (scope, iid) = flatScopeToScope inspec sc
@@ -1639,7 +1639,7 @@ compileControllableAction solver inspec flatspec pid sc str fname = do
     -- Apply all transformations that the input spec goes through to the statement:
     -- 1. parse
     stat <- liftM (F.sSeq F.nopos)
-            $ case parse (Grammar.statements1 <* eof) fname str of
+            $ case parse (Grammar.statements1Parser <* eof) fname str of
                    Left  e  -> Left $ show e
                    Right st -> Right st
     let (scope,iid) = flatScopeToScope inspec sc
