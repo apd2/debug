@@ -411,10 +411,9 @@ run sv = case step sv of
 exitMagicBlock :: (D.Rel c v a s) => RSourceView c a -> IO ()
 exitMagicBlock ref = do
     switchToControllable ref
-    modifyIORef ref (\sv -> setEPID EPIDCont 
-                            $ modifyCurrentStore sv (\st0 -> let st1 = storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)
-                                                                 st2 = storeSet st1 mkContVar  (Just $ SVal $ BoolVal False)
-                                                             in st2))
+    modifyIORef ref (\sv -> modifyCurrentStore sv (\st0 -> let st1 = storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)
+                                                               st2 = storeSet st1 mkContVar  (Just $ SVal $ BoolVal False)
+                                                           in st2))
     makeTransition ref
 
 -- simulate transition without GUI 
@@ -431,7 +430,7 @@ simulateTransition flatspec spec absvars st lab =
                               , svTracePos   = 0
                               , svStackFrame = 0
                               }
-        pid = case parseEPIDEnumerator flatspec $ storeEvalEnum lab mkEPIDLVar of
+        pid = case parseEPIDEnumerator $ storeEvalEnum lab mkEPIDLVar of
                    EPIDProc p -> p
                    _          -> -- find process currently inside a magic block
                                  case findProcInsideMagic sv0 of 
@@ -1197,9 +1196,9 @@ switchToControllable ref = do
     sv0 <- readIORef ref
     let Just pid = findProcInsideMagic sv0
     let sv1 = modifyCurrentStore sv0 (\st0 -> storeSet st0 mkContVar (Just $ SVal $ BoolVal True))
-        sv2 = setEPID (EPIDProc pid) sv1
+        --sv2 = setEPID (EPIDProc pid) sv1
     when (not $ storeEvalBool (currentStore sv0) mkContVar) $ do
-        writeIORef ref sv2
+        writeIORef ref sv1
         makeTransition ref
 
 runControllableCFA :: RSourceView c a -> CFA -> IO ()
@@ -1364,7 +1363,7 @@ isProcEnabled sv pid =
         lab   = cfaLocLabel loc cfa
         cont  = storeEvalBool store mkContVar
     in case storeTryEvalEnum (svTmp sv) mkEPIDLVar of
-            Just e -> case parseEPIDEnumerator (svFlatSpec sv) e of
+            Just e -> case parseEPIDEnumerator e of
                            EPIDCont -> isInsideMagicBlock lab
                            epid     -> stackGetEPID pid stack == epid
             _      -> -- The process is always enabled if it is inside a magic block
@@ -1587,8 +1586,8 @@ makeTransition ref = do
 --    D.modelSelectState (svModel sv) (Just $ D.tranTo trans)
 
 
-setEPID :: EPID -> SourceView.SourceView c a -> SourceView.SourceView c a
-setEPID epid sv = modifyCurrentStore sv (\s -> storeSet s mkEPIDVar (Just $ SVal $ EnumVal $ mkEPIDEnumeratorName epid))
+--setEPID :: EPID -> SourceView.SourceView c a -> SourceView.SourceView c a
+--setEPID epid sv = modifyCurrentStore sv (\s -> storeSet s mkEPIDVar (Just $ SVal $ EnumVal $ mkEPIDEnumeratorName epid))
     
 setLEPID :: EPID -> SourceView.SourceView c a -> SourceView.SourceView c a
 setLEPID epid sv = modifyCurrentStore sv (\s -> storeSet s mkEPIDLVar (Just $ SVal $ EnumVal $ mkEPIDEnumeratorName epid))
@@ -1669,9 +1668,9 @@ compileControllableAction solver inspec flatspec pid sc str fname = do
                                                aftstat <- let ?solver = solver in F.procStatToCFA simpstat cfaInitLoc
                                                -- switch to uncontrollable state
                                                aftucont <- ctxInsTrans' aftstat $ TranStat $ mkContVar =: false
-                                               aftpid <- ctxInsTrans' aftucont $ TranStat $ mkEPIDVar =: (EConst $ EnumVal $ mkEPIDEnumeratorName EPIDCont)
+                                               --aftpid <- ctxInsTrans' aftucont $ TranStat $ mkEPIDVar =: (EConst $ EnumVal $ mkEPIDEnumeratorName EPIDCont)
                                                -- add return after the statement to pop FrameInteractive off the stack
-                                               ctxInsTrans aftpid aftret TranReturn
+                                               ctxInsTrans aftucont aftret TranReturn
                                                ) ctx
     assert (null $ ctxVar ctx') (F.pos stat) "Cannot perform non-deterministic controllable action"
     -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
