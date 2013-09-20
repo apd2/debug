@@ -48,11 +48,13 @@ data MBEpoch = MBEpoch Int [Int]
 
 mbidChild :: MBID -> Loc -> MBID
 
-data CodeWin = CodeWin { cwCode     :: Code
-                       , cwScroll   :: G.ScrolledWindow        -- top-level widget
-                       , cwFiles    :: M.Map SourceName Region -- Source files and corresponding regions
-                       , cwMBRoots  :: M.Map Pos MBDescr       -- Roots of the MB hierarchy
-                       , cwActiveMB :: Maybe MBID              -- Currently active MB
+data CodeWin = CodeWin { cwAPI       :: CwAPI
+                       , cwView      :: CwView
+                       , cwScroll    :: G.ScrolledWindow                     -- top-level widget
+                       , cwFiles     :: M.Map SourceName (Region, G.TextTag) -- Source files and corresponding regions and tags
+                       , cwMBRoots   :: M.Map Pos MBDescr                    -- Roots of the MB hierarchy
+                       , cwActiveMB  :: Maybe MBID                           -- Currently active MB
+                       , cwSelection :: Maybe (Region, G.TextTag)
                        }
 
 cwLookupMB :: CodeWin -> MBID -> Maybe MBDescr
@@ -71,7 +73,7 @@ codeWinNew spec@Spec{..} = do
     -- Source window at the top
     cwScroll <- G.scrolledWindowNew Nothing Nothing
     G.widgetShow scroll
-    cwCode <- C.codeWidgetNew "tsl" 600 600
+    Code cwAPI cwView <- C.codeWidgetNew "tsl" 600 600
     G.containerAdd cwScroll (view cwCode)
 
     ref <- newIORef $ error "codeWinNew: undefined"
@@ -79,13 +81,15 @@ codeWinNew spec@Spec{..} = do
     files = nub $ map (G.sourceName . fst)
                 $ map pos specTemplate ++ map pos specType ++ map pos specConst
     cwFiles <- liftM M.fromList 
-               $ mapM (\n -> (n, createRootRegion (api code) n)) files
+               $ mapM (\n -> do reg <- createRootRegion (api code) n
+                                tag <- regionNewTag cwAPI reg
+                                return (n, (reg, tag))) files
     cwMBRoots <- liftM M.fromList
-                 $ mapM (\pos -> do let parent = cwFiles M.! G.sourceName $ fst pos
-                                    reg <- regionCreateFrom parent pos True (editCB ref $ MBID pos [])
+                 $ mapM (\pos -> do let parent = fst $ cwFiles M.! G.sourceName $ fst pos
+                                    reg <- regionCreateFrom cwAPI parent pos True (editCB ref $ MBID pos [])
                                     return (pos, MBI $ MBIStale (Just reg) 0)) 
                  $ specFindMBs spec
-    writeIORef ref $ CodeWin{cwActiveMB = Nothing, ..}
+    writeIORef ref $ CodeWin{cwActiveMB = Nothing, cwSelection = Nothing, ..}
 
 codeWinWidget :: RCodeWin -> IO G.Widget
 codeWinWidget = getIORef cwScroll
@@ -97,11 +101,11 @@ codeWinMBEpoch :: RCodeWin -> MBID -> MBEpoch
 -- Assumes: MBID refers to an existing stale MB whose parent is active.
 codeWinMBRefresh :: RCodeWin -> MBID -> CFA -> IO ()
 codeWinMBRefresh ref mbid cfa = do
-    cw <- readIORef ref
+    cw@CodeWin{..} <- readIORef ref
     let MBI MBIStale{..} = getMB cw mbid
-    regionMakeNonEditable $ fromJust mbsRegion
+    regionMakeNonEditable cwAPI $ fromJust mbsRegion
     nested <- mapM (\loc -> do let pos = cfaGetMBPos loc
-                               reg <- regionCreateFrom mbsRegion pos True (editCB ref $ mbidChild mbid loc)
+                               reg <- regionCreateFrom cwAPI mbsRegion pos True (editCB ref $ mbidChild mbid loc)
                                return (loc, MBI $ MBIStale (Just reg) 0))
               $ cfaFindMBs cfa
     mb' = MBA $ MBActive mbsRegion mbsEpoch cfa (M.fromList nested)
@@ -123,16 +127,31 @@ codeWinMBActivate ref mbid@(MBID pos locs) = do
     CodeWin{..} <- readIORef ref
     if' (mbid == cwActiveMB)           (return ())
     $ if' (isParentOf mbid cwActiveMB) (deactivateRec ref (MBID pos (take (length locs + 1) locs')))
-    $ if' (isParentOf cwActiveMB mbid) do mapM (\ls -> activate ref (MBID pos ls)) $ drop (length locs') $ inits locs]
+    $ if' (isParentOf cwActiveMB mbid) do mapM (\ls -> activate ref (MBID pos ls)) $ drop (length locs') $ inits locs
                                           return ()
     $ do codeWinMBDeactivate ref
          mapM (\ls -> activate ref (MBID pos ls)) $ inits locs
          return ()
 
--- 
-codeWinSetSelection :: RCodeWin -> MBID -> Pos -> IO ()
+-- Select range with currently active region
+codeWinSetSelection :: RCodeWin -> Pos -> String -> IO ()
+codeWinSetSelection ref pos color = do
+    codeWinClearSelection ref
+    cw@CodeWin{..} <- readIORef ref
+    let (reg, tag) = maybe (cwFiles M.! (sourceName $ fst pos))
+                           (\mbid@(MBID (p,_) _) -> let MBA mba = cwGetMB cw mbid 
+                                                    in (mbaRegion mba, snd $ cwFiles M.! sourceName p))
+                           cwActive
+    G.set cwSelTag [G.textTagBackground G.:= color]
+    regionApplyTag cwAPI reg cwSelTag pos
+    writeIORef ref $ cw {cwSelTag = Just (reg,tag)}
 
 codeWinClearSelection :: RCodeWin -> IO ()
+codeWinClearSelection ref =
+    cw@CodeWin{..} <- readIORef ref
+    maybe (return ())
+          (\(reg, tag) -> regionRemoveTag cwAPI reg tag)
+          cwSelection
 
 editCB :: RCodeWin -> MBID -> IO ()
 editCB ref mbid = do
@@ -146,6 +165,12 @@ editCB ref mbid = do
 -- Helpers
 ----------------------------------------------------------------------
 
+--cwPosToRegion :: CodeWin -> Pos -> Region
+--cwPosToRegion cw@CodeWin{..} pos = 
+--    maybe (cwFiles M.! (sourceName $ fst pos))
+--          (\mbid -> let MBA mba = cwGetMB cw mbid in mbaRegion mba)
+--          cwActive
+
 -- deactivate active MB and, recursively, its children
 deactivateRec :: RCodeWin -> MBID -> IO ()
 deactivateRec ref mbid = do
@@ -158,31 +183,31 @@ deactivateRec ref mbid = do
 -- deactivate active MB; all children are assumed to be inactive
 deactivate :: RCodeWin -> MBID -> IO ()
 deactivate ref mbid = do
-    cw <- readIORef ref
+    cw@CodeWin{..} <- readIORef ref
     let MBA (MBActive{..}) = cwGetMB cw mbid
-    text <- regionGetText mbaRegion
+    text <- regionGetText cwAPI mbaRegion
     -- Delete nested regions and merge text into the parent
-    alltext <- regionGetAllText mbaRegion
+    alltext <- regionGetAllText cwAPI mbaRegion
     nested <- mapM (\(loc, MBI mbi) -> do let Left reg = mbiRegion mbi
-                                          text' <- regionGetAllText reg
-                                          regionDelete reg
+                                          text' <- regionGetAllText cwAPI reg
+                                          regionDelete cwAPI reg
                                           return $ (loc, mbi {mbiRegion = Right text'}))
               $ M.toList mbaNested
-    regionSetText mbaRegion alltext
-    regionMakeEditable reg
+    regionSetText cwAPI mbaRegion alltext
+    regionMakeEditable cwAPI reg
     let mb' = MBI $ MBICurrent (Left mbaRegion) mbaEpoch text mbaCFA (M.fromList nested)
     writeIORef ref $ cwSetMB cw mbid mb'
 
 -- activate inactive MB whose parent is already active
 activate :: RCodeWin -> MBID -> IO ()
 activate ref mbid = do
-    cw <- readIORef ref
+    cw@CodeWin{..} <- readIORef ref
     let MBI MBICurrent{mbiRegion=Left reg, ..} = cwGetMB cw mbid
-    regionSetText reg mbiText
-    regionMakeNonEditable reg
+    regionSetText cwAPI reg mbiText
+    regionMakeNonEditable cwAPI reg
     -- Create and populate nested regions
     nested <- mapM (\(loc, mbi) -> do let Right content = mbiRegion mbi
-                                      reg' <- regionCreate reg (cfaGetMBPos mbiCFA loc) True content (editCB ref $ mbidChild mbid loc)
+                                      reg' <- regionCreate cwAPI reg (cfaGetMBPos mbiCFA loc) True content (editCB ref $ mbidChild mbid loc)
                                       return (loc, MBI $ mbi{mbiRegion = Left reg'}))
               $ M.toList mbiNested
     writeIORef ref $ cwSetMB cw mbid 
