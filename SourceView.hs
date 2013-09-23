@@ -1184,6 +1184,22 @@ stackFromStore sv mcw SVStore{..} pid = mbst ++ stackToProcStack (locStack lab)
                           mcw
 
 mbStackToProcStack :: CodeWin -> Pos -> [MBFrame] -> [ProcStackFrame]
+mbStackToProcStack cw p fs = mbStackToProcStack [] cw (MBID p []) $ reverse fs
+
+mbStackToProcStack :: [ProcStackFrame] -> CodeWin -> MBID -> [MBFrame] -> [ProcStackFrame]
+mbStackToProcStack st0 _  _    []             = st0
+mbStackToProcStack st0 cw mbid MBFrame{..}:fs = 
+    case cwLookupMB cw mbid of
+         Nothing -> []
+         Just mb -> if mbEpoch mb == mbfEpoch
+                       then if' null fs (st' ++ st1) (mbStackToProcStack st1 cw (mbidChild mbid mbfLoc) fs)
+                            where st1 = FrameMagic sc mbfLoc : st0 
+                                  -- compute CFA stack for the innermost MB
+                                  cfa = mbCFA mb
+                                  lab = cfaLocLabel mbfLoc cfa
+                                  st' = stackToProcStack (locStack lab)
+                                  sc  = frScope $ head st'
+                       else []
 
 ---- Truncate stale frame in MB stack
 --mbStackTruncate :: CodeWin -> Pos -> [MBFrame] -> [MBFrame]
