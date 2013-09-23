@@ -58,7 +58,7 @@ data SynthesisRes c a = SynthesisRes { srWin           :: Maybe Bool
                                      , srCMinusU       :: a
                                      }
 
-mkSynthesisRes :: I.Spec -> STDdManager s u -> (Maybe Bool, RefineInfo s u AbsVar AbsVar) -> ResourceT (DDNode s u) (ST s) (SynthesisRes DdManager DdNode) 
+mkSynthesisRes :: I.Spec -> STDdManager s u -> (Maybe Bool, RefineInfo s u AbsVar AbsVar String) -> ResourceT (DDNode s u) (ST s) (SynthesisRes DdManager DdNode) 
 mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
     let ?spec = spec 
         ?m    = toDdManager m
@@ -96,7 +96,7 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         srInit          = toDdNode srCtx init
         srGoals         = map (toDdNode srCtx) goal
         srFairs         = map (toDdNode srCtx) fair
-        srTran          = conj $ map (toDdNode srCtx . snd) trans
+        srTran          = disj $ map (conj . map ((toDdNode srCtx) . snd) . snd) trans
         srStateLabConstr = toDdNode srCtx slRel
         srCMinusC       = toDdNode srCtx consistentMinusCULCont
         srCPlusC        = toDdNode srCtx consistentPlusCULCont
