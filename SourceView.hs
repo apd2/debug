@@ -44,7 +44,7 @@ import Predicate
 import Store
 import SMTSolver
 
-import qualified CodeWidget      as C
+import CodeWin
 
 import qualified NS              as F
 import qualified Method          as F
@@ -166,8 +166,8 @@ data SourceView c a = SourceView {
     svWatchStore     :: G.ListStore (Maybe String), -- store containing watch expressions
 
     -- Code widget
-    svCode           :: C.CwAPI,                    -- code widget
-    svInprogLab      :: G.Label,                    --                transition in progress
+    svCodeWin        :: RCodeWin,                   -- code widget
+    svInprogLab      :: G.Label,                    -- transition in progress
 
     -- Resolve view
     svResolveStore   :: G.TreeStore Expr,           -- tmp variables in the scope of the current expression
@@ -176,9 +176,6 @@ data SourceView c a = SourceView {
 
     -- Action selector
     svFromSrc        :: Bool,                       -- executing transition from action selector
-
-    -- Magic block contents
-    svMB             :: M.Map Pos MBDescr
 }
 
 type RSourceView c a = IORef (SourceView c a)
@@ -209,13 +206,12 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svStackFrame     = error "SourceView: svStackFrame undefined"
                              , svWatchView      = error "SourceView: scWatchView undefined"
                              , svWatchStore     = error "SourceView: svWatchStore undefined"
-                             , svCode           = error "SourceView: svCode undefined"
+                             , svCodeWin        = error "SourceView: svCodeWin undefined"
                              , svInprogLab      = error "SourceView: svInprogLab undefined"
                              , svResolveStore   = error "SourceView: svResolveStore undefined"
                              , svAutoResolve    = True
                              , svAutoResolveTog = error "SourceView: svAutoResolveTog undefined"
                              , svFromSrc        = False
-                             , svMB             = 
                              }
 
 
@@ -442,7 +438,7 @@ simulateTransition flatspec spec absvars st lab =
                  else -- execute uncontrollable process from its current location
                       sv0 { svPID   = pid
                           , svTrace = [TraceEntry { teStore = storeUnion st lab 
-                                                  , teStack = stackFromStore sv0 st pid}]} 
+                                                  , teStack = stackFromStore sv0 Nothing st pid}]} 
         msv2 = run sv1 
         mstore2 = case msv2 of
                        Nothing  -> trace ("simulateTransition: msv2 = Nothing") Nothing
@@ -825,12 +821,11 @@ sourceWindowCreate ref = do
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox
     -- Source window at the top
-    scroll <- G.scrolledWindowNew Nothing Nothing
-    G.widgetShow scroll
-    G.boxPackStart vbox scroll G.PackGrow 0
 
-    code <- C.codeWidgetNew "tsl" 600 600
-    G.containerAdd scroll (C.view code)
+    spec <- getIORef svInputSpec ref
+    code <- C.codeWinNew spec
+    codewid <- codeWinWidget code
+    G.boxPackStart vbox codewid G.PackGrow 0
     -- Status bar at the bottom
     sbar <- G.hBoxNew True 0
     G.widgetShow sbar
@@ -840,11 +835,9 @@ sourceWindowCreate ref = do
     G.widgetShow lprog
     G.boxPackStart sbar lprog G.PackGrow 0
   
-    modifyIORef ref (\sv -> sv { svCode       = C.api code
-                               , svInprogLab  = lprog})
+    modifyIORef ref (\sv -> sv { svCodeWin   = code
+                               , svInprogLab = lprog})
 
-    -- create initial regions
-    initRegions ref
     return $ G.toWidget vbox
 
 sourceWindowUpdate :: RSourceView c a -> IO ()
@@ -873,40 +866,6 @@ sourceWindowDisable ref = do
     sourceClearPos sv
     --G.labelSetText       (svContLab sv)   ""
     --G.widgetSetSensitive (svContTog sv)   False
-
---sourceClearPos :: SourceView c a -> IO ()
---sourceClearPos sv = do
---    putStrLn "sourceClearPos"
---    let buf   = svSourceBuf sv
---    do istart <- G.textBufferGetStartIter buf
---       iend <- G.textBufferGetEndIter buf
---       G.textBufferRemoveTag buf (svSourceTag sv) istart iend
---    `catchIOError` (\_ -> return ())
-
---sourceSetPos :: SourceView c a -> F.Pos -> String -> IO ()
---sourceSetPos sv (from, to) color = do
---    putStrLn $ "sourceSetPos " ++ show (from, to)
---    let fname = sourceName from
---        buf   = svSourceBuf sv
---    do src <- readFile fname
---       G.textBufferSetText buf src
---       istart <- G.textBufferGetStartIter buf
---       iend <- G.textBufferGetEndIter buf
---       ifrom <- G.textBufferGetIterAtLineOffset buf (sourceLine from - 1) (sourceColumn from - 1)
---       ito <- G.textBufferGetIterAtLineOffset buf (sourceLine to - 1) (sourceColumn to - 1)
---       G.textBufferRemoveTag buf (svSourceTag sv) istart iend
---       G.set (svSourceTag sv) [G.textTagBackground G.:= color]
---       G.textBufferApplyTag buf (svSourceTag sv) ifrom ito
---       mark <- G.textMarkNew Nothing True
---       G.textBufferAddMark buf mark ifrom
---       _ <- G.textViewScrollToMark (svSourceView sv) mark 0.4 Nothing
---       return ()
---    `catchIOError` (\_ -> return ())
-
-initRegions :: RSourceView c a -> IO ()
-initRegions ref = do
-    
-
 
 -- Command buttons --
 commandButtonsUpdate :: RSourceView c a -> IO ()
@@ -1193,7 +1152,7 @@ findActiveMagicBlock flatspec spec st =
                              , svTracePos   = 0
                              , svStackFrame = 0
                              }
-   in (fmap (\pid -> let stack = stackFromStore sv0 st pid
+   in (fmap (\pid -> let stack = stackFromStore sv0 Nothing st pid
                          sc = frScope $ head stack
                          tm = case sc of
                                    F.ScopeProcess tm' _ -> tm'
@@ -1212,14 +1171,32 @@ isWaitForMagicLabel _              = False
 
 -- Given a snapshot of the store at a pause location, compute
 -- process stack.
-stackFromStore :: SourceView c a -> Store -> PrID -> ProcStack
-stackFromStore sv s pid = stackFromStore' sv s pid
-
-stackFromStore' :: SourceView c a -> Store -> PrID -> ProcStack
-stackFromStore' sv s pid = stackToProcStack (locStack lab)
+stackFromStore :: SourceView c a -> Maybe CodeWin -> SVStore -> PrID -> ProcStack
+stackFromStore sv mcw SVStore{..} pid = mbst ++ stackToProcStack (locStack lab)
     where cfa   = specGetCFA (svSpec sv) (EPIDProc pid)
-          loc   = storeGetLoc s pid
+          loc   = storeGetLoc sstStore pid
           lab   = cfaLocLabel loc cfa
+          mbst  = map (\MBFrame _ l -> FrameMagic sc l)
+                  $ maybe [] 
+                          case lab of
+                               ActStat (SMagic _ p _) -> mbStackToProcStack cw p sstMBStack
+                               _                      -> []
+                          mcw
+
+mbStackToProcStack :: CodeWin -> Pos -> [MBFrame] -> [ProcStackFrame]
+
+---- Truncate stale frame in MB stack
+--mbStackTruncate :: CodeWin -> Pos -> [MBFrame] -> [MBFrame]
+--mbStackTruncate cw p stack = reverse 
+--                             $ mbStackTruncate' cw (MBID p []) 
+--                             $ reverse stack
+--
+--mbStackTruncate' :: CodeWin -> MBID -> [MBFrame] -> [MBFrame]
+--mbStackTruncate' _  _    []     = []
+--mbStackTruncate' cw mbid (MBFrame{..}:fs) =
+--    maybe []
+--          (\mb -> if' (mbEpoch mb == mbfEpoch) (f:mbStackTruncate' cw (mbidChild mbid mbfLoc) fs) [])
+--          $ cwLookupMB cw mbid    
 
 -- Find out what the process is about to do (or is currently doing) based on its stack:
 -- run a normal transition, a controllable task, or a controllable transition
@@ -1246,7 +1223,7 @@ storeGetLoc s pid = pcEnumToLoc pc
 isProcEnabled :: SourceView c a -> PrID -> Bool
 isProcEnabled sv pid = 
     let store = fromJust $ D.sConcrete $ svState sv
-        stack = stackFromStore sv store pid
+        stack = stackFromStore sv Nothing store pid
         frame = head stack
         loc   = frLoc frame
         cfa   = stackGetCFA sv pid stack
@@ -1271,7 +1248,7 @@ isProcInsideMagic :: SourceView c a -> PrID -> Bool
 isProcInsideMagic sv pid = isInsideMagicBlock lab || isFrameMagic frame 
     where
     store = fromJust $ D.sConcrete $ svState sv
-    stack = stackFromStore sv store pid
+    stack = stackFromStore sv Nothing store pid
     frame = head stack
     loc   = frLoc frame
     cfa   = stackGetCFA sv pid stack
@@ -1310,8 +1287,9 @@ reset ref = do
     processSelectorUpdate ref
     
     sv1 <- readIORef ref
+    cw  <- readIORef $ svCodeWin sv1
     -- initialise trace
-    let tr = [TraceEntry { teStack = stackFromStore sv1 (fromJust $ D.sConcrete $ svState sv1) (svPID sv1)
+    let tr = [TraceEntry { teStack = stackFromStore sv1 (Just cw) (fromJust $ D.sConcrete $ svState sv1) (svPID sv1)
                          , teStore = store}]
     writeIORef ref sv1{svTrace = tr, svTracePos = 0, svStackFrame = 0, svFromSrc = False}
     updateDisplays ref

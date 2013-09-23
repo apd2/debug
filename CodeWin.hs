@@ -1,6 +1,9 @@
 {-# LANGUAGE RecordWildCards #-}
 
-module CodeWin(CodeWin,
+module CodeWin(MBDescr,
+               mbEpoch,
+               CodeWin,
+               cwLookupMB,
                codeWinNew,
                codeWinWidget,
                codeWinMBRefresh,
@@ -56,6 +59,10 @@ isMBActive :: MBDescr -> Bool
 isMBActive (MBA _) = True
 isMBActive _       = False
 
+mbEpoch :: MBDescr -> Int
+mbEpoch MBA mba = mbaEpoch mba
+mbEpoch MBI mbi = mbiEpoch mbi
+
 data MBID    = MBID Pos [Loc] deriving (Eq, Ord)
 --data MBEpoch = MBEpoch Int [Int]
 
@@ -78,14 +85,16 @@ data CodeWin = CodeWin { cwAPI       :: CwAPI
                        , cwSelection :: Maybe (Region, G.TextTag)
                        }
 
+cwLookupMB :: CodeWin -> MBID -> Maybe MBDescr
+cwLookupMB cw (MBID p ls) = lookupMB (cwMBRoots cw M.! p) ls
+
+lookupMB :: MBDescr -> [Loc] -> Maybe MBDescr
+lookupMB mb        []     = Just mb
+lookupMB (MBA mba) (l:ls) = fmap (\mb'  -> lookupMB mb'        ls) $ M.lookup l (mbaNested mba)
+lookupMB (MBI mbi) (l:ls) = fmap (\mbi' -> lookupMB (MBI mbi') ls) $ M.lookup l (mbiNested mbi)
+
 cwGetMB :: CodeWin -> MBID -> MBDescr
-cwGetMB cw (MBID p ls) = getMB (cwMBRoots cw M.! p) ls
-
-getMB :: MBDescr -> [Loc] -> MBDescr
-getMB mb [] = mb
-
-getMB (MBA mba) (l:ls) = getMB (mbaNested mba M.! l)       ls
-getMB (MBI mbi) (l:ls) = getMB (MBI $ mbiNested mbi M.! l) ls
+cwGetMB cw mbid = fromJust $ lookupMB cw mbid
 
 cwMBChildren :: CodeWin -> MBID -> [MBID]
 cwMBChildren cw mbid = map (mbidChild mbid) 
