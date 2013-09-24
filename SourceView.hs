@@ -1587,7 +1587,7 @@ makeTransition ref = do
     D.modelAddTransition svModel trans'
 
 applyExplicitUpdates :: SourceView c a -> Store
-applyExplicitUpdates sv = foldl' (\s (n, upd) -> let asn = snd $ fromJust $ find (storeEvalBool s . fst) upd
+applyExplicitUpdates sv = foldl' (\s (n, upd) -> let asn = snd $ fromJust $ find (storeEvalBool initstore . fst) upd
                                                  in storeSet s (EVar n) $ Just $ storeEval initstore asn) 
                                  (currentStore sv) (M.toList $ specUpds spec)
     where
