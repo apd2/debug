@@ -92,7 +92,7 @@ data SVStore = SVStore {
 instance D.Vals Store
 
 data ProcStackFrame = FrameRegular {frScope::F.Scope, frLoc::Loc}
-                    | FrameMagic   {frScope::F.Scope, frLoc::Loc}
+                    | FrameMagic   {frScope::F.Scope, frLoc::Loc, frCFA::CFA}
 
 isFrameMagic (FrameMagic _ _ _) = True
 isFrameMagic _                  = False
@@ -111,8 +111,15 @@ showStack = PP.render . pp
 stackToProcStack :: Stack -> ProcStack
 stackToProcStack frames = map (\(Frame sc loc) -> FrameRegular sc loc) frames
 
+-- Process stack, including magic frames
+newtype EProcStack = EProcStack ProcStack
+
+instance PP EProcStack where
+    pp (EProcStack stack) = pp stack
+
+
 data TraceEntry = TraceEntry {
-    teStack :: ProcStack,
+    teStack :: EProcStack,
     teStore :: Store
 }
 
@@ -251,7 +258,7 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
 
     -- command buttons
     butstep <- G.toolButtonNewFromStock G.stockGoForward
-    G.set butstep [G.widgetTooltipText G.:= Just "step"]
+    .set butstep [G.widgetTooltipText G.:= Just "step"]
     _ <- G.onToolButtonClicked butstep (stepAction ref)
     G.widgetShow butstep
     G.toolbarInsert tbar butstep (-1)
@@ -362,7 +369,8 @@ stepAction ref = do
     sv   <- readIORef ref
     -- sync PID
     let sv0 = maybeSetLCont $ setLEPID (stackGetEPID (svPID sv) $ currentStack sv) sv
-    let msv' = step sv0
+    (sv1, continue) <- maybeCrossMBBoundary sv0
+    let msv' = if' continue (step sv1) (Just sv1)
     when (isJust msv') $ do writeIORef ref (fromJust msv')
                             when (currentDelay $ fromJust msv') $ makeTransition ref
                             updateDisplays ref
@@ -386,7 +394,9 @@ runAction ref = do
     sv <- readIORef ref
     -- sync PID
     let sv0 = maybeSetLCont $ setLEPID (stackGetEPID (svPID sv) $ currentStack sv) sv
-    case run sv0 of
+    (sv1, continue) <- maybeCrossMBBoundary sv0
+    let msv' = if' continue (run sv1) (Just sv1)
+    case msv' of
          Nothing  -> return ()
          Just sv' -> do writeIORef ref sv'
                         when (currentDelay sv') $ makeTransition ref
@@ -438,7 +448,7 @@ simulateTransition flatspec spec absvars st lab =
                  else -- execute uncontrollable process from its current location
                       sv0 { svPID   = pid
                           , svTrace = [TraceEntry { teStore = storeUnion st lab 
-                                                  , teStack = stackFromStore sv0 Nothing st pid}]} 
+                                                  , teStack = EProcStack $ stackFromStore sv0 st pid}]} 
         msv2 = run sv1 
         mstore2 = case msv2 of
                        Nothing  -> trace ("simulateTransition: msv2 = Nothing") Nothing
@@ -519,7 +529,7 @@ processSelectorUpdate ref = do
     myTreeModelForeach store (\iter -> do sv'      <- readIORef ref
                                           path     <- G.treeModelGetPath store iter
                                           (pid, _) <- G.treeStoreGetValue store path
-                                          let en = isProcEnabled sv' pid
+                                          en       <- isProcEnabled sv' pid
                                           G.treeStoreSetValue store path (pid, en))
     miter <- G.comboBoxGetActiveIter combo
     when (isNothing miter) $ do miter' <- G.treeModelGetIter store [0]
@@ -531,8 +541,8 @@ processSelectorUpdate ref = do
 processSelectorChooseUniqueEnabled :: RSourceView c a -> IO ()
 processSelectorChooseUniqueEnabled ref = do
     sv <- readIORef ref
-    let enpids = filter (isProcEnabled sv)
-                 $ concatMap flatten $ pidtree sv
+    enpids <- filterM (isProcEnabled sv)
+              $ concatMap flatten $ pidtree sv
     when (length enpids == 1) $ processSelectorSelectPID ref (head enpids)
 
 processSelectorSelectPID :: RSourceView c a -> PrID -> IO ()
@@ -710,7 +720,7 @@ traceViewUpdate ref = do
     G.widgetSetSensitive (svTraceCombo sv) True
 
 
-traceAppend :: SourceView c a -> Store -> ProcStack -> SourceView c a
+traceAppend :: SourceView c a -> Store -> EProcStack -> SourceView c a
 traceAppend sv store stack = sv {svTrace = tr, svTracePos = p}
     where tr = take (svTracePos sv + 1) (svTrace sv) ++ [TraceEntry stack store]
           p  = length tr - 1
@@ -874,7 +884,7 @@ commandButtonsUpdate ref = do
     -- enable step and run buttons if we are not at a pause location or
     -- if we are in a pause location and the wait condition is true
     let ?spec = svSpec sv
-    let pen = isProcEnabled sv (svPID sv)
+    pen <- isProcEnabled sv (svPID sv)
     let lab = currentLocLabel sv
         en = -- current process must be enabled and ...
              case lab of
@@ -891,13 +901,13 @@ commandButtonsUpdate ref = do
               $ currentTmpExprTree sv)
     G.widgetSetSensitive (svStepButton sv)    en
     G.widgetSetSensitive (svRunButton sv)     en
-    G.widgetSetSensitive (svMagExitButton sv) $  (currentMagic sv)                       -- we're inside a magic block
-                                              && (svTracePos sv == 0)                    -- there is no transition in progress
-                                              && isInsideMagicBlock (currentLocLabel sv) -- current process is inside the MB
-    G.widgetSetSensitive (svContButton sv) $  (currentMagic sv)                       -- we're inside a magic block
-                                           && (svTracePos sv == 0)                    -- there is no transition in progress
-                                           && (not $ currentControllable sv)          -- we're in an uncontrollable state
-                                           && isInsideMagicBlock (currentLocLabel sv) -- current process is inside the MB
+    G.widgetSetSensitive (svMagExitButton sv) $  (currentMagic sv)                                  -- we're inside a magic block
+                                              && (svTracePos sv == 0)                               -- there is no transition in progress
+                                              && isControllableCode sv (svPID sv) (currentStack sv) -- current process is inside the MB
+    G.widgetSetSensitive (svContButton sv) $  (currentMagic sv)                                  -- we're inside a magic block
+                                           && (svTracePos sv == 0)                               -- there is no transition in progress
+                                           && (not $ currentControllable sv)                     -- we're in an uncontrollable state
+                                           && isControllableCode sv (svPID sv) (currentStack sv) -- current process is inside the MB
 
 commandButtonsDisable :: RSourceView c a -> IO ()
 commandButtonsDisable ref = do
@@ -1152,7 +1162,7 @@ findActiveMagicBlock flatspec spec st =
                              , svTracePos   = 0
                              , svStackFrame = 0
                              }
-   in (fmap (\pid -> let stack = stackFromStore sv0 Nothing st pid
+   in (fmap (\pid -> let stack = stackFromStore sv0 st pid
                          sc = frScope $ head stack
                          tm = case sc of
                                    F.ScopeProcess tm' _ -> tm'
@@ -1165,23 +1175,63 @@ findActiveMagicBlock flatspec spec st =
 -- Private helpers
 --------------------------------------------------------------
 
-isWaitForMagicLabel :: LocLabel -> Bool
-isWaitForMagicLabel (LPause _ _ e) = isWaitForMagic e
-isWaitForMagicLabel _              = False
+-- If we are about to enter magic block, activate it first.
+-- If we are about to exit magic block, deactivate it first.
+maybeCrossMBBoundary :: SourceView c a -> IO (SourceView c a, Bool)
+maybeCrossMBBoundary sv = do
+    let EProcStack (fr:_) = currentStack sv
+    case locAct $ currentLocLabel sv of
+         F.SMagic _ p _ -> liftM (, True) $ enterMB sv (p, currentLoc sv)
+         _              -> if isFrameMagic fr && isDeadEndLoc (currentCFA sv) (currentLoc sv)
+                              then exitMB sv p
+                              else return (sv, True)
+
+enterMB :: SourceView c a -> (Pos, Loc) -> IO (SourceView c a)
+enterMB sv@SourceView{..} (p,l) = do
+    mactive <- codeWinActiveMB svCodeWin
+    let mbid = maybe (MBID p Nothing) (\id -> mbidChild id l) mactive
+    MBI mbi <- codeWinGetMB svCodeWin mbid
+    text <- mbiGetRegionText svCodeWin mbi
+    let EProcStack frames = currentStack sv
+    if' (isMBICurrent mbi)
+        (do codeWinMBActivate svCodeWin mbid
+            return $ traceAppend sv (currentStore sv) (EProcStack $ (FrameMagic (frScope $ head frames) cfaInitLoc (mbiCFA mbi)):frames))
+        (case compileMB sv text of
+              Left err  -> do D.showMessage svModel G.MessageError err
+                              return sv
+              Right cfa -> do codeWinMBRefresh svCodeWin mbid cfa
+                              return $ traceAppend sv (currentStore sv) (EProcStack $ (FrameMagic (frScope $ head frames) cfaInitLoc cfa):frames))
+
+exitMB :: SourceView c a -> IO (SourceView c a, Bool)
+exitMB sv@SourceView{..} = do
+    Just mbid@(MBID _ ls) <- codeWinActiveMB svCodeWin
+    let EProcStack frames = currentStack sv
+        sv' = if null ls
+                 then modifyCurrentStore sv (\st0 -> storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False))
+                 else sv
+    -- pop the magic block from the stack and step to the next instruction following MB.
+    return (traceAppend sv' (currentStore sv') (EProcStack $ tail frames), True)
 
 -- Given a snapshot of the store at a pause location, compute
 -- process stack.
-stackFromStore :: SourceView c a -> Maybe CodeWin -> SVStore -> PrID -> ProcStack
-stackFromStore sv mcw SVStore{..} pid = mbst ++ stackToProcStack (locStack lab)
+stackFromStore :: SourceView c a -> SVStore -> PrID -> ProcStack
+stackFromStore sv SVStore{..} pid = mbst ++ stackToProcStack (locStack lab)
     where cfa   = specGetCFA (svSpec sv) (EPIDProc pid)
           loc   = storeGetLoc sstStore pid
           lab   = cfaLocLabel loc cfa
-          mbst  = map (\MBFrame _ l -> FrameMagic sc l)
-                  $ maybe [] 
-                          case lab of
-                               ActStat (SMagic _ p _) -> mbStackToProcStack cw p sstMBStack
-                               _                      -> []
-                          mcw
+
+-- As above, but include MB stack
+extStackFromStore :: SourceView c a -> SVStore -> PrID -> IO EProcStack
+extStackFromStore sv SVStore{..} pid = do
+    cw <- readIORef $ svCodeWin sv
+    let cfa  = specGetCFA (svSpec sv) (EPIDProc pid)
+        loc  = storeGetLoc sstStore pid
+        lab  = cfaLocLabel loc cfa
+        mbst = case lab of
+                    ActStat (SMagic _ p _) -> mbStackToProcStack cw p sstMBStack
+                    _                      -> []
+    return $ EProcStack $ mbst ++ stackToProcStack (locStack lab)
+
 
 mbStackToProcStack :: CodeWin -> Pos -> [MBFrame] -> [ProcStackFrame]
 mbStackToProcStack cw p fs = mbStackToProcStack [] cw (MBID p []) $ reverse fs
@@ -1193,7 +1243,7 @@ mbStackToProcStack st0 cw mbid MBFrame{..}:fs =
          Nothing -> []
          Just mb -> if mbEpoch mb == mbfEpoch
                        then if' null fs (st' ++ st1) (mbStackToProcStack st1 cw (mbidChild mbid mbfLoc) fs)
-                            where st1 = FrameMagic sc mbfLoc : st0 
+                            where st1 = FrameMagic sc mbfLoc cfa : st0 
                                   -- compute CFA stack for the innermost MB
                                   cfa = mbCFA mb
                                   lab = cfaLocLabel mbfLoc cfa
@@ -1201,30 +1251,17 @@ mbStackToProcStack st0 cw mbid MBFrame{..}:fs =
                                   sc  = frScope $ head st'
                        else []
 
----- Truncate stale frame in MB stack
---mbStackTruncate :: CodeWin -> Pos -> [MBFrame] -> [MBFrame]
---mbStackTruncate cw p stack = reverse 
---                             $ mbStackTruncate' cw (MBID p []) 
---                             $ reverse stack
---
---mbStackTruncate' :: CodeWin -> MBID -> [MBFrame] -> [MBFrame]
---mbStackTruncate' _  _    []     = []
---mbStackTruncate' cw mbid (MBFrame{..}:fs) =
---    maybe []
---          (\mb -> if' (mbEpoch mb == mbfEpoch) (f:mbStackTruncate' cw (mbidChild mbid mbfLoc) fs) [])
---          $ cwLookupMB cw mbid    
-
 -- Find out what the process is about to do (or is currently doing) based on its stack:
 -- run a normal transition, a controllable task, or a controllable transition
-stackGetEPID :: PrID -> ProcStack -> EPID
-stackGetEPID pid stack = stackGetEPID' (EPIDProc pid) (reverse stack) 
+stackGetEPID :: PrID -> EProcStack -> EPID
+stackGetEPID pid stack = stackGetEPID' (EPIDProc pid) (EProcStack stack)
 
 stackGetEPID' epid []                     = epid
 stackGetEPID' _    ((FrameMagic _ _ _):_) = EPIDCont
 stackGetEPID' epid (_:s)                  = stackGetEPID' epid s
 
-stackGetCFA :: SourceView c a -> PrID -> ProcStack -> CFA
-stackGetCFA sv pid stack = stackGetCFA' sv (reverse stack) (EPIDProc pid)
+stackGetCFA :: SourceView c a -> PrID -> EProcStack -> CFA
+stackGetCFA sv pid (EProcStack stack) = stackGetCFA' sv stack (EPIDProc pid)
 
 stackGetCFA' :: SourceView c a -> [ProcStackFrame] -> EPID -> CFA
 stackGetCFA' sv []                         epid = specGetCFA (svSpec sv) epid
@@ -1236,47 +1273,56 @@ storeGetLoc s pid = pcEnumToLoc pc
     where pcvar = EVar $ mkPCVarName pid
           pc    = maybe (mkPCEnum pid cfaInitLoc) id $ storeTryEvalEnum s pcvar
 
-isProcEnabled :: SourceView c a -> PrID -> Bool
-isProcEnabled sv pid = 
+-- Used to highlight enabled processes in process selector
+isProcEnabled :: SourceView c a -> PrID -> IO Bool
+isProcEnabled sv pid = do
     let store = fromJust $ D.sConcrete $ svState sv
-        stack = stackFromStore sv Nothing store pid
-        frame = head stack
+    stack@(EProcStack frames) <- extStackFromStore sv store pid
+    let frame = head frames
         loc   = frLoc frame
         cfa   = stackGetCFA sv pid stack
         lab   = cfaLocLabel loc cfa
         cont  = storeEvalBool store mkContVar
-    in case storeTryEvalEnum (svTmp sv) mkEPIDLVar of
-            Just e -> case parseEPIDEnumerator e of
-                           EPIDCont -> isInsideMagicBlock lab
-                           epid     -> stackGetEPID pid stack == epid
-            _      -> -- The process is always enabled if it is inside a magic block
-                      -- Otherwise, the process is enabled if we are in an uncontrollable 
-                      -- state and its pause condition holds
-                      if' (isInsideMagicBlock lab) True $
-                      if' cont False $
-                      case lab of
-                           LPause _ _ cond -> storeEvalBool store cond == True
-                           LFinal _ _      -> not $ null $ Graph.lsuc cfa loc
-                           _               -> True
+        cond  = case lab of
+                     LPause _ _ cond -> storeEvalBool store cond
+                     LFinal _ _      -> not $ null $ Graph.lsuc cfa loc
+                           _         -> True
+    return $  case storeTryEvalEnum (svTmp sv) mkEPIDLVar of
+                   Just e -> case parseEPIDEnumerator e of
+                                  EPIDCont -> isControllableCode stack
+                                  epid     -> stackGetEPID pid stack == epid
+                   _      -> -- If the process is running uncontrollable code, then the enabled condition is:
+                             -- !cont /\ wait_condition holds
+                             -- If the process is running controllable code, then it is enabled if its program
+                             -- counter (at the top of the stack) is either inside a magic block or at a pause
+                             -- location in a nested CFA whose wait condition is satisfied.
+                             if' (isControllableCode stack) 
+                                 (cont && (isInsideMagicBlock lab || cond))
+                                 ((not cont) && cond)
 
-
-isProcInsideMagic :: SourceView c a -> PrID -> Bool
-isProcInsideMagic sv pid = isInsideMagicBlock lab || isFrameMagic frame 
+isProcControllableCode :: SourceView c a -> PrID -> Bool
+isProcControllableCode sv pid = isControllableCode sv pid (EProcStack stack)
     where
     store = fromJust $ D.sConcrete $ svState sv
-    stack = stackFromStore sv Nothing store pid
-    frame = head stack
-    loc   = frLoc frame
-    cfa   = stackGetCFA sv pid stack
-    lab   = cfaLocLabel loc cfa
+    stack = stackFromStore sv store pid
 
 findProcInsideMagic :: SourceView c a -> Maybe PrID
-findProcInsideMagic sv = find (isProcInsideMagic sv)
+findProcInsideMagic sv = find (isProcControllableCode sv)
                          $ concatMap flatten $ pidtree sv
 
+-- True if process is running controllable code, i.e., is inside a top-level MB.
+isControllableCode :: SourceView c a -> PrID -> EProcStack -> Bool
+isControllableCode sv pid (EProcStack frames) = isInsideMagicBlock lab
+    where
+    pstack = reverse $ takeWhile (not . isFrameMagic) $ reverse frames
+    cfa    = stackGetCFA sv pid (EProcStack pstack)
+    loc    = frLoc $ head pstack
+    lab    = cfaLocLabel loc cfa
+
 isInsideMagicBlock :: LocLabel -> Bool
-isInsideMagicBlock (LPause _ _ cond) = cond == mkMagicDoneCond
-isInsideMagicBlock _                 = False
+isInsideMagicBlock lab = case locAct lab of
+                              SMagic _ _ _ -> True
+                              _            -> False                             
 
 -- update all displays
 updateDisplays :: RSourceView c a -> IO ()
@@ -1303,9 +1349,9 @@ reset ref = do
     processSelectorUpdate ref
     
     sv1 <- readIORef ref
-    cw  <- readIORef $ svCodeWin sv1
+    stack <- extStackFromStore sv1 (fromJust $ D.sConcrete $ svState sv1) (svPID sv1)
     -- initialise trace
-    let tr = [TraceEntry { teStack = stackFromStore sv1 (Just cw) (fromJust $ D.sConcrete $ svState sv1) (svPID sv1)
+    let tr = [TraceEntry { teStack = stack
                          , teStore = store}]
     writeIORef ref sv1{svTrace = tr, svTracePos = 0, svStackFrame = 0, svFromSrc = False}
     updateDisplays ref
@@ -1354,7 +1400,7 @@ modifyStore sv idx f = sv {svTrace = tr'}
 modifyCurrentStore :: SourceView c a -> (Store -> Store) -> SourceView c a
 modifyCurrentStore sv f = modifyStore sv (svTracePos sv) f
 
-currentStack :: SourceView c a -> ProcStack
+currentStack :: SourceView c a -> EProcStack
 currentStack sv = getStack sv (svTracePos sv)
 
 currentTmpExprTree :: SourceView c a -> Forest Expr
@@ -1390,7 +1436,7 @@ getStore :: SourceView c a -> Int -> Store
 getStore sv p | p >= (length $ svTrace sv) = SStruct $ M.empty
               | otherwise                  = teStore $ svTrace sv !! p
 
-getStack :: SourceView c a -> Int -> ProcStack
+getStack :: SourceView c a -> Int -> EProcStack
 getStack sv p = teStack $ svTrace sv !! p
 
 getTmpExprTree :: SourceView c a -> Int -> Forest Expr
@@ -1529,18 +1575,18 @@ storeEvalStr inspec flatspec store mpid sc str = do
     -- 6. evaluate
     return $ storeEval store iexpr
 
-compileControllableAction :: SMTSolver -> F.Spec -> F.Spec -> PrID -> F.Scope -> String -> FilePath -> Either String CFA
-compileControllableAction solver inspec flatspec pid sc str fname = do
-    trace ("compileControllableAction" ++ show pid) $ return ()
+compileMB :: SourceView -> String -> Either String CFA
+compileMB sv@SourceView{..} str = do
+    let sc = frScope $ head $ currentStack sv
     -- Apply all transformations that the input spec goes through to the statement:
     -- 1. parse
     stat <- liftM (F.sSeq F.nopos)
             $ case parse (Grammar.statements1Parser <* eof) fname str of
                    Left  e  -> Left $ show e
                    Right st -> Right st
-    let (scope,iid) = flatScopeToScope inspec sc
+    let (scope,iid) = flatScopeToScope svInputSpec sc
     -- 2. validate
-    let ?spec = inspec
+    let ?spec = svInputSpec
         ?privoverride = False
     F.validateStat scope stat
     validateControllableStat scope stat
@@ -1559,23 +1605,66 @@ compileControllableAction solver inspec flatspec pid sc str fname = do
                      , ctxGNMap   = globalNMap
                      , ctxLastVar = 0
                      , ctxVar     = []}
-        ctx' = let ?procs =[] in execState (do -- create final state and make it the return location
-                                               aftret <- ctxInsLocLab (LFinal ActNone [])
-                                               ctxPushScope sc aftret Nothing (scopeLMap (Just pid) sc)
-                                               aftstat <- let ?solver = solver in F.procStatToCFA simpstat cfaInitLoc
-                                               -- switch to uncontrollable state
-                                               aftucont <- ctxInsTrans' aftstat $ TranStat $ mkContVar =: false
-                                               -- add return after the statement to pop FrameInteractive off the stack
-                                               ctxInsTrans aftucont aftret TranReturn
-                                               ) ctx
+        ctx' = let ?procs =[] in execState (let ?solver = solver in F.procStatToCFA simpstat cfaInitLoc) ctx
     assert (null $ ctxVar ctx') (F.pos stat) "Cannot perform non-deterministic controllable action"
     -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
     let cfa   = ctxCFA ctx'
         cfar  = cfaPruneUnreachable cfa [cfaInitLoc]
-        reach = cfaReachInst cfar cfaInitLoc
-        cfa'  = cfaPrune cfar (S.insert cfaInitLoc reach)
-    assert (Graph.noNodes cfar == Graph.noNodes cfa') (F.pos stat) "Controllable action must be an instantaneous statement"
-    return $ cfaTraceFile cfa' "action" cfa'
+    return $ cfaTraceFile cfar "action" cfar
+
+-- TODO: - compile nested magic blocks differently
+--       - exit nested MB as soon as its end is reached (don
+--       t wait for the next transition)
+
+
+--
+--compileControllableAction :: SMTSolver -> F.Spec -> F.Spec -> PrID -> F.Scope -> String -> FilePath -> Either String CFA
+--compileControllableAction solver inspec flatspec pid sc str fname = do
+--    trace ("compileControllableAction" ++ show pid) $ return ()
+--    -- Apply all transformations that the input spec goes through to the statement:
+--    -- 1. parse
+--    stat <- liftM (F.sSeq F.nopos)
+--            $ case parse (Grammar.statements1Parser <* eof) fname str of
+--                   Left  e  -> Left $ show e
+--                   Right st -> Right st
+--    let (scope,iid) = flatScopeToScope inspec sc
+--    -- 2. validate
+--    let ?spec = inspec
+--        ?privoverride = False
+--    F.validateStat scope stat
+--    validateControllableStat scope stat
+--    -- 3. flatten
+--    let flatstat = F.statFlatten iid scope stat
+--    -- 4. simplify
+--    let ?spec = flatspec
+--    let (simpstat, (_, vars)) = let ?scope = sc
+--                                in runState (F.statSimplify flatstat) (0,[])
+--    assert (null vars) (F.pos stat) "Statement too complex"
+--    -- 5. inline
+--    let ctx = CFACtx { ctxEPID    = Just EPIDCont
+--                     , ctxStack   = []
+--                     , ctxCFA     = newCFA sc simpstat true
+--                     , ctxBrkLocs = []
+--                     , ctxGNMap   = globalNMap
+--                     , ctxLastVar = 0
+--                     , ctxVar     = []}
+--        ctx' = let ?procs =[] in execState (do -- create final state and make it the return location
+--                                               aftret <- ctxInsLocLab (LFinal ActNone [])
+--                                               ctxPushScope sc aftret Nothing (scopeLMap (Just pid) sc)
+--                                               aftstat <- let ?solver = solver in F.procStatToCFA simpstat cfaInitLoc
+--                                               -- switch to uncontrollable state
+--                                               aftucont <- ctxInsTrans' aftstat $ TranStat $ mkContVar =: false
+--                                               -- add return after the statement to pop FrameInteractive off the stack
+--                                               ctxInsTrans aftucont aftret TranReturn
+--                                               ) ctx
+--    assert (null $ ctxVar ctx') (F.pos stat) "Cannot perform non-deterministic controllable action"
+--    -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
+--    let cfa   = ctxCFA ctx'
+--        cfar  = cfaPruneUnreachable cfa [cfaInitLoc]
+--        reach = cfaReachInst cfar cfaInitLoc
+--        cfa'  = cfaPrune cfar (S.insert cfaInitLoc reach)
+--    assert (Graph.noNodes cfar == Graph.noNodes cfa') (F.pos stat) "Controllable action must be an instantaneous statement"
+--    return $ cfaTraceFile cfa' "action" cfa'
     
 -- Check whether statement specifies a valid controllable action:
 -- * Function, procedure, and controllable task calls only

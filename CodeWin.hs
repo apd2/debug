@@ -1,11 +1,18 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module CodeWin(MBDescr,
+               MBActive,
+               MBInactive,
+               isMBICurrent,
+               mbiGetRegionText,
                mbEpoch,
                CodeWin,
                cwLookupMB,
                codeWinNew,
                codeWinWidget,
+               codeWinActiveMB,
+               codeWinLookupMB,
+               codeWinGetMB,
                codeWinMBRefresh,
                codeWinMBDeactivate,
                codeWinMBActivate,
@@ -51,6 +58,17 @@ data MBInactive = MBICurrent { mbiRegion :: Either Region String -- contains MB 
                 | MBIStale   { mbiRegion :: Either Region String
                              , mbiEpoch  :: Int
                              }
+
+isMBICurrent :: MBInactive -> Bool
+isMBICurrent (MBICurrent _ _ _ _ _) = True
+isMBICurrent _                      = False
+
+mbiGetRegionText :: RCodeWin -> MBInactive -> String
+mbiGetRegionText ref mbi = do
+    cw <- readIORef ref
+    case mbiRegion mbi of
+         Left reg -> regionGetText (cwAPI cw) reg
+         Right s  -> return s
 
 data MBDescr = MBA MBActive
              | MBI MBInactive
@@ -141,6 +159,15 @@ codeWinNew spec@F.Spec{..} = do
 
 codeWinWidget :: RCodeWin -> IO G.Widget
 codeWinWidget = liftM G.toWidget . getIORef cwScroll
+
+codeWinActiveMB :: RCodeWin -> IO (Maybe MBID)
+codeWinActiveMB = getIORef cwActiveMB
+
+codeWinLookupMB :: RCodeWin -> MBID -> IO (Maybe MBDescr)
+codeWinLookupMB ref mbid = getIORef (\cw -> cwLookupMB cw mbid) ref
+
+codeWinGetMB :: RCodeWin -> MBID -> IO MBDescr
+codeWinGetMB ref mbid = getIORef (\cw -> cwGetMB cw mbid) ref
 
 -- Make stale MB active, creating nested MBs if necessary
 -- Assumes: MBID refers to an existing stale MB whose parent is active.
