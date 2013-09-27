@@ -49,17 +49,17 @@ scaleConcreteNode   = 0.5
 -- Types
 --------------------------------------------------------------
 
-data Edge a b = EdgeTransition {eId :: Int, eTran :: D.Transition a b}
-              | EdgeSubset     {eId :: Int}
-              | EdgeOverlap    {eId :: Int}
-              | EdgeEq         {eId :: Int}
+data Edge a b d = EdgeTransition {eId :: Int, eTran :: D.Transition a b d}
+                | EdgeSubset     {eId :: Int}
+                | EdgeOverlap    {eId :: Int}
+                | EdgeEq         {eId :: Int}
 
-type TrGraph a b = G.Gr (D.State a b) (Edge a b)
+type TrGraph a b d = G.Gr (D.State a d) (Edge a b d)
 
-data GraphView c a b = GraphView {
-    gvModel         :: D.RModel c a b,
+data GraphView c a b d = GraphView {
+    gvModel         :: D.RModel c a b d,
     gvGraphDraw     :: RGraphDraw,
-    gvGraph         :: TrGraph a b,
+    gvGraph         :: TrGraph a b d,
     gvSelectedState :: Maybe G.Node,
     gvSelectedTrans :: Maybe GEdgeId,
     gvLastEdgeId    :: GEdgeId
@@ -71,7 +71,7 @@ type RGraphView c a b = IORef (GraphView c a b)
 -- View callbacks
 --------------------------------------------------------------
 
-graphViewNew :: (D.Rel c v a s, D.Vals b) => D.RModel c a b -> IO (D.View a b)
+graphViewNew :: (D.Rel c v a s, D.Vals b) => D.RModel c a b d -> IO (D.View a b d)
 graphViewNew model = do
     draw <- graphDrawNew
     ref <- newIORef $ GraphView { gvModel         = model
@@ -98,7 +98,7 @@ graphViewNew model = do
                     , D.viewCB        = cb
                     }
 
-graphViewStateSelected :: (D.Rel c v a s, D.Vals b) => RGraphView c a b -> Maybe (D.State a b) -> IO ()
+graphViewStateSelected :: (D.Rel c v a s, D.Vals b) => RGraphView c a b d -> Maybe (D.State a b d) -> IO ()
 graphViewStateSelected ref mstate = do
     -- If selected state is equal to one of states in the graph, highlight this state
     gv <- readIORef ref
@@ -166,10 +166,10 @@ nodeRightClick ref nid = do
 -- Private functions
 --------------------------------------------------------------
 
-findState :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b -> D.State a b -> Maybe G.Node
+findState :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> D.State a d -> Maybe G.Node
 findState gv s = fmap fst $ find ((==s) . snd) $ G.labNodes $ gvGraph gv
 
-getState :: GraphView c a b -> G.Node -> D.State a b
+getState :: GraphView c a b d -> G.Node -> D.State a d
 getState gv nid = fromJust $ G.lab (gvGraph gv) nid
 
 findEdge :: GraphView c a b -> GEdgeId -> Maybe (Edge a b)
@@ -212,7 +212,7 @@ setSelectedTrans gv mid = do
          Just eid -> graphDrawSetEdgeStyle (gvGraphDraw gv) eid (transitionStyle {gcLW = gcLW transitionStyle + 2})
     return gv'
 
-findOrCreateState :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b -> Maybe G.Node -> D.State a b -> IO (G.Node, GraphView c a b)
+findOrCreateState :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> Maybe G.Node -> D.State a d -> IO (G.Node, GraphView c a b d)
 findOrCreateState gv mid s = 
     case findState gv s of
          Just sid -> return (sid, gv)
@@ -225,7 +225,7 @@ findOrCreateTransition gv fromid toid tran = do
          Just eid -> return (eid, gv)
          Nothing  -> createTransition gv fromid toid tran
 
-createState :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b -> (Double, Double) -> D.State a b -> IO (G.Node, GraphView c a b)
+createState :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> (Double, Double) -> D.State a d -> IO (G.Node, GraphView c a b d)
 createState gv coords s = do
     let rel = D.sAbstract s
         sid = (snd $ G.nodeRange (gvGraph gv)) + 1
@@ -345,7 +345,7 @@ transitionAnnots gv tran = do
     return $ GAnnotation labstr AnnotRight labelStyle
            : map (\n -> GAnnotation n AnnotLeft tranAnnotStyle) relnames
 
-transitionLabel :: (D.Rel c v a s, ?m::c) => D.RModel c a b -> a -> IO String
+transitionLabel :: (D.Rel c v a s, ?m::c) => D.RModel c a b d -> a -> IO String
 transitionLabel rmodel rel = do
     lvars <- D.modelLabelVars rmodel
     let vals = maybe [] (map (\(v,i) -> (v, D.valStrFromInt (D.mvarType v) i))) (D.oneSatVal rel lvars)

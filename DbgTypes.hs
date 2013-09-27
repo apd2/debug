@@ -116,19 +116,19 @@ valStrFromRel _ _  rel | rel .== b = "#"
 valStrFromRel x tp rel             = valStrFromInt tp $ boolArrToBitsBe $ extract x $ fromJust $ satOne rel
 
 -- View interface
-data View a b = View {
+data View a b d = View {
     viewName      :: String,
     viewDefAlign  :: IDEAlign,
     viewShow      :: IO (),
     viewHide      :: IO (),
     viewGetWidget :: IO G.Widget,
-    viewCB        :: ViewEvents a b
+    viewCB        :: ViewEvents a b d
 }
 
 -- Events sent from the debugger core to each view
-data ViewEvents a b = ViewEvents {
-     evtStateSelected      :: Maybe (State a b) -> IO (),
-     evtTransitionSelected :: Transition a b -> IO (),
+data ViewEvents a b d = ViewEvents {
+     evtStateSelected      :: Maybe (State a d) -> IO (),
+     evtTransitionSelected :: Transition a b d -> IO (),
      evtTRelUpdated        :: IO ()
 }
 
@@ -136,19 +136,19 @@ data StateCategory = StateControllable
                    | StateUncontrollable
                    | StateBoth
 
-data State a b = State {
+data State a d = State {
     sAbstract :: a,      -- abstract state
-    sConcrete :: Maybe b -- concrete state
+    sConcrete :: Maybe d -- concrete state
 }
 
-isConcreteState :: State a b -> Bool
+isConcreteState :: State a d -> Bool
 isConcreteState = isJust . sConcrete
 
 
-instance (?m::c, L.Boolean c a, Eq b) => Eq (State a b) where
+instance (?m::c, L.Boolean c a, Eq d) => Eq (State a d) where
     (==) x y = sAbstract x .== sAbstract y && sConcrete x == sConcrete y
 
-stateCategory :: (Rel c v a s, ?m::c) => Model c a b -> a -> IO StateCategory
+stateCategory :: (Rel c v a s, ?m::c) => Model c a b d -> a -> IO StateCategory
 stateCategory model rel = 
     case find ((==contRelName) . fst) (mStateRels model) of
          Nothing        -> return StateBoth
@@ -156,16 +156,16 @@ stateCategory model rel =
                            if' (rel `leq` nt cont) (return StateUncontrollable) $
                            return StateBoth
 
-data Transition a b = Transition {
-    tranFrom          :: State a b,
+data Transition a b d = Transition {
+    tranFrom          :: State a d,
     tranUntracked     :: a,
     tranAbstractLabel :: a,
     tranConcreteLabel :: Maybe b,
     tranSrc           :: Maybe String,
-    tranTo            :: State a b
+    tranTo            :: State a d
 }
 
-instance (?m::c, L.Boolean c a, Eq b) => Eq (Transition a b) where
+instance (?m::c, L.Boolean c a, Eq b, Eq d) => Eq (Transition a b d) where
     (==) x y =  tranFrom x == tranFrom y
              && tranTo x == tranTo y
              && tranUntracked x .== tranUntracked y
@@ -173,17 +173,17 @@ instance (?m::c, L.Boolean c a, Eq b) => Eq (Transition a b) where
              && tranConcreteLabel x == tranConcreteLabel y
 
 -- Project next state to current state vars
-tranTo' :: (Rel c v a s, ?m::c) => Model c a b -> Transition a b -> a
+tranTo' :: (Rel c v a s, ?m::c) => Model c a b d -> Transition a b d -> a
 tranTo' model tr = swap (mNextV model) (mStateV model) (sAbstract $ tranTo tr)
 
 -- Conjunction of state, next, label, and untracked relations
-tranRel :: (Rel c v a s, ?m::c) => Model c a b -> Transition a b -> a
+tranRel :: (Rel c v a s, ?m::c) => Model c a b d -> Transition a b d -> a
 tranRel model tr = (sAbstract $ tranFrom tr) 
                 .& (tranTo' model tr)
                 .& (tranUntracked tr)
                 .& (tranAbstractLabel tr)
 
-isConcreteTransition :: Transition a b -> Bool
+isConcreteTransition :: Transition a b d -> Bool
 isConcreteTransition Transition{..} = isConcreteState tranFrom 
                                    && isConcreteState tranTo 
                                    && isJust tranConcreteLabel
@@ -198,7 +198,7 @@ instance Eq ModelVar where
 type ModelStateVar = (String, Type, ([Int],[Int]))
 
 -- Debugger state
-data Model c a b = Model {
+data Model c a b d = Model {
     -- Static part --
     mCtx                  :: c,
 
@@ -213,83 +213,83 @@ data Model c a b = Model {
     mTransRels            :: [(String, a)],
 
     -- Callbacks
-    mConcretiseState      :: a              -> Maybe (State a b),
-    mConcretiseTransition :: Transition a b -> Maybe (Transition a b),
+    mConcretiseState      :: a                -> Maybe (State a d),
+    mConcretiseTransition :: Transition a b d -> Maybe (Transition a b d),
 
     -- Dynamic part --
-    mViews                :: [View a b],
+    mViews                :: [View a b d],
     mAutoConcretiseTrans  :: Bool,
     mConstraints          :: M.Map String a,
     mTransRel             :: a
 }
 
-mCurStateVars :: Model c a b -> [ModelVar]
+mCurStateVars :: Model c a b d -> [ModelVar]
 mCurStateVars = map (\(n,tp,(i,_)) -> ModelVar n tp i) . mStateVars
 
-mNextStateVars :: Model c a b -> [ModelVar]
+mNextStateVars :: Model c a b d -> [ModelVar]
 mNextStateVars = map (\(n,tp,(_,i)) -> ModelVar n tp i) . mStateVars
 
 mvarToVS :: (Rel c v a s, ?m::c) => ModelVar -> v
 mvarToVS = idxToVS . mvarIdx
 
-mStateV, mNextV, mUntrackedV, mLabelV, mInitV :: (Rel c v a s, ?m::c) => Model c a b -> v
+mStateV, mNextV, mUntrackedV, mLabelV, mInitV :: (Rel c v a s, ?m::c) => Model c a b d -> v
 mStateV     = idxToVS . concatMap mvarIdx . mCurStateVars
 mNextV      = idxToVS . concatMap mvarIdx . mNextStateVars
 mUntrackedV = idxToVS . concatMap mvarIdx . mUntrackedVars
 mLabelV     = idxToVS . concatMap mvarIdx . mLabelVars
 mInitV      = idxToVS . concatMap mvarIdx . mInitVars
 
-mSetConstraint :: (Rel c v a s) => Model c a b -> String -> Maybe a -> Model c a b
+mSetConstraint :: (Rel c v a s) => Model c a b d -> String -> Maybe a -> Model c a b d
 mSetConstraint m cname Nothing  = mUpdateTRel $ m {mConstraints = M.delete cname   $ mConstraints m}
 mSetConstraint m cname (Just r) = mUpdateTRel $ m {mConstraints = M.insert cname r $ mConstraints m}
 
-mUpdateTRel :: (Rel c v a s) => Model c a b -> Model c a b
+mUpdateTRel :: (Rel c v a s) => Model c a b d -> Model c a b d
 mUpdateTRel m@Model{..} = m {mTransRel = r}
     where r = let ?m = mCtx in 
               conj $ (snd $ head mTransRels) : (map snd $ M.toList mConstraints)
 
-type RModel c a b = IORef (Model c a b)
+type RModel c a b d = IORef (Model c a b d)
 
 ----------------------------------------------------------
 -- External interface
 ----------------------------------------------------------
 
 -- Querying state
-modelCtx :: RModel c a b -> IO c
+modelCtx :: RModel c a b d -> IO c
 modelCtx ref = (liftM mCtx) $ readIORef ref
 
-modelStateVars :: RModel c a b -> IO [(String, Type, ([Int],[Int]))]
+modelStateVars :: RModel c a b d -> IO [(String, Type, ([Int],[Int]))]
 modelStateVars ref = getIORef mStateVars ref
 
-modelUntrackedVars :: RModel c a b -> IO [ModelVar]
+modelUntrackedVars :: RModel c a b d -> IO [ModelVar]
 modelUntrackedVars ref = getIORef mUntrackedVars ref
 
-modelLabelVars :: RModel c a b -> IO [ModelVar]
+modelLabelVars :: RModel c a b d -> IO [ModelVar]
 modelLabelVars ref = getIORef mLabelVars ref
 
-modelInitVars :: RModel c a b -> IO [ModelVar]
+modelInitVars :: RModel c a b d -> IO [ModelVar]
 modelInitVars ref = getIORef mInitVars ref
 
-modelTransRels :: RModel c a b -> IO [(String, a)]
+modelTransRels :: RModel c a b d -> IO [(String, a)]
 modelTransRels ref = getIORef mTransRels ref
 
-modelStateRels :: RModel c a b -> IO [(String, a)]
+modelStateRels :: RModel c a b d -> IO [(String, a)]
 modelStateRels ref = getIORef mStateRels ref
 
-modelConcretiseState :: RModel c a b -> a -> IO (Maybe (State a b))
+modelConcretiseState :: RModel c a b d -> a -> IO (Maybe (State a d))
 modelConcretiseState ref x = getIORef ((flip mConcretiseState) x) ref
 
-modelActiveTransRel :: RModel c a b -> IO a
+modelActiveTransRel :: RModel c a b d -> IO a
 modelActiveTransRel ref = getIORef mTransRel ref
 
 -- Actions
-modelSelectTransition :: RModel c a b -> Transition a b -> IO ()
+modelSelectTransition :: RModel c a b d -> Transition a b d -> IO ()
 modelSelectTransition ref tran = doSelectTransition ref tran False
 
-modelAddTransition :: RModel c a b -> Transition a b -> IO ()
+modelAddTransition :: RModel c a b d -> Transition a b d -> IO ()
 modelAddTransition ref tran = doSelectTransition ref tran True
 
-doSelectTransition :: RModel c a b -> Transition a b -> Bool -> IO ()
+doSelectTransition :: RModel c a b d -> Transition a b d -> Bool -> IO ()
 doSelectTransition ref tran selnext = do
    Model{..} <- readIORef ref
    let tran' = if (not $ isConcreteTransition tran) && mAutoConcretiseTrans
@@ -303,13 +303,13 @@ doSelectTransition ref tran selnext = do
 
 
 
-modelSelectState :: RModel c a b -> Maybe (State a b) -> IO ()
+modelSelectState :: RModel c a b d -> Maybe (State a d) -> IO ()
 modelSelectState ref mrel = do
    views <- modelViews ref
    _ <- mapM (\v -> (evtStateSelected $ viewCB v) mrel) views
    return ()
 
-modelSetConstraint :: (Rel c v a s) => RModel c a b -> String -> Maybe a -> IO ()
+modelSetConstraint :: (Rel c v a s) => RModel c a b d -> String -> Maybe a -> IO ()
 modelSetConstraint ref cname crel = do 
     modifyIORef ref $ \m -> mSetConstraint m cname crel
     views <- modelViews ref
@@ -338,7 +338,7 @@ oneSatVal rel vars = do
     return $ map (\v -> (v, boolArrToBitsBe $ extract (mvarToVS v) asn)) $ nub supvars
 
 -- Message boxes
-showMessage :: RModel c a b -> G.MessageType -> String -> IO ()
+showMessage :: RModel c a b d -> G.MessageType -> String -> IO ()
 showMessage _ mtype mtext = do
     dialog <- G.messageDialogNew Nothing [G.DialogModal] mtype G.ButtonsOk mtext
     _ <- G.onResponse dialog (\_ -> G.widgetDestroy dialog)
@@ -348,7 +348,7 @@ showMessage _ mtype mtext = do
 -- Debugging
 ----------------------------------------------------------
 
-mDumpIndices :: Model c a b -> String
+mDumpIndices :: Model c a b d -> String
 mDumpIndices m =
     intercalate "\n" $
     map (\(n,_,(i,i')) -> (pad p ' ' n) ++ ": (" ++ showi i ++ "," ++ showi i' ++ ")") (mStateVars     m) ++
@@ -363,5 +363,5 @@ mDumpIndices m =
 -- Private functions
 ----------------------------------------------------------
 
-modelViews :: RModel c a b -> IO [View a b]
+modelViews :: RModel c a b d -> IO [View a b d]
 modelViews ref = (liftM mViews) $ readIORef ref

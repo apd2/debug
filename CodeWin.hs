@@ -1,12 +1,15 @@
 {-# LANGUAGE RecordWildCards #-}
 
-module CodeWin(MBDescr,
-               MBActive,
-               MBInactive,
+module CodeWin(MBID(..),
+               mbidChild,
+               MBDescr(..),
+               MBActive(..),
+               MBInactive(..),
                isMBICurrent,
                mbiGetRegionText,
                mbEpoch,
                CodeWin,
+               RCodeWin,
                cwLookupMB,
                codeWinNew,
                codeWinWidget,
@@ -63,7 +66,7 @@ isMBICurrent :: MBInactive -> Bool
 isMBICurrent (MBICurrent _ _ _ _ _) = True
 isMBICurrent _                      = False
 
-mbiGetRegionText :: RCodeWin -> MBInactive -> String
+mbiGetRegionText :: RCodeWin -> MBInactive -> IO String
 mbiGetRegionText ref mbi = do
     cw <- readIORef ref
     case mbiRegion mbi of
@@ -78,8 +81,8 @@ isMBActive (MBA _) = True
 isMBActive _       = False
 
 mbEpoch :: MBDescr -> Int
-mbEpoch MBA mba = mbaEpoch mba
-mbEpoch MBI mbi = mbiEpoch mbi
+mbEpoch (MBA mba) = mbaEpoch mba
+mbEpoch (MBI mbi) = mbiEpoch mbi
 
 data MBID    = MBID Pos [Loc] deriving (Eq, Ord)
 --data MBEpoch = MBEpoch Int [Int]
@@ -108,11 +111,11 @@ cwLookupMB cw (MBID p ls) = lookupMB (cwMBRoots cw M.! p) ls
 
 lookupMB :: MBDescr -> [Loc] -> Maybe MBDescr
 lookupMB mb        []     = Just mb
-lookupMB (MBA mba) (l:ls) = fmap (\mb'  -> lookupMB mb'        ls) $ M.lookup l (mbaNested mba)
-lookupMB (MBI mbi) (l:ls) = fmap (\mbi' -> lookupMB (MBI mbi') ls) $ M.lookup l (mbiNested mbi)
+lookupMB (MBA mba) (l:ls) = maybe Nothing (\mb'  -> lookupMB mb'        ls) $ M.lookup l (mbaNested mba)
+lookupMB (MBI mbi) (l:ls) = maybe Nothing (\mbi' -> lookupMB (MBI mbi') ls) $ M.lookup l (mbiNested mbi)
 
 cwGetMB :: CodeWin -> MBID -> MBDescr
-cwGetMB cw mbid = fromJust $ lookupMB cw mbid
+cwGetMB cw mbid = fromJust $ cwLookupMB cw mbid
 
 cwMBChildren :: CodeWin -> MBID -> [MBID]
 cwMBChildren cw mbid = map (mbidChild mbid) 
@@ -206,14 +209,14 @@ codeWinMBActivate ref mbid@(MBID p locs) = do
           return ())
 
 -- Select range within currently active region
-codeWinSetSelection :: RCodeWin -> Pos -> String -> IO ()
-codeWinSetSelection ref p color = do
+codeWinSetSelection :: RCodeWin -> Maybe MBID -> Pos -> String -> IO ()
+codeWinSetSelection ref mmbid p color = do
     codeWinClearSelection ref
     cw@CodeWin{..} <- readIORef ref
     let (reg, tag) = maybe (cwFiles M.! (sourceName $ fst p))
                            (\mbid@(MBID (p',_) _) -> let MBA mba = cwGetMB cw mbid 
                                                      in (mbaRegion mba, snd $ cwFiles M.! sourceName p'))
-                           cwActiveMB
+                           mmbid
     G.set tag [G.textTagBackground G.:= color]
     regionApplyTag cwAPI reg tag p
     writeIORef ref $ cw {cwSelection = Just (reg,tag)}

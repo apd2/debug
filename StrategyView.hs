@@ -26,8 +26,8 @@ data Strategy a = Strategy {
     stratRel   :: [[a]]
 }
 
-data StrategyView c a b = StrategyView {
-    svModel          :: D.RModel c a b,
+data StrategyView c a b d = StrategyView {
+    svModel          :: D.RModel c a b d,
     svStrat          :: Strategy a,
     svEnBut          :: G.CheckButton,
     svGoalButs       :: [G.RadioButton],
@@ -35,12 +35,12 @@ data StrategyView c a b = StrategyView {
     }
 
 
-type RStrategyView c a b = IORef (StrategyView c a b)
+type RStrategyView c a b d = IORef (StrategyView c a b d)
 
 --------------------------------------------------------------
 -- View callbacks
 --------------------------------------------------------------
-strategyViewNew :: (D.Rel c v a s) => Strategy a -> D.RModel c a b -> IO (D.View a b)
+strategyViewNew :: (D.Rel c v a s) => Strategy a -> D.RModel c a b d -> IO (D.View a b d)
 strategyViewNew strat@Strategy{..} model = do
     ref <- newIORef $ StrategyView { svModel    = model
                                    , svStrat    = strat
@@ -132,7 +132,7 @@ strategyViewNew strat@Strategy{..} model = do
 -- GUI Actions
 --------------------------------------------------------------
 
-highlightActive :: (D.Rel c v a s) => RStrategyView c a b -> Maybe (D.State a b) -> IO ()
+highlightActive :: (D.Rel c v a s) => RStrategyView c a b d -> Maybe (D.State a d) -> IO ()
 highlightActive ref mst = do
     let (Just st) = mst
     StrategyView{..} <- readIORef ref
@@ -149,7 +149,7 @@ highlightActive ref mst = do
                  svFairButs
     return ()
 
-goalToggled :: (D.Rel c v a s) => RStrategyView c a b -> Int -> IO ()
+goalToggled :: (D.Rel c v a s) => RStrategyView c a b d -> Int -> IO ()
 goalToggled ref i = do
     buts <- getIORef svGoalButs ref
     on <- G.toggleButtonGetActive $ buts !! i
@@ -157,13 +157,13 @@ goalToggled ref i = do
     -- enabled button). Only react to the enabling event
     when on $ update ref
 
-fairToggled :: (D.Rel c v a s) => RStrategyView c a b -> Int -> IO ()
+fairToggled :: (D.Rel c v a s) => RStrategyView c a b d -> Int -> IO ()
 fairToggled ref i = do
     buts <- getIORef svFairButs ref
     on <- G.toggleButtonGetActive $ buts !! i
     when on $ update ref
 
-update :: (D.Rel c v a s) => RStrategyView c a b -> IO ()
+update :: (D.Rel c v a s) => RStrategyView c a b d -> IO ()
 update ref = do
     StrategyView{..} <- readIORef ref
     let Strategy{..} = svStrat
@@ -179,7 +179,7 @@ update ref = do
 -- Automatic scheduling of goals and fair regions
 --------------------------------------------------------------
 
-autoSchedule :: (D.Rel c v a s) => RStrategyView c a b -> D.State a b -> IO ()
+autoSchedule :: (D.Rel c v a s) => RStrategyView c a b d -> D.State a d -> IO ()
 autoSchedule ref st = do
     StrategyView{..} <- readIORef ref
     let Strategy{..} = svStrat

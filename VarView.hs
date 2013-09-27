@@ -11,19 +11,19 @@ import qualified IDE             as D
 import SetExplorer
 import Implicit
 
-data VarView c a b = VarView {
-    vvModel     :: D.RModel c a b,
-    vvSelection :: Maybe (Either (D.State a b) (D.Transition a b)),
+data VarView c a b d = VarView {
+    vvModel     :: D.RModel c a b d,
+    vvSelection :: Maybe (Either (D.State a d) (D.Transition a b d)),
     vvExplorer  :: RSetExplorer c a
 }
 
-vvSelectionFrom :: VarView c a b -> Maybe (D.State a b)
+vvSelectionFrom :: VarView c a b d -> Maybe (D.State a d)
 vvSelectionFrom vv = case vvSelection vv of
                           Nothing         -> Nothing
                           Just (Left s)   -> Just s
                           Just (Right tr) -> Just (D.tranFrom tr)
 
-vvSelectionTo :: VarView c a b -> Maybe (D.State a b)
+vvSelectionTo :: VarView c a b d -> Maybe (D.State a d)
 vvSelectionTo vv = case vvSelection vv of
                           Just (Right tr) -> Just (D.tranTo tr)
                           _               -> Nothing
@@ -84,18 +84,18 @@ varViewNew rmodel = do
                     , D.viewCB        = cb
                     }
 
-varViewStateSelected :: (D.Rel c v a s) => RVarView c a b -> Maybe (D.State a b) -> IO ()
+varViewStateSelected :: (D.Rel c v a s) => RVarView c a b d -> Maybe (D.State a d) -> IO ()
 varViewStateSelected ref mstate = do
     modifyIORef ref $ \vv -> vv {vvSelection = fmap Left mstate}
     update ref
 --    putStrLn $ "trel support: " ++ (show $ supportIndices trel)
 
-varViewTransitionSelected :: (D.Rel c v a s) => RVarView c a b -> D.Transition a b -> IO ()
+varViewTransitionSelected :: (D.Rel c v a s) => RVarView c a b d -> D.Transition a b d -> IO ()
 varViewTransitionSelected ref tran = do
     modifyIORef ref $ \vv -> vv {vvSelection = Just $ Right tran}
     update ref
 
-update :: (D.Rel c v a s) => RVarView c a b -> IO ()
+update :: (D.Rel c v a s) => RVarView c a b d -> IO ()
 update ref = do
     VarView{..}  <- readIORef ref
     model@D.Model{..} <- readIORef vvModel
@@ -111,7 +111,7 @@ update ref = do
 -- Private functions
 ---------------------------------------------------------------------
 
-executeTransition :: (D.Rel c v a s, ?m::c) => RVarView c a b -> IO ()
+executeTransition :: (D.Rel c v a s, ?m::c) => RVarView c a b d -> IO ()
 executeTransition ref = do
     vv@VarView{..} <- readIORef ref
     [from, untracked, label, to] <- setExplorerGetVarAssignment vvExplorer 
