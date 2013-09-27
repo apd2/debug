@@ -11,7 +11,6 @@ import qualified Data.Map as M
 import Data.List
 import Data.Maybe
 import Control.Monad.ST
-import Control.Monad.Trans
 
 import Util
 import Cudd
@@ -24,15 +23,16 @@ import CuddSymTab
 import Predicate
 import Store
 import SMTSolver
-import qualified Spec          as F
-import qualified ISpec         as I
-import qualified TranSpec      as I
-import qualified IType         as I
-import qualified DbgTypes      as D
-import qualified DbgConcretise as D
-import qualified DbgAbstract   as D
-import qualified StrategyView  as D
-import qualified SourceView    as D
+import qualified Spec            as F
+import qualified ISpec           as I
+import qualified TranSpec        as I
+import qualified IType           as I
+import qualified DbgTypes        as D
+import qualified DbgConcretise   as D
+import qualified DbgAbstract     as D
+import qualified StrategyView    as D
+import qualified SourceView      as D
+import qualified SourceViewTypes as D
 import Resource hiding (trace,d)
 
 instance D.Rel DdManager VarData DdNode [[SatBit]]
@@ -159,14 +159,14 @@ mkModel :: F.Spec ->
            I.Spec -> 
            SMTSolver -> 
            SynthesisRes DdManager DdNode ->
-           D.Model DdManager DdNode Store
+           D.Model DdManager DdNode Store D.SVStore
 mkModel inspec flatspec spec solver sr = let ?spec     = spec 
                                              ?flatspec = flatspec
                                              ?inspec   = inspec
                                              ?solver   = solver
                                          in mkModel' sr
 
-mkModel' :: (?inspec::F.Spec, ?flatspec::F.Spec, ?spec::I.Spec, ?solver::SMTSolver) => SynthesisRes DdManager DdNode -> D.Model DdManager DdNode Store
+mkModel' :: (?inspec::F.Spec, ?flatspec::F.Spec, ?spec::I.Spec, ?solver::SMTSolver) => SynthesisRes DdManager DdNode -> D.Model DdManager DdNode Store D.SVStore
 mkModel' sr@SynthesisRes{..} = model
     where
     mCtx                  = srCtx
@@ -201,21 +201,21 @@ mkModel' sr@SynthesisRes{..} = model
 
     model = D.Model{..}
 
-    concretiseS :: DdNode -> Maybe (D.State DdNode Store)
+    concretiseS :: DdNode -> Maybe (D.State DdNode D.SVStore)
     concretiseS d =
         let ?m       = mCtx
             ?model   = model
             ?absvars = srAbsVars
         in D.concretiseState d
 
-    concretiseT :: D.Transition DdNode Store -> Maybe (D.Transition DdNode Store)
+    concretiseT :: D.Transition DdNode Store D.SVStore-> Maybe (D.Transition DdNode Store D.SVStore)
     concretiseT D.Transition{..} | D.isConcreteState tranFrom = do
         let ?m       = mCtx
             ?model   = model
             ?absvars = srAbsVars
         cstate <- D.sConcrete tranFrom
-        cnext  <- D.concretiseTransition cstate tranAbstractLabel
-        let tr' = D.abstractTransition tranFrom cnext
+        cnext  <- D.concretiseTransition (D.sstStore cstate) tranAbstractLabel
+        let tr' = D.abstractTransition tranFrom cnext []
         let msrc = D.contTransToSource ?inspec ?flatspec ?spec tr'
         return tr'{D.tranSrc = msrc}
 --        if ((D.sAbstract $ D.tranTo tr') .-> (D.sAbstract tranTo)) .== t

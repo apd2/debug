@@ -15,8 +15,9 @@ import Debug.Trace
 import Store
 import SMTSolver
 import Predicate
-import qualified DbgTypes    as D
-import qualified SourceView  as D
+import qualified DbgTypes        as D
+import qualified SourceView      as D
+import qualified SourceViewTypes as D
 import Implicit
 import BFormula
 import qualified Spec        as F
@@ -24,7 +25,6 @@ import qualified Spec        as F
 import IVar
 import ISpec
 import IExpr hiding (conj)
-import SourceViewTypes
 
 -- Input: relation over a set of abstract variables
 -- Output: a single concrete assignment or Nothing if a 
@@ -49,15 +49,15 @@ concretiseRel mvars0 rel = do
                 concretiseRel mvars rel'
          Just (Right store) -> return (qb, store)
 
-concretiseState :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store SVStore, ?absvars::M.Map String AbsVar) => a -> Maybe (D.State a Store)
+concretiseState :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store D.SVStore, ?absvars::M.Map String AbsVar) => a -> Maybe (D.State a D.SVStore)
 concretiseState rel = case concretiseRel (D.mCurStateVars ?model ++ D.mInitVars ?model) rel of
                            Nothing            -> Nothing
                            Just (rel', store) -> do rel'' <- oneCube (D.mStateV ?model) rel'
-                                                    return $ D.State rel'' (Just $ storeExtendDefaultState store)
+                                                    return $ D.State rel'' (Just $ D.SVStore (storeExtendDefaultState store) [])
 
 -- Given a concrete state and an abstract label, compute concrete label.  
 -- The abstract label is assumed to be a cube.
-concretiseLabel :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store SVStore, ?absvars::M.Map String AbsVar) => Store -> a -> Maybe Store
+concretiseLabel :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store D.SVStore, ?absvars::M.Map String AbsVar) => Store -> a -> Maybe Store
 concretiseLabel cstate alabel = do
    -- extract predicates from abstract label
    asn <- D.oneSatVal alabel (D.mCurStateVars ?model ++ D.mLabelVars ?model)
@@ -87,7 +87,7 @@ concretiseLabel cstate alabel = do
 -- * String that represents controllable action 
 --   performed by the transition in a user-readable
 --   way
-concretiseTransition :: (D.Rel c v a s, ?flatspec::F.Spec, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store SVStore, ?absvars::M.Map String AbsVar) => Store -> a -> Maybe Store
+concretiseTransition :: (D.Rel c v a s, ?flatspec::F.Spec, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store D.SVStore, ?absvars::M.Map String AbsVar) => Store -> a -> Maybe Store
 concretiseTransition cstate alabel = do
     -- concretise label
     clabel <- concretiseLabel cstate alabel

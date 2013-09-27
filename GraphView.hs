@@ -65,13 +65,13 @@ data GraphView c a b d = GraphView {
     gvLastEdgeId    :: GEdgeId
 }
 
-type RGraphView c a b = IORef (GraphView c a b)
+type RGraphView c a b d = IORef (GraphView c a b d)
 
 --------------------------------------------------------------
 -- View callbacks
 --------------------------------------------------------------
 
-graphViewNew :: (D.Rel c v a s, D.Vals b) => D.RModel c a b d -> IO (D.View a b d)
+graphViewNew :: (D.Rel c v a s, D.Vals b, D.Vals d) => D.RModel c a b d -> IO (D.View a b d)
 graphViewNew model = do
     draw <- graphDrawNew
     ref <- newIORef $ GraphView { gvModel         = model
@@ -98,7 +98,7 @@ graphViewNew model = do
                     , D.viewCB        = cb
                     }
 
-graphViewStateSelected :: (D.Rel c v a s, D.Vals b) => RGraphView c a b d -> Maybe (D.State a b d) -> IO ()
+graphViewStateSelected :: (D.Rel c v a s, D.Vals b, D.Vals d) => RGraphView c a b d -> Maybe (D.State a d) -> IO ()
 graphViewStateSelected ref mstate = do
     -- If selected state is equal to one of states in the graph, highlight this state
     gv <- readIORef ref
@@ -111,7 +111,7 @@ graphViewStateSelected ref mstate = do
     gv2 <- setSelectedTrans gv1 Nothing
     writeIORef ref gv2
 
-graphViewTransitionSelected :: (D.Rel c v a s, D.Vals b) => RGraphView c a b -> D.Transition a b -> IO ()
+graphViewTransitionSelected :: (D.Rel c v a s, D.Vals b, D.Vals d) => RGraphView c a b d -> D.Transition a b d -> IO ()
 graphViewTransitionSelected ref tran = do
     gv <- readIORef ref
     model <- readIORef $ gvModel gv
@@ -130,19 +130,19 @@ graphViewTransitionSelected ref tran = do
 -- GraphDraw callbacks
 --------------------------------------------------------------
 
-edgeLeftClick :: RGraphView c a b -> (Int, Int, GEdgeId) -> IO ()
+edgeLeftClick :: RGraphView c a b d -> (Int, Int, GEdgeId) -> IO ()
 edgeLeftClick ref (_, _, eid) = do
     gv <- readIORef ref
     case findEdge gv eid of
          Just (EdgeTransition _ tran) -> D.modelSelectTransition (gvModel gv) tran
          _                            -> return ()
     
-nodeLeftClick :: RGraphView c a b -> GNodeId -> IO ()
+nodeLeftClick :: RGraphView c a b d -> GNodeId -> IO ()
 nodeLeftClick ref nid = do
     gv <- readIORef ref
     D.modelSelectState (gvModel gv) (Just $ getState gv nid)
 
-nodeRightClick :: (D.Rel c v a s, D.Vals b) => RGraphView c a b -> GNodeId -> IO ()
+nodeRightClick :: (D.Rel c v a s, D.Vals b, D.Vals d) => RGraphView c a b d -> GNodeId -> IO ()
 nodeRightClick ref nid = do
     gv <- readIORef ref
     let s = getState gv nid
@@ -166,16 +166,16 @@ nodeRightClick ref nid = do
 -- Private functions
 --------------------------------------------------------------
 
-findState :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> D.State a d -> Maybe G.Node
+findState :: (D.Rel c v a s, D.Vals d, ?m::c) => GraphView c a b d -> D.State a d -> Maybe G.Node
 findState gv s = fmap fst $ find ((==s) . snd) $ G.labNodes $ gvGraph gv
 
 getState :: GraphView c a b d -> G.Node -> D.State a d
 getState gv nid = fromJust $ G.lab (gvGraph gv) nid
 
-findEdge :: GraphView c a b -> GEdgeId -> Maybe (Edge a b)
+findEdge :: GraphView c a b d -> GEdgeId -> Maybe (Edge a b d)
 findEdge gv eid = fmap sel3 $ find ((==eid) . eId . sel3) $ G.labEdges $ gvGraph gv
 
-findTransition :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b -> G.Node -> G.Node -> D.Transition a b -> Maybe GEdgeId
+findTransition :: (D.Rel c v a s, D.Vals b, D.Vals d, ?m::c) => GraphView c a b d -> G.Node -> G.Node -> D.Transition a b d -> Maybe GEdgeId
 findTransition gv fromid toid tran = 
     fmap (\(_,_,e) -> eId e)
     $ find (\(fr,to,e) -> fr == fromid && to == toid &&
@@ -184,7 +184,7 @@ findTransition gv fromid toid tran =
                                _                      -> False) 
     $ G.labEdges $ gvGraph gv
 
-setSelectedState :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b -> Maybe G.Node -> IO (GraphView c a b)
+setSelectedState :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> Maybe G.Node -> IO (GraphView c a b d)
 setSelectedState gv mid = do
     let gv' = gv {gvSelectedState = mid}
     -- Deselect previous active node
@@ -199,7 +199,7 @@ setSelectedState gv mid = do
                         graphDrawSetNodeStyle (gvGraphDraw gv) sid style
     return gv'
 
-setSelectedTrans :: GraphView c a b -> (Maybe GEdgeId) -> IO (GraphView c a b)
+setSelectedTrans :: GraphView c a b d -> (Maybe GEdgeId) -> IO (GraphView c a b d)
 setSelectedTrans gv mid = do
     let gv' = gv {gvSelectedTrans = mid}
     -- Deselect previous active edge
@@ -212,14 +212,14 @@ setSelectedTrans gv mid = do
          Just eid -> graphDrawSetEdgeStyle (gvGraphDraw gv) eid (transitionStyle {gcLW = gcLW transitionStyle + 2})
     return gv'
 
-findOrCreateState :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> Maybe G.Node -> D.State a d -> IO (G.Node, GraphView c a b d)
+findOrCreateState :: (D.Rel c v a s, D.Vals b, D.Vals d, ?m::c) => GraphView c a b d -> Maybe G.Node -> D.State a d -> IO (G.Node, GraphView c a b d)
 findOrCreateState gv mid s = 
     case findState gv s of
          Just sid -> return (sid, gv)
          Nothing  -> do coords <- chooseLocation gv mid
                         createState gv coords s
 
-findOrCreateTransition :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b -> G.Node -> G.Node -> D.Transition a b -> IO (GEdgeId, GraphView c a b)
+findOrCreateTransition :: (D.Rel c v a s, D.Vals b, D.Vals d, ?m::c) => GraphView c a b d -> G.Node -> G.Node -> D.Transition a b d -> IO (GEdgeId, GraphView c a b d)
 findOrCreateTransition gv fromid toid tran = do
     case findTransition gv fromid toid tran of
          Just eid -> return (eid, gv)
@@ -244,7 +244,7 @@ createState gv coords s = do
     gv3 <- foldM (\_gv sid' -> (liftM snd) $ createOverlapEdge _gv sid  sid') gv2 overlaps
     return (sid, gv3)
 
-deleteState :: RGraphView c a b -> G.Node -> IO ()
+deleteState :: RGraphView c a b d -> G.Node -> IO ()
 deleteState ref nid = do
     gv <- readIORef ref
     graphDrawDeleteNode (gvGraphDraw gv) nid
@@ -255,11 +255,11 @@ deleteState ref nid = do
                         when (isNothing $ findEdge gv' eid) $ 
                              writeIORef ref $ gv' {gvSelectedTrans = Nothing}
     if Just nid == gvSelectedState gv
-       then do modifyIORef ref $ \gv -> gv {gvSelectedState = Nothing}
+       then do modifyIORef ref $ \gv' -> gv' {gvSelectedState = Nothing}
                D.modelSelectState (gvModel gv) Nothing
        else return ()
 
-concretiseState :: (D.Rel c v a s, D.Vals b) => RGraphView c a b -> G.Node -> IO ()
+concretiseState :: (D.Rel c v a s, D.Vals b, D.Vals d) => RGraphView c a b d -> G.Node -> IO ()
 concretiseState ref nid = do
     gv <- readIORef ref
     ctx <- D.modelCtx $ gvModel gv
@@ -272,24 +272,24 @@ concretiseState ref nid = do
                        writeIORef ref gv'
                        D.modelSelectState (gvModel gv') (Just $ getState gv' nid')
 
-createTransition :: (D.Rel c v a s, ?m::c) => GraphView c a b -> G.Node -> G.Node -> D.Transition a b -> IO (GEdgeId, GraphView c a b)
+createTransition :: (D.Rel c v a s, ?m::c) => GraphView c a b d -> G.Node -> G.Node -> D.Transition a b d -> IO (GEdgeId, GraphView c a b d)
 createTransition gv fromid toid tran = do
     annots <- transitionAnnots gv tran
     createEdge gv fromid toid (\eid -> EdgeTransition {eId = eid, eTran =  tran}) annots transitionStyle EndArrow True
 
-createSubsetEdge :: GraphView c a b -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b)
+createSubsetEdge :: GraphView c a b d -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b d)
 createSubsetEdge gv fromid toid = 
     createEdge gv fromid toid EdgeSubset [] subsetStyle EndDiamond False 
 
-createEqEdge :: GraphView c a b -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b)
+createEqEdge :: GraphView c a b d -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b d)
 createEqEdge gv fromid toid = 
     createEdge gv fromid toid EdgeEq [] eqStyle EndNone False
 
-createOverlapEdge :: GraphView c a b -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b)
+createOverlapEdge :: GraphView c a b d -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b d)
 createOverlapEdge gv fromid toid = 
     createEdge gv fromid toid EdgeOverlap [] overlapStyle EndNone False
 
-createEdge :: GraphView c a b -> G.Node -> G.Node -> (GEdgeId -> Edge a b) -> [GAnnotation] -> GC -> EndStyle -> Bool -> IO (GEdgeId, GraphView c a b)
+createEdge :: GraphView c a b d -> G.Node -> G.Node -> (GEdgeId -> Edge a b d) -> [GAnnotation] -> GC -> EndStyle -> Bool -> IO (GEdgeId, GraphView c a b d)
 createEdge gv fromid toid f annots gc end visible = do
     let eid = gvLastEdgeId gv + 1
         e = f eid
@@ -298,21 +298,21 @@ createEdge gv fromid toid f annots gc end visible = do
     graphDrawInsertEdge (gvGraphDraw gv') fromid toid eid annots gc end visible
     return (eid, gv')
 
-chooseLocation :: GraphView c a b -> Maybe G.Node -> IO (Double, Double)
+chooseLocation :: GraphView c a b d -> Maybe G.Node -> IO (Double, Double)
 chooseLocation gv Nothing = chooseLocationFrom gv initLocation
 chooseLocation gv (Just sid) = do
     (parentx, parenty) <- graphDrawGetNodeCoords (gvGraphDraw gv) sid
     chooseLocationFrom gv (parentx, parenty + childYOffset)
 
 -- Find unoccupied location next to given coordinates
-chooseLocationFrom :: GraphView c a b -> (Double, Double) -> IO (Double, Double)
+chooseLocationFrom :: GraphView c a b d -> (Double, Double) -> IO (Double, Double)
 chooseLocationFrom gv (x,y) = do
     ids <- graphDrawGetNodesAtLocation (gvGraphDraw gv) (x,y)
     case ids of
          [] -> return (x,y)
          _  -> chooseLocationFrom gv (x,y+graphSearchStep)
 
-stateStyle :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b -> G.Node -> IO (GC, GC)
+stateStyle :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> G.Node -> IO (GC, GC)
 stateStyle gv sid = do
     model <- readIORef $ gvModel gv
     cat   <- D.stateCategory model $ D.sAbstract $ getState gv sid
@@ -325,7 +325,7 @@ stateStyle gv sid = do
                 then (ls{gcLW = gcLW ls + 1}, as{gcFG = map3 ((`shiftR` 1),(`shiftR` 1),(`shiftR` 1)) $ gcFG as})
                 else (ls,as)
 
-stateAnnots :: (D.Rel c v a s, ?m::c) => GraphView c a b -> a -> IO [GAnnotation]
+stateAnnots :: (D.Rel c v a s, ?m::c) => GraphView c a b d -> a -> IO [GAnnotation]
 stateAnnots gv srel = do
     staterels <- D.modelStateRels (gvModel gv)
     let supersets = map fst 
@@ -334,7 +334,7 @@ stateAnnots gv srel = do
                     $ filter ((/= D.contRelName) . fst) staterels 
     return $ map (\n -> GAnnotation n AnnotRight stateAnnotStyle) supersets
 
-transitionAnnots :: (D.Rel c v a s, ?m::c) => GraphView c a b -> D.Transition a b -> IO [GAnnotation]
+transitionAnnots :: (D.Rel c v a s, ?m::c) => GraphView c a b d -> D.Transition a b d -> IO [GAnnotation]
 transitionAnnots gv tran = do
     model <- readIORef $ gvModel gv
     let tranrels = D.mTransRels model

@@ -25,3 +25,4 @@ instance Show SVStore where
     show SVStore{..} = "SVStore:" ++ show sstStore ++ "\n  MB stack:" ++ show sstMBStack
 
 instance Vals SVStore
+instance Vals Store

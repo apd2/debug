@@ -18,43 +18,43 @@ import GraphView
 dbgDefaultWidth  = 1024
 dbgDefaultHeight = 768
 
-data Debugger a b = Debugger {
+data Debugger a b d = Debugger {
     dbgIDE      :: RIDE,
-    dbgViews    :: [DbgView a b]
+    dbgViews    :: [DbgView a b d]
 }
 
-type RDebugger a b = IORef (Debugger a b)
+type RDebugger a b d = IORef (Debugger a b d)
 
 -- State associated by the debugger with each registered view (visible or invisible)
-data DbgView a b = DbgView {
-    dbgViewView     :: View a b,
+data DbgView a b d = DbgView {
+    dbgViewView     :: View a b d,
     dbgViewPanel    :: IDEPanel,
     dbgViewVisible  :: Bool,
     dbgViewMenuItem :: G.CheckMenuItem
 }
 
 
-dbgGetIDE :: RDebugger a b -> IO RIDE
+dbgGetIDE :: RDebugger a b d -> IO RIDE
 dbgGetIDE ref = (liftM dbgIDE) $ readIORef ref
 
-dbgGetView :: RDebugger a b -> Int -> IO (DbgView a b)
+dbgGetView :: RDebugger a b d -> Int -> IO (DbgView a b d)
 dbgGetView ref idx = do
     dbg <- readIORef ref
     return $ dbgViews dbg !! idx
 
-dbgSetView :: RDebugger a b -> Int -> DbgView a b -> IO ()
+dbgSetView :: RDebugger a b d -> Int -> DbgView a b d -> IO ()
 dbgSetView ref idx view = do
     dbg <- readIORef ref
     writeIORef ref $ dbg {dbgViews = (take idx (dbgViews dbg)) ++ [view] ++ drop (idx+1) (dbgViews dbg)}
 
 -- List of available views
-viewFactories :: (Rel c v a s, Vals b) => [(RModel c a b -> IO (View a b), Bool)]
+viewFactories :: (Rel c v a s, Vals b, Vals d) => [(RModel c a b d -> IO (View a b d), Bool)]
 viewFactories = [ (varViewNew,   True)
                 , (graphViewNew, True)]
 
 
 -- GUI manager
-debugGUI :: (Rel c v a s, Vals b) => [(RModel c a b -> IO (View a b), Bool)] -> Model c a b -> IO ()
+debugGUI :: (Rel c v a s, Vals b, Vals d) => [(RModel c a b d -> IO (View a b d), Bool)] -> Model c a b d -> IO ()
 debugGUI extraFactories model = do
     let ?m = mCtx model
     let factories = viewFactories ++ extraFactories
@@ -133,7 +133,7 @@ debugGUI extraFactories model = do
     putStrLn "exiting debugger"
 
 
-dbgViewToggle :: RDebugger a b -> Int -> G.CheckMenuItem -> IO ()
+dbgViewToggle :: RDebugger a b d -> Int -> G.CheckMenuItem -> IO ()
 dbgViewToggle ref idx item = do
     active <- G.checkMenuItemGetActive item
     view <- dbgGetView ref idx
@@ -144,7 +144,7 @@ dbgViewToggle ref idx item = do
                else return ()
 
 
-dbgViewShow :: RDebugger a b -> Int  -> IO ()
+dbgViewShow :: RDebugger a b d -> Int  -> IO ()
 dbgViewShow ref idx = do
     view <- dbgGetView ref idx
     ide  <- dbgGetIDE ref
@@ -159,7 +159,7 @@ dbgViewShow ref idx = do
     viewShow $ dbgViewView view
 
 
-dbgViewHide :: RDebugger a b -> Int  -> IO ()
+dbgViewHide :: RDebugger a b d -> Int  -> IO ()
 dbgViewHide ref idx = do
     view <- dbgGetView ref idx
     viewHide $ dbgViewView view
@@ -171,7 +171,7 @@ dbgViewHide ref idx = do
 -- Callback triggered by a view when it wants to hide itself.
 -- Simply toggle the menu item to unchecked state.  Do the actual
 -- deletion in the event handler.
-dbgViewHideCB :: RDebugger a b -> Int -> IO ()
+dbgViewHideCB :: RDebugger a b d -> Int -> IO ()
 dbgViewHideCB ref idx = do
     view <- dbgGetView ref idx
     G.checkMenuItemSetActive (dbgViewMenuItem view) False

@@ -28,13 +28,13 @@ vvSelectionTo vv = case vvSelection vv of
                           Just (Right tr) -> Just (D.tranTo tr)
                           _               -> Nothing
 
-type RVarView c a b = IORef (VarView c a b)
+type RVarView c a b d = IORef (VarView c a b d)
 
 --------------------------------------------------------------
 -- View callbacks
 --------------------------------------------------------------
 
-varViewNew :: (D.Rel c v a s) => D.RModel c a b -> IO (D.View a b)
+varViewNew :: (D.Rel c v a s) => D.RModel c a b d -> IO (D.View a b d)
 varViewNew rmodel = do
     model <- readIORef rmodel
     let ?m = D.mCtx model
