@@ -853,10 +853,13 @@ sourceWindowUpdate ref = do
         loc = frLoc $ frames !! svStackFrame
         mmbid = stackGetMBID sv $ EProcStack $ drop svStackFrame frames
         color = maybe colorUCont (\_ -> colorCont) mmbid
+        -- if we called a method from inside MB, current syntactic scope
+        -- is not inside MB anymore
+        mmbid' = if' (isFrameMagic $ head frames) mmbid Nothing
     case locAct $ cfaLocLabel loc cfa of
          ActNone   -> codeWinClearSelection svCodeWin
-         ActExpr e -> codeWinSetSelection svCodeWin mmbid (F.pos e) color
-         ActStat s -> codeWinSetSelection svCodeWin mmbid (F.pos s) color
+         ActExpr e -> codeWinSetSelection svCodeWin mmbid' (F.pos e) color
+         ActStat s -> codeWinSetSelection svCodeWin mmbid' (F.pos s) color
     G.labelSetMarkup svInprogLab $ if svTracePos == 0
                                       then if currentError sv
                                               then "<span color=\"red\" weight=\"bold\">ERROR</span>"
@@ -1188,7 +1191,7 @@ enterMB sv@SourceView{..} (p,l) = do
     if' (isMBICurrent mbi)
         (do codeWinMBActivate svCodeWin mbid
             return $ traceAppend sv (currentStore sv) (EProcStack $ (FrameMagic (frScope $ head frames) cfaInitLoc (mbiCFA mbi)):frames))
-        (case compileMB sv text of
+        (case compileMB sv svPID text of
               Left e    -> do D.showMessage svModel G.MessageError e
                               return sv
               Right cfa -> do codeWinMBRefresh svCodeWin mbid cfa
@@ -1609,8 +1612,8 @@ storeEvalStr inspec flatspec store mpid sc str = do
     -- 6. evaluate
     return $ storeEval store iexpr
 
-compileMB :: SourceView c a -> String -> Either String CFA
-compileMB sv@SourceView{..} str = do
+compileMB :: SourceView c a -> PrID -> String -> Either String CFA
+compileMB sv@SourceView{..} pid str = do
     let sc = frScope $ head $ currentStackFrames sv
     -- Apply all transformations that the input spec goes through to the statement:
     -- 1. parse
@@ -1633,7 +1636,7 @@ compileMB sv@SourceView{..} str = do
     assert (null vars) (F.pos stat) "Statement too complex"
     -- 5. inline
     let ctx = CFACtx { ctxEPID    = Just EPIDCont
-                     , ctxStack   = []
+                     , ctxStack   = [(sc, error "return from magic block", Nothing, (scopeLMap (Just pid) sc))]
                      , ctxCFA     = newCFA sc simpstat true
                      , ctxBrkLocs = []
                      , ctxGNMap   = globalNMap
