@@ -142,14 +142,17 @@ codeWinNew spec@F.Spec{..} = do
     G.widgetShow cwScroll
     Code cwAPI cwView <- codeWidgetNew "tsl" 600 600
     G.containerAdd cwScroll cwView
+    G.widgetShow cwView
 
     ref <- newIORef $ error "codeWinNew: undefined"
 
     let files = nub 
                 $ map (sourceName . fst)
-                $ map pos specTemplate ++ map pos specType ++ map pos specConst
-    cwFiles <- liftM M.fromList 
+                $ map pos specTemplate ++ map pos specType ++ map pos specConst ++ concatMap (map pos . F.tmProcess) specTemplate
+    cwFiles <- trace ("codeWinNew: files=" ++ show files)
+               $ liftM M.fromList 
                $ mapM (\n -> do reg <- pageCreate cwAPI n
+                                regionEditable cwAPI reg False
                                 tag <- tagNew cwAPI reg
                                 return (n, (reg, tag))) files
     cwMBRoots <- liftM M.fromList
@@ -211,6 +214,7 @@ codeWinMBActivate ref mbid@(MBID p locs) = do
 -- Select range within currently active region
 codeWinSetSelection :: RCodeWin -> Maybe MBID -> Pos -> String -> IO ()
 codeWinSetSelection ref mmbid p color = do
+    putStrLn $ "codeWinSetSelection: p=" ++ show p 
     codeWinClearSelection ref
     cw@CodeWin{..} <- readIORef ref
     let (reg, tag) = maybe (cwFiles M.! (sourceName $ fst p))

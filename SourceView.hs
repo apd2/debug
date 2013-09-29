@@ -347,7 +347,9 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
 
 stepAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
 stepAction ref = do 
-    sv   <- readIORef ref
+    sv' <- readIORef ref
+    when (isProcControllableCode sv' (svPID sv')) $ switchToControllable ref
+    sv <- readIORef ref
     -- sync PID
     let sv0 = maybeSetLCont $ setLEPID (procGetEPID sv (svPID sv)) sv
     sv1 <- maybeEnterMB sv0
@@ -374,6 +376,8 @@ step sv =
 
 runAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
 runAction ref = do
+    sv' <- readIORef ref
+    when (isProcControllableCode sv' (svPID sv')) $ switchToControllable ref
     sv <- readIORef ref
     -- sync PID
     let sv0 = maybeSetLCont $ setLEPID (procGetEPID sv (svPID sv)) sv
@@ -877,10 +881,11 @@ commandButtonsUpdate ref = do
     pen <- isProcEnabled sv (svPID sv)
     let lab = currentLocLabel sv
         en = -- current process must be enabled and ...
-             case lab of
-                  LInst _      -> True
-                  LPause _ _ c -> pen && (storeEvalBool (currentStore sv) c == True)
-                  LFinal _ _   -> pen && (not $ null $ Graph.lsuc (currentCFA sv) (currentLoc sv))
+             pen
+--             case lab of
+--                  LInst _      -> True
+--                  LPause _ _ c -> pen && (storeEvalBool (currentStore sv) c == True)
+--                  LFinal _ _   -> pen && (not $ null $ Graph.lsuc (currentCFA sv) (currentLoc sv))
              && 
              -- ... non-determinism must be resolved
              -- (all scalar tmp variables that affect the next transition must be assigned)
@@ -1166,12 +1171,15 @@ findActiveMagicBlock flatspec spec st =
 -- If we are about to enter magic block, activate it.
 maybeEnterMB :: SourceView c a -> IO (SourceView c a)
 maybeEnterMB sv = do
-    case locAct $ currentLocLabel sv of
-         ActStat (F.SMagic _ p _) -> enterMB sv (p, currentLoc sv)
-         _                        -> return sv
+    let lab = currentLocLabel sv
+    if' (isMBLabel lab) 
+        (do let ActStat (F.SMagic _ p _) = locAct lab
+            enterMB sv (p, currentLoc sv))
+        (return sv)
 
 enterMB :: SourceView c a -> (F.Pos, Loc) -> IO (SourceView c a)
 enterMB sv@SourceView{..} (p,l) = do
+    putStrLn "enterMB"
     mactive <- codeWinActiveMB svCodeWin
     let mbid = maybe (MBID p []) (\m -> mbidChild m l) mactive
     MBI mbi <- codeWinGetMB svCodeWin mbid
@@ -1198,6 +1206,7 @@ maybeExitMB ref = do
 
 exitMB :: (D.Rel c v a s) => RSourceView c a -> IO ()
 exitMB ref = do
+    putStrLn "exitMB"
     sv0 <- readIORef ref
     Just (MBID _ ls) <- codeWinActiveMB $ svCodeWin sv0
     -- if we're about to exit an outermost MB, insert additional exit transition.
@@ -1324,7 +1333,7 @@ isProcEnabled sv pid = do
                             -- counter (at the top of the stack) is either inside a magic block or at a pause
                             -- location in a nested CFA whose wait condition is satisfied.
                             if' (isControllableCode sv pid stack) 
-                                (cont && (isInsideMagicBlock lab || cond))
+                                (cond || (isMBLabel lab))
                                 ((not cont) && cond)
 
 isProcControllableCode :: SourceView c a -> PrID -> Bool
@@ -1339,15 +1348,15 @@ findProcInsideMagic sv = find (isProcControllableCode sv)
 
 -- True if process is running controllable code, i.e., is inside a top-level MB.
 isControllableCode :: SourceView c a -> PrID -> EProcStack -> Bool
-isControllableCode sv pid (EProcStack frames) = isInsideMagicBlock lab
+isControllableCode sv pid (EProcStack frames) = isMBLabel lab
     where
     pstack = reverse $ takeWhile (not . isFrameMagic) $ reverse frames
     cfa    = stackGetCFA sv pid (EProcStack pstack)
     loc    = frLoc $ head pstack
     lab    = cfaLocLabel loc cfa
 
-isInsideMagicBlock :: LocLabel -> Bool
-isInsideMagicBlock lab = isDelayLabel lab && 
+isMBLabel :: LocLabel -> Bool
+isMBLabel lab = isDelayLabel lab && 
                          case locAct lab of
                               ActStat (F.SMagic _ _ _) -> True
                               _                        -> False                             
