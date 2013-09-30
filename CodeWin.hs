@@ -331,17 +331,17 @@ statFindMBs (F.SFor     _ _ b)     = statFindMBs b
 statFindMBs (F.SChoice  _ ss)      = concatMap statFindMBs ss
 statFindMBs (F.SITE     _ _ t me)  = concatMap statFindMBs $ t : maybeToList me 
 statFindMBs (F.SCase    _ _ cs md) = concatMap statFindMBs $ map snd cs ++ maybeToList md
-statFindMBs (F.SMagic   _ p _)     = [p]
+statFindMBs (F.SMagic   p)         = [p]
 statFindMBs _                      = []
 
 
 cfaGetMBPos :: CFA -> Loc -> Pos
 cfaGetMBPos cfa l = p
-    where ActStat (F.SMagic _ p _) = locAct $ cfaLocLabel l cfa
+    where ActStat (F.SMagic p) = locAct $ cfaLocLabel l cfa
 
 cfaFindMBs :: CFA -> [Loc]
 cfaFindMBs cfa = nub 
                  $ filter (\l -> case locAct $ cfaLocLabel l cfa of
-                                      ActStat (F.SMagic _ _ _) -> True
-                                      _                        -> False)
+                                      ActStat (F.SMagic _) -> True
+                                      _                    -> False)
                  $ cfaDelayLocs cfa

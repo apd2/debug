@@ -1177,7 +1177,7 @@ maybeEnterMB :: SourceView c a -> IO (Maybe (SourceView c a), Bool)
 maybeEnterMB sv = do
     let lab = currentLocLabel sv
     if' (isMBLabel lab && currentMagic sv)
-        (do let ActStat (F.SMagic _ p _) = locAct lab
+        (do let ActStat (F.SMagic p) = locAct lab
             liftM (,True) $ enterMB sv (p, currentLoc sv))
         (return (Just sv, False))
 
@@ -1245,8 +1245,8 @@ extStackFromStore sv SVStore{..} pid = do
         loc  = storeGetLoc sstStore pid
         lab  = cfaLocLabel loc cfa
         mbst = case locAct lab of
-                    ActStat (F.SMagic _ p _) -> mbStackToProcStack cw p sstMBStack
-                    _                        -> []
+                    ActStat (F.SMagic p) -> mbStackToProcStack cw p sstMBStack
+                    _                    -> []
     return $ EProcStack $ mbst ++ stackToProcStack (locStack lab)
 
 
@@ -1296,11 +1296,11 @@ stackGetMBID' :: SourceView c a -> Maybe MBID -> [ProcStackFrame] -> Maybe MBID
 stackGetMBID' _  mmbid [_]        = mmbid
 stackGetMBID' sv mmbid (f0:f1:fs) | isFrameMagic f1 = 
     maybe (let cfa = specGetCFA (svSpec sv) (EPIDProc $ svPID sv)
-               ActStat (F.SMagic _ p _) = locAct $ cfaLocLabel (frLoc f0) cfa 
+               ActStat (F.SMagic p) = locAct $ cfaLocLabel (frLoc f0) cfa 
            in stackGetMBID' sv (Just $ MBID p []) (f1:fs))
           (\mbid -> stackGetMBID' sv (Just $ mbidChild mbid $ frLoc f0) (f1:fs))
           mmbid
-                                         | otherwise       = stackGetMBID' sv mmbid (f1:fs)
+                                  | otherwise       = stackGetMBID' sv mmbid (f1:fs)
 
 -- Find out what the process is about to do (or is currently doing) based on its stack:
 -- run a normal transition, or a controllable transition
@@ -1370,8 +1370,8 @@ isControllableCode sv pid (EProcStack frames) = isMBLabel lab && storeEvalBool s
 isMBLabel :: LocLabel -> Bool
 isMBLabel lab = isDelayLabel lab && 
                          case locAct lab of
-                              ActStat (F.SMagic _ _ _) -> True
-                              _                        -> False                             
+                              ActStat (F.SMagic _) -> True
+                              _                    -> False                             
 
 -- update all displays
 updateDisplays :: RSourceView c a -> IO ()
