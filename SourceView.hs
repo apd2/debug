@@ -842,6 +842,7 @@ sourceWindowCreate ref = do
 
 sourceWindowUpdate :: RSourceView c a -> IO ()
 sourceWindowUpdate ref = do
+    putStrLn "sourceWindowUpdate"
     sv@SourceView{..} <- readIORef ref
     -- activate magic block if necessary
     maybe (codeWinMBDeactivate svCodeWin)
@@ -1186,6 +1187,7 @@ enterMB sv@SourceView{..} (p,l) = do
     putStrLn "enterMB"
     mactive <- codeWinActiveMB svCodeWin
     let mbid = maybe (MBID p []) (\m -> mbidChild m l) mactive
+    putStrLn $ "enterMB: mbid=" ++ show mbid
     MBI mbi <- codeWinGetMB svCodeWin mbid
     text <- mbiGetRegionText svCodeWin mbi
     let frames = currentStackFrames sv

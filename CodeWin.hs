@@ -105,7 +105,7 @@ data CodeWin = CodeWin { cwAPI       :: CwAPI
                        , cwFiles     :: M.Map SourceName (Region, G.TextTag) -- Source files and corresponding regions and tags
                        , cwMBRoots   :: M.Map Pos MBDescr                    -- Roots of the MB hierarchy
                        , cwActiveMB  :: Maybe MBID                           -- Currently active MB
-                       , cwSelection :: Maybe (Region, G.TextTag)
+                       , cwSelection :: Maybe (Region, Pos, G.TextTag)
                        , cwCBEnabled :: Bool
                        }
 
@@ -207,7 +207,7 @@ codeWinMBActivate ref mbid@(MBID p locs) = do
     let Just mbid'@(MBID _ locs') = cwActiveMB
     (if' (Just mbid == cwActiveMB)                      (return ())
      $ if' (isJust cwActiveMB && isParentOf mbid mbid') (deactivateRec ref (MBID p (take (length locs + 1) locs'))) 
-     $ if' (isJust cwActiveMB && isParentOf mbid' mbid) (do _ <- mapM (\ls -> activate ref (MBID p ls)) $ drop (length locs') $ inits locs
+     $ if' (isJust cwActiveMB && isParentOf mbid' mbid) (do _ <- mapM (\ls -> activate ref (MBID p ls)) $ drop (length locs' + 1) $ inits locs
                                                             return ())
      $ do codeWinMBDeactivate ref
           _ <- mapM (\ls -> activate ref (MBID p ls)) $ inits locs
@@ -226,22 +226,27 @@ codeWinSetSelection ref mmbid p color = do
     G.set tag [G.textTagBackground G.:= color]
     regionApplyTag cwAPI reg tag p
     regionScrollToPos cwAPI reg (fst p)
-    writeIORef ref $ cw {cwSelection = Just (reg,tag)}
+    writeIORef ref $ cw {cwSelection = Just (reg,p,tag)}
 
 codeWinClearSelection :: RCodeWin -> IO ()
 codeWinClearSelection ref = do
     CodeWin{..} <- readIORef ref
     maybe (return ())
-          (\(reg, tag) -> regionRemoveTag cwAPI reg tag)
+          (\(reg, _, tag) -> regionRemoveTag cwAPI reg tag)
           cwSelection
 
 editCB :: RCodeWin -> MBID -> IO ()
 editCB ref mbid = do
-    cw <- readIORef ref
-    when (cwCBEnabled cw) $ do let mmbi = cwLookupMB cw mbid
-                               case mmbi of 
-                                    Just (MBI MBICurrent{..}) -> writeIORef ref $ cwSetMB cw mbid $ MBI $ MBIStale mbiRegion (mbiEpoch + 1)
-                                    _                         -> return ()
+    putStrLn "editCB"
+    cw@CodeWin{..} <- readIORef ref
+    maybe (return ())
+          (\(reg, p, tag) -> do regionRemoveTag cwAPI reg tag
+                                regionApplyTag cwAPI reg tag p) 
+          cwSelection
+    when cwCBEnabled $ do let mmbi = cwLookupMB cw mbid
+                          case mmbi of 
+                               Just (MBI MBICurrent{..}) -> writeIORef ref $ cwSetMB cw mbid $ MBI $ MBIStale mbiRegion (mbiEpoch + 1)
+                               _                         -> return ()
 
 
 
@@ -265,6 +270,7 @@ regionSetTextSafe ref reg str = do
 -- deactivate active MB and, recursively, its children
 deactivateRec :: RCodeWin -> MBID -> IO ()
 deactivateRec ref mbid = do
+   putStrLn $ "deactivateRec " ++ show mbid
    cw <- readIORef ref
    _ <- mapM (deactivateRec ref) 
         $ filter (\mbid' -> isMBActive $ cwGetMB cw mbid')
