@@ -1285,7 +1285,7 @@ procStackToMBStack :: SourceView c a -> EProcStack -> IO [MBFrame]
 procStackToMBStack sv stack@(EProcStack fs) = do
     case stackGetMBID sv stack of
          Nothing         -> return []
-         Just (MBID p _) -> foldM (\mbst fr -> do let mbid = MBID p $ map mbfLoc mbst
+         Just (MBID p _) -> foldM (\mbst fr -> do let mbid = MBID p $ map mbfLoc $ reverse mbst
                                                   mb <- codeWinGetMB (svCodeWin sv) mbid
                                                   return $ MBFrame (mbEpoch mb) (frLoc fr) : mbst) []
                             $ filter isFrameMagic 

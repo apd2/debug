@@ -234,6 +234,7 @@ codeWinClearSelection ref = do
     maybe (return ())
           (\(reg, _, tag) -> regionRemoveTag cwAPI reg tag)
           cwSelection
+    modifyIORef ref $ \cw -> cw{cwSelection = Nothing}
 
 editCB :: RCodeWin -> MBID -> IO ()
 editCB ref mbid = do
@@ -261,6 +262,14 @@ regionSetTextSafe ref reg str = do
     regionSetText (cwAPI cw') reg str
     modifyIORef ref (\cw -> cw{cwCBEnabled = True})
 
+regionDeleteSafe :: RCodeWin -> Region -> IO ()
+regionDeleteSafe ref reg = do
+    cw@CodeWin{..} <- readIORef ref
+    case cwSelection of 
+         Just (reg', _, _) -> when (reg' == reg) $ codeWinClearSelection ref
+         _                 -> return ()
+    regionDelete cwAPI reg
+
 --cwPosToRegion :: CodeWin -> Pos -> Region
 --cwPosToRegion cw@CodeWin{..} pos = 
 --    maybe (cwFiles M.! (sourceName $ fst pos))
@@ -287,14 +296,14 @@ deactivate ref mbid = do
     alltext <- regionGetAllText cwAPI mbaRegion
     nested <- mapM (\(loc, MBI mbi) -> do let Left reg = mbiRegion mbi
                                           text' <- regionGetAllText cwAPI reg
-                                          regionDelete cwAPI reg
+                                          regionDeleteSafe ref reg
                                           return $ (loc, mbi {mbiRegion = Right text'}))
               $ M.toList mbaNested
     regionSetTextSafe ref mbaRegion alltext
     regionEditable cwAPI mbaRegion True
     let mb' = MBI $ MBICurrent (Left mbaRegion) mbaEpoch mbaText mbaCFA (M.fromList nested)
-    writeIORef ref $ (\cw' -> cw' {cwActiveMB = mbidParent mbid})
-                   $ cwSetMB cw mbid mb'
+    modifyIORef ref $ \cw' -> (cwSetMB cw' mbid mb') {cwActiveMB = mbidParent mbid}
+                   
 
 -- activate inactive MB whose parent is already active
 activate :: RCodeWin -> MBID -> IO ()
