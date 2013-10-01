@@ -13,6 +13,7 @@ module DbgTypes(Rel,
                 tranTo',
                 tranRel,
                 isConcreteTransition,
+                Oracle(..),
                 ModelVar(..),
                 ModelStateVar(..),
                 Model(..),
@@ -43,7 +44,10 @@ module DbgTypes(Rel,
                 modelStateRels,
                 modelTransRels,
                 modelConcretiseState,
+                modelConcretiseTransition,
                 modelActiveTransRel,
+                modelAddOracle,
+                modelAdviseTransition,
                 modelSelectTransition,
                 modelAddTransition,
                 modelSelectState,
@@ -188,6 +192,9 @@ isConcreteTransition Transition{..} = isConcreteState tranFrom
                                    && isConcreteState tranTo 
                                    && isJust tranConcreteLabel
 
+-- Oracle interface for advising available transitions
+data Oracle a b d = Oracle String (IO (Maybe (Transition a b d)))
+
 data ModelVar = ModelVar { mvarName :: String
                          , mvarType :: Type
                          , mvarIdx  :: [Int]
@@ -220,7 +227,8 @@ data Model c a b d = Model {
     mViews                :: [View a b d],
     mAutoConcretiseTrans  :: Bool,
     mConstraints          :: M.Map String a,
-    mTransRel             :: a
+    mTransRel             :: a,
+    mOracles              :: [Oracle a b d]
 }
 
 mCurStateVars :: Model c a b d -> [ModelVar]
@@ -247,6 +255,16 @@ mUpdateTRel :: (Rel c v a s) => Model c a b d -> Model c a b d
 mUpdateTRel m@Model{..} = m {mTransRel = r}
     where r = let ?m = mCtx in 
               conj $ (snd $ head mTransRels) : (map snd $ M.toList mConstraints)
+
+mAddOracle :: Model c a b d -> Oracle a b d -> Model c a b d
+mAddOracle m oracle = m {mOracles = mOracles m ++ [oracle]}
+
+mAdviseTransition :: Model c a b d -> IO (Maybe (Transition a b d))
+mAdviseTransition m = mAdviseTransition' (mOracles m)
+
+mAdviseTransition' :: [Oracle a b d] -> IO (Maybe (Transition a b d))
+mAdviseTransition' []                = return Nothing
+mAdviseTransition' ((Oracle _ f):os) = f >>= maybe (mAdviseTransition' os) (return . Just)
 
 type RModel c a b d = IORef (Model c a b d)
 
@@ -279,8 +297,21 @@ modelStateRels ref = getIORef mStateRels ref
 modelConcretiseState :: RModel c a b d -> a -> IO (Maybe (State a d))
 modelConcretiseState ref x = getIORef ((flip mConcretiseState) x) ref
 
+modelConcretiseTransition :: RModel c a b d -> Transition a b d -> IO (Maybe (Transition a b d))
+modelConcretiseTransition ref tran = do
+    Model{..} <- readIORef ref
+    return $ if isConcreteTransition tran 
+                then Just tran
+                else mConcretiseTransition tran
+
 modelActiveTransRel :: RModel c a b d -> IO a
 modelActiveTransRel ref = getIORef mTransRel ref
+
+modelAddOracle :: RModel c a b d -> Oracle a b d -> IO ()
+modelAddOracle ref oracle = modifyIORef ref $ \m -> mAddOracle m oracle
+
+modelAdviseTransition :: RModel c a b d -> IO (Maybe (Transition a b d))
+modelAdviseTransition ref = readIORef ref >>= mAdviseTransition
 
 -- Actions
 modelSelectTransition :: RModel c a b d -> Transition a b d -> IO ()

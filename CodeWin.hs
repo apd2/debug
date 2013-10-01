@@ -16,6 +16,7 @@ module CodeWin(MBID(..),
                codeWinActiveMB,
                codeWinLookupMB,
                codeWinGetMB,
+               codeWinSetMBText,
                codeWinMBRefresh,
                codeWinMBActivate,
                codeWinSetSelection,
@@ -173,6 +174,18 @@ codeWinLookupMB ref mbid = getIORef (\cw -> cwLookupMB cw mbid) ref
 
 codeWinGetMB :: RCodeWin -> MBID -> IO MBDescr
 codeWinGetMB ref mbid = getIORef (\cw -> cwGetMB cw mbid) ref
+
+-- Change text inside inactive (current or stale) MB.  The MB will become stale and its epoch will increase by 1
+codeWinSetMBText :: RCodeWin -> MBID -> String -> IO ()
+codeWinSetMBText ref mbid txt = do
+    putStrLn $ "codeWinSetMBText " ++ show mbid ++ " \"" ++ txt ++ "\""
+    cw@CodeWin{..} <- readIORef ref
+    let MBI mbi = cwGetMB cw mbid
+    reg' <- case mbiRegion mbi of
+                 Left reg -> do regionSetTextSafe ref reg txt
+                                return $ Left reg
+                 Right _  -> return $ Right txt
+    modifyIORef ref $ \cw' -> cwSetMB cw' mbid $ MBI $ MBIStale reg' (mbiEpoch mbi + 1)
 
 -- Make stale MB active, creating nested MBs if necessary
 -- Assumes: MBID refers to an existing stale MB whose parent is active.

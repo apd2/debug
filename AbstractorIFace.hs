@@ -198,6 +198,7 @@ mkModel' sr@SynthesisRes{..} = model
     mAutoConcretiseTrans  = True
     mConstraints          = M.empty
     mTransRel             = let ?m = srCtx in b
+    mOracles              = []
 
     model = D.Model{..}
 

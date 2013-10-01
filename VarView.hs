@@ -10,6 +10,7 @@ import qualified DbgTypes        as D
 import qualified IDE             as D
 import SetExplorer
 import Implicit
+import Util
 
 data VarView c a b d = VarView {
     vvModel     :: D.RModel c a b d,
@@ -76,6 +77,7 @@ varViewNew rmodel = do
                           , D.evtTransitionSelected = varViewTransitionSelected ref
                           , D.evtTRelUpdated        = update                    ref
                           }
+    D.modelAddOracle rmodel (D.Oracle "VarView_oracle" (fmap Just $ getTransition ref))
     return $ D.View { D.viewName      = "Variables"
                     , D.viewDefAlign  = D.AlignLeft
                     , D.viewShow      = return ()
@@ -111,8 +113,8 @@ update ref = do
 -- Private functions
 ---------------------------------------------------------------------
 
-executeTransition :: (D.Rel c v a s, ?m::c) => RVarView c a b d -> IO ()
-executeTransition ref = do
+getTransition :: (D.Rel c v a s, ?m::c) => RVarView c a b d -> IO (D.Transition a b d)
+getTransition ref = do
     vv@VarView{..} <- readIORef ref
     [from, untracked, label, to] <- setExplorerGetVarAssignment vvExplorer 
     model <- readIORef vvModel
@@ -130,4 +132,10 @@ executeTransition ref = do
                                                        Nothing -> Nothing
                                                        Just st -> if D.sAbstract st  .== tabs then D.sConcrete st else Nothing}
         tranSrc           = Nothing
-    D.modelAddTransition vvModel D.Transition{..}
+    return D.Transition{..}
+
+executeTransition :: (D.Rel c v a s, ?m::c) => RVarView c a b d -> IO ()
+executeTransition ref = do
+    model <- getIORef vvModel ref
+    tr <- getTransition ref
+    D.modelAddTransition model tr

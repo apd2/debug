@@ -133,6 +133,7 @@ data SourceView c a = SourceView {
     svRunButton      :: G.ToolButton,
     svMagExitButton  :: G.ToolButton,               -- exit magic block
     svContButton     :: G.ToolButton,               -- switch to controllable state
+    svMagicButton    :: G.ToolButton,               -- generate code automatically
 
     -- Trace
     svTrace          :: Trace,                      -- steps from the current state
@@ -180,6 +181,7 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svRunButton      = error "SourceView: svRunButton undefined"
                              , svMagExitButton  = error "SourceView: svMagExitButton undefined"
                              , svContButton     = error "SourceView: svContButton undefined"
+                             , svMagicButton    = error "SourceView: svMagicButton undefined"
                              , svTrace          = []
                              , svTracePos       = 0
                              , svTraceCombo     = error "SourceView: svTraceCombo undefined"
@@ -249,6 +251,12 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
     G.widgetShow butrun
     G.toolbarInsert tbar butrun (-1)
 
+    bmagic <- G.toolButtonNewFromStock G.stockEdit
+    G.set bmagic [G.widgetTooltipText G.:= Just "Magic!"]
+    _ <- G.onToolButtonClicked bmagic (autogen ref)
+    G.widgetShow bmagic
+    G.toolbarInsert tbar bmagic (-1)    
+
     bexit <- G.toolButtonNewFromStock G.stockClose
     G.set bexit [G.widgetTooltipText G.:= Just "Exit Magic Block"]
     _ <- G.onToolButtonClicked bexit (exitMagicBlock ref)
@@ -264,7 +272,8 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
     modifyIORef ref (\sv -> sv { svRunButton     = butrun
                                , svStepButton    = butstep
                                , svMagExitButton = bexit
-                               , svContButton    = bcont})
+                               , svContButton    = bcont
+                               , svMagicButton   = bmagic})
 
     sep2 <- G.separatorToolItemNew
     G.widgetShow sep2
@@ -901,6 +910,10 @@ commandButtonsUpdate ref = do
     G.widgetSetSensitive (svMagExitButton sv) $  (currentMagic sv)                                  -- we're inside a magic block
                                               && (svTracePos sv == 0)                               -- there is no transition in progress
                                               && isControllableCode sv (svPID sv) (currentStack sv) -- current process is inside the MB
+    G.widgetSetSensitive (svMagicButton sv) $  (isMBLabel $ currentLocLabel sv)                     -- we're at a magic block entrance
+                                            && (currentMagic sv)
+                                            && (svTracePos sv == 0)                                 -- there is no transition in progress
+
     G.widgetSetSensitive (svContButton sv) $  (currentMagic sv)                                  -- we're inside a magic block
                                            && (svTracePos sv == 0)                               -- there is no transition in progress
                                            && (not $ currentControllable sv)                     -- we're in an uncontrollable state
@@ -914,6 +927,7 @@ commandButtonsDisable ref = do
     G.widgetSetSensitive (svRunButton sv)     False
     G.widgetSetSensitive (svMagExitButton sv) False
     G.widgetSetSensitive (svContButton sv)    False
+    G.widgetSetSensitive (svMagicButton sv)   False
 
 -- Resolve --
 
@@ -1099,8 +1113,7 @@ ppContAction _      _   ActExit                = Just $ PP.text "exit"
 ppContAction inspec iid (ActCall methiid t as) = do 
     path <- let ?spec = inspec in F.itreeAbsToRelPath iid methiid
     return $ (PP.hcat $ PP.punctuate (PP.char '.') $ (map (PP.text . F.sname) path) ++ [PP.text $ F.sname t]) PP.<>
-             (PP.parens $ PP.hcat $ PP.punctuate PP.comma $ map (\a -> if' (F.argDir a == F.ArgOut) (PP.char '_') (pp $ fromJust $ lookup (F.sname a) as)) $ F.methArg t) PP.<>
-             PP.semi
+             (PP.parens $ PP.hcat $ PP.punctuate PP.comma $ map (\a -> if' (F.argDir a == F.ArgOut) (PP.char '_') (pp $ fromJust $ lookup (F.sname a) as)) $ F.methArg t)
     
 -- Translate an abstract transition into a controllable action
 -- cstate - concrete state before the transition
@@ -1170,6 +1183,33 @@ findActiveMagicBlock flatspec spec st =
 --------------------------------------------------------------
 -- Private helpers
 --------------------------------------------------------------
+
+-- assumes: 
+-- * we're at a magic block entrance
+-- * there is no transition in progress
+autogen :: (D.Rel c v a s) => RSourceView c a -> IO ()
+autogen ref = do
+    -- make sure we're in controllable state
+    switchToControllable ref
+    sv@SourceView{..} <- readIORef ref
+    -- request transition from oracle
+    mtran <- D.modelAdviseTransition svModel
+    -- translate transition to source
+    txt <- maybe (return "/* no transition */")
+                 (\t -> do mt' <- D.modelConcretiseTransition svModel t
+                           return $ 
+                            maybe "/* failed to concretise transition */"
+                                  (maybe "/* failed to convert transition to code */" 
+                                         ((++ "; ...") . id)
+                                   . contTransToSource svInputSpec svFlatSpec svSpec)
+                                  mt')
+                 mtran
+    -- insert it into magic block
+    let ActStat (F.SMagic p) = locAct $ currentLocLabel sv
+    mactive <- codeWinActiveMB svCodeWin
+    let mbid = maybe (MBID p []) (\m -> mbidChild m $ currentLoc sv) mactive
+    codeWinSetMBText svCodeWin mbid txt
+       
 
 -- If we are about to enter magic block, activate it.
 maybeEnterMB :: SourceView c a -> IO (Maybe (SourceView c a), Bool)
