@@ -845,9 +845,7 @@ sourceWindowUpdate ref = do
     putStrLn "sourceWindowUpdate"
     sv@SourceView{..} <- readIORef ref
     -- activate magic block if necessary
-    maybe (codeWinMBDeactivate svCodeWin)
-          (codeWinMBActivate svCodeWin)
-          $ stackGetMBID sv $ currentStack sv
+    codeWinMBActivate svCodeWin $ stackGetMBID sv $ currentStack sv
     -- highlight statement
     let cfa = cfaAtFrame sv svStackFrame
         frames = currentStackFrames sv
@@ -1192,7 +1190,7 @@ enterMB sv@SourceView{..} (p,l) = do
     text <- mbiGetRegionText svCodeWin mbi
     let frames = currentStackFrames sv
     if' (isMBICurrent mbi)
-        (do codeWinMBActivate svCodeWin mbid
+        (do codeWinMBActivate svCodeWin (Just mbid)
             return $ Just $ traceAppend sv (currentStore sv) (EProcStack $ (FrameMagic (frScope $ head frames) cfaInitLoc (mbiCFA mbi)):frames))
         (case compileMB sv svPID text of
               Left e    -> do D.showMessage svModel G.MessageError e
@@ -1216,7 +1214,8 @@ exitMB ref = do
     putStrLn "exitMB"
     sv0 <- readIORef ref
     let st0 = currentStore sv0
-    Just (MBID _ ls) <- codeWinActiveMB $ svCodeWin sv0
+    Just mbid@(MBID _ ls) <- codeWinActiveMB $ svCodeWin sv0
+    putStrLn $ "exitMB: mbid=" ++ show mbid
 --    -- if we're about to exit an outermost MB, insert additional exit transition.
 --    when (null ls) $ makeTransition ref
 --    sv1 <- readIORef ref
@@ -1227,9 +1226,12 @@ exitMB ref = do
                  else sv0
         sv2 = traceAppend sv1 (currentStore sv1) (EProcStack $ tail frames)
     -- pop the magic block from the stack
-    writeIORef ref $ if null ls
-                        then sv2
-                        else fromJust $ step sv2 -- 
+        sv3 = if null ls
+                 then sv2
+                 else fromJust $ step sv2 -- 
+    codeWinMBActivate (svCodeWin sv3) $ stackGetMBID sv3 $ currentStack sv3
+    writeIORef ref sv3
+
 
 -- Given a snapshot of the store at a pause location, compute
 -- process stack.
@@ -1633,7 +1635,11 @@ compileMB sv@SourceView{..} pid str = do
     stat <- liftM (F.sSeq F.nopos)
             $ case parse (Grammar.statements1Parser <* eof) "" str of
                    Left  e  -> Left $ show e
-                   Right st -> Right st
+                   Right st -> do assert (case head st of 
+                                               F.SMagic _ -> False
+                                               _          -> True)
+                                         (F.pos $ head st) "Magic block body can not start with a magic block"
+                                  return st
     let (scope,iid) = flatScopeToScope svInputSpec sc
     -- 2. validate
     let ?spec = svInputSpec

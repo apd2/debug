@@ -17,7 +17,6 @@ module CodeWin(MBID(..),
                codeWinLookupMB,
                codeWinGetMB,
                codeWinMBRefresh,
-               codeWinMBDeactivate,
                codeWinMBActivate,
                codeWinSetSelection,
                codeWinClearSelection) where
@@ -190,18 +189,15 @@ codeWinMBRefresh ref mbid cfa = do
     writeIORef ref $ cwSetMB cw mbid $ MBI $ MBICurrent (Left ireg) mbiEpoch txt cfa (M.fromList nested)
     activate ref mbid
 
--- Deactivate all active MBs
-codeWinMBDeactivate :: RCodeWin -> IO ()
-codeWinMBDeactivate ref = do
+-- Activate MB
+-- Assumes: MBID refer to an existing non-stale MB
+codeWinMBActivate :: RCodeWin -> Maybe MBID -> IO ()
+codeWinMBActivate ref Nothing                   = do
     CodeWin{..} <- readIORef ref
     maybe (return ()) 
           (\(MBID p _) -> deactivateRec ref (MBID p []))
           cwActiveMB
-
--- Activate MB
--- Assumes: MBID refer to an existing non-stale MB
-codeWinMBActivate :: RCodeWin -> MBID -> IO ()
-codeWinMBActivate ref mbid@(MBID p locs) = do
+codeWinMBActivate ref (Just mbid@(MBID p locs)) = do
     putStrLn $ "codeWinMBActivate " ++ show mbid
     CodeWin{..} <- readIORef ref
     let Just mbid'@(MBID _ locs') = cwActiveMB
@@ -209,7 +205,7 @@ codeWinMBActivate ref mbid@(MBID p locs) = do
      $ if' (isJust cwActiveMB && isParentOf mbid mbid') (deactivateRec ref (MBID p (take (length locs + 1) locs'))) 
      $ if' (isJust cwActiveMB && isParentOf mbid' mbid) (do _ <- mapM (\ls -> activate ref (MBID p ls)) $ drop (length locs' + 1) $ inits locs
                                                             return ())
-     $ do codeWinMBDeactivate ref
+     $ do codeWinMBActivate ref Nothing
           _ <- mapM (\ls -> activate ref (MBID p ls)) $ inits locs
           return ())
 
@@ -238,7 +234,6 @@ codeWinClearSelection ref = do
 
 editCB :: RCodeWin -> MBID -> IO ()
 editCB ref mbid = do
-    putStrLn "editCB"
     cw@CodeWin{..} <- readIORef ref
     maybe (return ())
           (\(reg, p, tag) -> do regionRemoveTag cwAPI reg tag
@@ -264,7 +259,7 @@ regionSetTextSafe ref reg str = do
 
 regionDeleteSafe :: RCodeWin -> Region -> IO ()
 regionDeleteSafe ref reg = do
-    cw@CodeWin{..} <- readIORef ref
+    CodeWin{..} <- readIORef ref
     case cwSelection of 
          Just (reg', _, _) -> when (reg' == reg) $ codeWinClearSelection ref
          _                 -> return ()
