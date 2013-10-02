@@ -11,6 +11,7 @@ import qualified Data.Map as M
 import Data.List
 import Data.Maybe
 import Control.Monad.ST
+import Control.Monad.Trans.Class
 
 import Util
 import Cudd
