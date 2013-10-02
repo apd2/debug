@@ -188,7 +188,7 @@ mkModel' sr@SynthesisRes{..} = model
                             --, ("c+c"                            , srCPlusC)
                             --, ("c-u"                            , srCMinusU)
                             --, ("c+u"                            , srCPlusU)
-                            ] ++ 
+                            ]
     mViews                = []
     mConcretiseState      = concretiseS
     mConcretiseTransition = concretiseT
