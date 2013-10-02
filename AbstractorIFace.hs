@@ -50,7 +50,7 @@ data SynthesisRes c a = SynthesisRes { srWin           :: Maybe Bool
                                      , srInit          :: a
                                      , srGoals         :: [a]
                                      , srFairs         :: [a]
-                                     , srTran          :: [(String, a)]
+                                     , srTran          :: a
                                      , srStateLabConstr:: a
                                      , srCPlusC        :: a
                                      , srCMinusC       :: a
@@ -65,17 +65,16 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
     let RefineStatic{..}  = rs
         RefineDynamic{..} = rd
         pdb               = db
-    let srStrat = [[t]]
---    srStrat <- case res of
---                  Just True -> do s0 <- strat ri
---                                  lift $ mapM (mapM (\s -> do s' <- bor m s $ bnot cont
---                                                              deref m s
---                                                              return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
---                  Just False -> do s0 <- cex ri
---                                   lift $ mapM (mapM (\s -> do s' <- bor m s cont
---                                                               deref m s
---                                                               return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
---                  Nothing    -> return []
+    srStrat <- case res of
+                  Just True -> do s0 <- strat ri
+                                  lift $ mapM (mapM (\s -> do s' <- bor m s $ bnot cont
+                                                              deref m s
+                                                              return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
+                  Just False -> do s0 <- cex ri
+                                   lift $ mapM (mapM (\s -> do s' <- bor m s cont
+                                                               deref m s
+                                                               return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
+                  Nothing    -> return []
     let SectionInfo{..} = _sections pdb
         SymbolInfo{..}  = _symbolTable pdb
         (state, untracked) = partition func $ M.toList _stateVars
@@ -97,7 +96,7 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         srInit          = toDdNode srCtx init
         srGoals         = map (toDdNode srCtx) goal
         srFairs         = map (toDdNode srCtx) fair
-        srTran          = map (mapSnd $ conj . map ((toDdNode srCtx) . snd)) trans
+        srTran          = disj $ map (conj . map ((toDdNode srCtx) . snd) . snd) trans
         srStateLabConstr = toDdNode srCtx slRel
         srCMinusC       = toDdNode srCtx consistentMinusCULCont
         srCPlusC        = toDdNode srCtx consistentPlusCULCont
@@ -131,14 +130,13 @@ avarType (AVarInt  tr) = case I.typ tr of
 mkTRel :: (D.Rel c v a s) => SynthesisRes c a -> a
 mkTRel sr@SynthesisRes{..} =
     let ?m     = srCtx in
-    let tran   = disj $ map snd srTran
-        tcont  = tran .& srCont
-        tucont = tran .& (nt srCont)
+    let tcont  = srTran .& srCont
+        tucont = srTran .& (nt srCont)
     in trace "mkTRel"
        $ case srWin of
             Just True  -> (quant_dis sr (tcont .& srCMinusC)) .| (tucont .& srCPlusU)
             Just False -> (tcont .& srCPlusC)                 .| (quant_dis sr (tucont .& srCMinusU))
-            Nothing    -> tran
+            Nothing    -> srTran
 
 quant_dis :: (D.Rel c v a s, ?m :: c) => SynthesisRes c a -> a -> a
 quant_dis SynthesisRes{..} rel = 
@@ -185,13 +183,12 @@ mkModel' sr@SynthesisRes{..} = model
                                     Just False -> "trel_lose" 
                                     Nothing    -> "trel", 
                                mkTRel sr)-}
-                              ("trel"                           , trace "computing trel" $ let ?m = srCtx in (disj $ map snd srTran) .& srStateLabConstr)
+                              ("trel"                           , let ?m = srCtx in srTran .& srStateLabConstr)
                             --, ("c-c"                            , srCMinusC)
                             --, ("c+c"                            , srCPlusC)
                             --, ("c-u"                            , srCMinusU)
                             --, ("c+u"                            , srCPlusU)
                             ] ++ 
-                            (trace "computing disjuncts" $ map (\(n, tr) -> (n, let ?m = srCtx in tr .& srStateLabConstr)) srTran)
     mViews                = []
     mConcretiseState      = concretiseS
     mConcretiseTransition = concretiseT
