@@ -1252,7 +1252,9 @@ autogen ref = do
                            return $ 
                             maybe "/* failed to concretise transition */"
                                   (maybe "/* failed to convert transition to code */" 
-                                         (++ ";\n" ++ replicate (sourceColumn (fst p) - 1) ' ' ++ "...")
+                                         (\s -> if s == "exit"
+                                                   then "{}"
+                                                   else s ++ ";\n" ++ replicate (sourceColumn (fst p) - 1) ' ' ++ "...")
                                    . contTransToSource svInputSpec svFlatSpec svSpec)
                                   mt')
                  mtran
