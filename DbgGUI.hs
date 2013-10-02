@@ -67,7 +67,9 @@ debugGUI extraFactories model = do
     wmain <- G.windowNew
     G.windowSetDefaultSize wmain dbgDefaultWidth dbgDefaultHeight
     G.windowMaximize wmain
-    _ <- G.on wmain G.deleteEvent (do {liftIO G.mainQuit; return True})
+    _ <- G.on wmain G.deleteEvent $ do q <- liftIO $ modelQuit rmodel
+                                       liftIO $ when q G.mainQuit
+                                       return True
 
     -- use the same icon for all debugger windows
     icon <- G.pixbufNewFromXPMData ladyBugIcon

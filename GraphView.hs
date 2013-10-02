@@ -95,6 +95,7 @@ graphViewNew model = do
                     , D.viewShow      = graphDrawConnect draw
                     , D.viewHide      = graphDrawDisconnect draw
                     , D.viewGetWidget = graphDrawWidget draw
+                    , D.viewQuit      = return True
                     , D.viewCB        = cb
                     }
 

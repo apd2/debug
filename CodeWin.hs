@@ -2,6 +2,8 @@
 
 module CodeWin(MBID(..),
                mbidChild,
+               mbidParent,
+               mbidFile,
                MBDescr(..),
                MBActive(..),
                MBInactive(..),
@@ -16,6 +18,8 @@ module CodeWin(MBID(..),
                codeWinActiveMB,
                codeWinLookupMB,
                codeWinGetMB,
+               codeWinSaveAll,
+               codeWinModifiedFiles,
                codeWinSetMBText,
                codeWinMBRefresh,
                codeWinMBActivate,
@@ -27,6 +31,7 @@ import qualified Graphics.UI.Gtk as G
 import Data.IORef
 import Data.Maybe
 import Data.List
+import Data.Tuple.Select
 import Text.Parsec
 import Control.Monad
 
@@ -97,14 +102,17 @@ mbidParent :: MBID -> Maybe MBID
 mbidParent (MBID _ [])  = Nothing
 mbidParent (MBID p ls)  = Just $ MBID p $ init ls
 
+mbidFile :: MBID -> FilePath
+mbidFile (MBID p _) = sourceName $ fst p
+
 isParentOf :: MBID -> MBID -> Bool
 isParentOf (MBID p1 ls1) (MBID p2 ls2) = (p1 == p2) && length ls1 < length ls2 && isPrefixOf ls1 ls2
 
 data CodeWin = CodeWin { cwAPI       :: CwAPI
                        , cwView      :: G.Widget
-                       , cwFiles     :: M.Map SourceName (Region, G.TextTag) -- Source files and corresponding regions and tags
-                       , cwMBRoots   :: M.Map Pos MBDescr                    -- Roots of the MB hierarchy
-                       , cwActiveMB  :: Maybe MBID                           -- Currently active MB
+                       , cwFiles     :: M.Map SourceName (Region, G.TextTag, String) -- Source files and corresponding regions, tags, and last saved content
+                       , cwMBRoots   :: M.Map Pos MBDescr                            -- Roots of the MB hierarchy
+                       , cwActiveMB  :: Maybe MBID                                   -- Currently active MB
                        , cwSelection :: Maybe (Region, Pos, G.TextTag)
                        , cwCBEnabled :: Bool
                        }
@@ -154,9 +162,10 @@ codeWinNew spec@F.Spec{..} = do
                $ mapM (\n -> do reg <- pageCreate cwAPI n
                                 regionEditable cwAPI reg False
                                 tag <- tagNew cwAPI reg
-                                return (n, (reg, tag))) files
+                                txt <- regionGetAllText cwAPI reg
+                                return (n, (reg, tag, txt))) files
     cwMBRoots <- liftM M.fromList
-                 $ mapM (\p -> do let parent = fst $ cwFiles M.! (sourceName $ fst p)
+                 $ mapM (\p -> do let parent = sel1 $ cwFiles M.! (sourceName $ fst p)
                                   reg <- regionCreateFrom cwAPI parent p True (editCB ref $ MBID p [])
                                   return (p, MBI $ MBIStale (Left reg) 0)) 
                  $ specFindMBs spec
@@ -174,6 +183,25 @@ codeWinLookupMB ref mbid = getIORef (\cw -> cwLookupMB cw mbid) ref
 
 codeWinGetMB :: RCodeWin -> MBID -> IO MBDescr
 codeWinGetMB ref mbid = getIORef (\cw -> cwGetMB cw mbid) ref
+
+codeWinModifiedFiles :: RCodeWin -> IO [String]
+codeWinModifiedFiles ref = do
+    CodeWin{..} <- readIORef ref
+    liftM (map fst)
+     $ filterM (\(_,(reg,_,txt)) -> do txt' <- regionGetAllText cwAPI reg
+                                       return $ txt /= txt') 
+     $ M.toList cwFiles
+
+codeWinSaveAll :: RCodeWin -> IO ()
+codeWinSaveAll ref = do
+    CodeWin{..} <- readIORef ref
+    tosave <- codeWinModifiedFiles ref
+    _ <- mapM (\n -> do let (reg, t, _) = cwFiles M.! n 
+                        txt <- regionGetAllText cwAPI reg
+                        writeFile n txt
+                        modifyIORef ref $ \cw -> cw {cwFiles = M.insert n (reg,t,txt) cwFiles})
+         tosave
+    return ()
 
 -- Change text inside inactive (current or stale) MB.  The MB will become stale and its epoch will increase by 1
 codeWinSetMBText :: RCodeWin -> MBID -> String -> IO ()
@@ -228,9 +256,9 @@ codeWinSetSelection ref mmbid p color = do
     putStrLn $ "codeWinSetSelection: " ++ show mmbid ++ " " ++ show p 
     codeWinClearSelection ref
     cw@CodeWin{..} <- readIORef ref
-    let (reg, tag) = maybe (cwFiles M.! (sourceName $ fst p))
+    let (reg, tag) = maybe (let (r, t,_ ) = cwFiles M.! (sourceName $ fst p) in (r,t))
                            (\mbid@(MBID (p',_) _) -> let MBA mba = cwGetMB cw mbid 
-                                                     in (mbaRegion mba, snd $ cwFiles M.! sourceName p'))
+                                                     in (mbaRegion mba, sel2 $ cwFiles M.! sourceName p'))
                            mmbid
     G.set tag [G.textTagBackground G.:= color]
     regionApplyTag cwAPI reg tag p

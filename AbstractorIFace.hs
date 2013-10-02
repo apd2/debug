@@ -177,7 +177,7 @@ mkModel' sr@SynthesisRes{..} = model
     mStateRels            = [ (D.contRelName  , srCont)
                             , ("win"          , srWinningRegion)
                             --, ("uncontrollable", let ?m = srCtx in nt srCont)
-                            , ("init"          , if' (srWin == Just True || srWin == Nothing) srInit (let ?m = srCtx in srInit .& (nt srWinningRegion)))] ++
+                            , ("init"          , trace "computing init" $  if' (srWin == Just True || srWin == Nothing) srInit (let ?m = srCtx in srInit .& (nt srWinningRegion)))] ++
                             zip (map I.goalName $ I.tsGoal $ I.specTran ?spec) srGoals  {- ++ 
                             zip (map I.fairName $ I.tsFair $ I.specTran ?spec) srFairs -}
     mTransRels            = [ {- (case srWin of 
@@ -185,13 +185,13 @@ mkModel' sr@SynthesisRes{..} = model
                                     Just False -> "trel_lose" 
                                     Nothing    -> "trel", 
                                mkTRel sr)-}
-                              ("trel"                           , let ?m = srCtx in (disj $ map snd srTran) .& srStateLabConstr)
+                              ("trel"                           , trace "computing trel" $ let ?m = srCtx in (disj $ map snd srTran) .& srStateLabConstr)
                             --, ("c-c"                            , srCMinusC)
                             --, ("c+c"                            , srCPlusC)
                             --, ("c-u"                            , srCMinusU)
                             --, ("c+u"                            , srCPlusU)
                             ] ++ 
-                            map (\(n, tr) -> (n, let ?m = srCtx in tr .& srStateLabConstr)) srTran
+                            (trace "computing disjuncts" $ map (\(n, tr) -> (n, let ?m = srCtx in tr .& srStateLabConstr)) srTran)
     mViews                = []
     mConcretiseState      = concretiseS
     mConcretiseTransition = concretiseT

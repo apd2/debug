@@ -52,6 +52,7 @@ module DbgTypes(Rel,
                 modelAddTransition,
                 modelSelectState,
                 modelSetConstraint,
+                modelQuit,
                 showMessage) where
 
 import qualified Graphics.UI.Gtk as G 
@@ -126,6 +127,7 @@ data View a b d = View {
     viewShow      :: IO (),
     viewHide      :: IO (),
     viewGetWidget :: IO G.Widget,
+    viewQuit      :: IO Bool,      -- False = abandon quit
     viewCB        :: ViewEvents a b d
 }
 
@@ -346,6 +348,16 @@ modelSetConstraint ref cname crel = do
     views <- modelViews ref
     _ <- mapM (evtTRelUpdated . viewCB) views
     return ()
+
+modelQuit :: RModel c a b d -> IO Bool
+modelQuit ref = do
+    m <- readIORef ref
+    modelQuit' $ mViews m
+
+modelQuit' :: [View a b d] -> IO Bool
+modelQuit' []     = return True
+modelQuit' (v:vs) = do q <- viewQuit v
+                       if' q (modelQuit' vs) (return False)
 
 -- Utils
 

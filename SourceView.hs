@@ -129,6 +129,7 @@ data SourceView c a = SourceView {
     svSolver         :: SMTSolver,
 
     -- Command buttons
+    svSaveAllButton  :: G.ToolButton,
     svStepButton     :: G.ToolButton,
     svRunButton      :: G.ToolButton,
     svMagExitButton  :: G.ToolButton,               -- exit magic block
@@ -177,6 +178,7 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svState          = error "SourceView: svState undefined"
                              , svTmp            = error "SourceView: svTmp undefined"
                              , svSolver         = error "SourceView: svSolver undefined"
+                             , svSaveAllButton  = error "SourceView: svSaveAllButton undefined"
                              , svStepButton     = error "SourceView: svStepButton undefined"
                              , svRunButton      = error "SourceView: svRunButton undefined"
                              , svMagExitButton  = error "SourceView: svMagExitButton undefined"
@@ -227,6 +229,17 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
     G.boxPackStart vbox tbar G.PackNatural 0
     G.widgetShow tbar
 
+    -- File operations
+    butsaveall <- G.toolButtonNewFromStock G.stockSave
+    G.set butsaveall [G.widgetTooltipText G.:= Just "Save all files"]
+    _ <- G.onToolButtonClicked butsaveall (saveAll ref)
+    G.widgetShow butsaveall
+    G.toolbarInsert tbar butsaveall (-1)
+
+    sep0 <- G.separatorToolItemNew
+    G.widgetShow sep0
+    G.toolbarInsert tbar sep0 (-1)
+
     -- process selector
     sel <- processSelectorCreate ref
     selitem <- G.toolItemNew
@@ -270,6 +283,7 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
     G.toolbarInsert tbar bcont (-1)    
 
     modifyIORef ref (\sv -> sv { svRunButton     = butrun
+                               , svSaveAllButton = butsaveall
                                , svStepButton    = butstep
                                , svMagExitButton = bexit
                                , svContButton    = bcont
@@ -319,6 +333,7 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
                     , D.viewShow      = return ()
                     , D.viewHide      = return ()
                     , D.viewGetWidget = return $ G.toWidget vbox
+                    , D.viewQuit      = quit ref
                     , D.viewCB        = cb
                     }
     
@@ -457,12 +472,46 @@ simulateTransition flatspec spec absvars st lab =
        $ trace ("simulateTransitions returns " ++ show mstore2) 
        $ mstore2
 
+saveAll :: RSourceView c a -> IO ()
+saveAll ref = do
+    SourceView{..} <- readIORef ref
+    codeWinSaveAll svCodeWin
+
 contTransToSource :: F.Spec -> F.Spec -> Spec -> D.Transition a Store SVStore -> Maybe String
 contTransToSource inspec flatspec spec D.Transition{..} = do
     iid <- findActiveMagicBlock flatspec spec (sstStore $ fromJust $ D.sConcrete tranFrom)
     act <- transitionToAction inspec flatspec spec (storeUnion (sstStore $ fromJust $ D.sConcrete tranTo) (fromJust tranConcreteLabel))
     doc <- ppContAction inspec iid act
     return $ PP.render doc
+
+quit :: RSourceView c a -> IO Bool 
+quit ref = do
+    SourceView{..} <- readIORef ref
+    fs <- codeWinModifiedFiles svCodeWin
+    case fs of
+         [] -> return True
+         _  -> saveQuitDialog ref fs
+
+saveQuitDialog :: RSourceView c a -> [String] -> IO Bool
+saveQuitDialog ref fs = do
+    SourceView{..} <- readIORef ref
+    g <- G.messageDialogNew Nothing [] G.MessageQuestion G.ButtonsNone 
+         $ "Save changes to the following files?\n" 
+         ++ (intercalate "\n" $ fs) 
+
+    --G.widgetShow g
+    _ <- G.dialogAddButton g "Yes"    G.ResponseYes
+    _ <- G.dialogAddButton g "No"     G.ResponseNo
+    _ <- G.dialogAddButton g "Cancel" G.ResponseCancel
+    resp <- G.dialogRun g
+    ret <- case resp of
+                G.ResponseYes    -> do codeWinSaveAll svCodeWin
+                                       return True
+                G.ResponseNo     -> return True
+                G.ResponseCancel -> return False
+                G.ResponseNone   -> return False
+    G.widgetDestroy g
+    return ret
 
 --------------------------------------------------------------
 -- GUI components
@@ -905,6 +954,7 @@ commandButtonsUpdate ref = do
               $ filter isScalar
               $ concatMap flatten 
               $ currentTmpExprTree sv)
+    G.widgetSetSensitive (svSaveAllButton sv) True
     G.widgetSetSensitive (svStepButton sv)    en
     G.widgetSetSensitive (svRunButton sv)     en
     G.widgetSetSensitive (svMagExitButton sv) $  (currentMagic sv)                                  -- we're inside a magic block
@@ -923,6 +973,7 @@ commandButtonsDisable :: RSourceView c a -> IO ()
 commandButtonsDisable ref = do
     sv <- readIORef ref
     -- disable command buttons
+    G.widgetSetSensitive (svSaveAllButton sv) False
     G.widgetSetSensitive (svStepButton sv)    False
     G.widgetSetSensitive (svRunButton sv)     False
     G.widgetSetSensitive (svMagExitButton sv) False
@@ -1353,12 +1404,12 @@ procGetEPID sv pid | isProcControllableCode sv pid = EPIDCont
                    | otherwise                     = EPIDProc pid
 
 stackGetCFA :: SourceView c a -> PrID -> EProcStack -> CFA
-stackGetCFA sv pid (EProcStack stack) = stackGetCFA' sv stack (EPIDProc pid)
+stackGetCFA sv pid (EProcStack stack) = stackGetCFA' sv stack pid
 
-stackGetCFA' :: SourceView c a -> [ProcStackFrame] -> EPID -> CFA
-stackGetCFA' sv []                         epid = specGetCFA (svSpec sv) epid
-stackGetCFA' sv ((FrameRegular _ _):s)     epid = stackGetCFA' sv s epid
-stackGetCFA' _  ((FrameMagic{..}):_)       _    = frCFA
+stackGetCFA' :: SourceView c a -> [ProcStackFrame] -> PrID -> CFA
+stackGetCFA' sv []                     pid = specGetCFA (svSpec sv) (EPIDProc pid)
+stackGetCFA' sv ((FrameRegular _ _):s) pid = stackGetCFA' sv s pid
+stackGetCFA' _  ((FrameMagic{..}):_)   _   = frCFA
 
 storeGetLoc :: Store -> PrID -> Loc
 storeGetLoc s pid = pcEnumToLoc pc

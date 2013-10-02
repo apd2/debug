@@ -122,6 +122,7 @@ strategyViewNew strat@Strategy{..} model = do
                     , D.viewShow      = return ()
                     , D.viewHide      = G.toggleButtonSetActive apply False
                     , D.viewGetWidget = return $ G.toWidget scroll
+                    , D.viewQuit      = return True
                     , D.viewCB        = D.ViewEvents { D.evtStateSelected      = (\mst -> do {highlightActive ref mst; maybe (return ()) (autoSchedule ref) mst})
                                                      , D.evtTransitionSelected = (\_   -> highlightActive ref Nothing)
                                                      , D.evtTRelUpdated        = return ()

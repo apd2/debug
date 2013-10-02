@@ -83,6 +83,7 @@ varViewNew rmodel = do
                     , D.viewShow      = return ()
                     , D.viewHide      = return ()
                     , D.viewGetWidget = return $ G.toWidget vbox
+                    , D.viewQuit      = return True
                     , D.viewCB        = cb
                     }
 
