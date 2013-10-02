@@ -1192,6 +1192,7 @@ autogen ref = do
     -- make sure we're in controllable state
     switchToControllable ref
     sv@SourceView{..} <- readIORef ref
+    let ActStat (F.SMagic p) = locAct $ currentLocLabel sv
     -- request transition from oracle
     mtran <- D.modelAdviseTransition svModel
     -- translate transition to source
@@ -1200,12 +1201,11 @@ autogen ref = do
                            return $ 
                             maybe "/* failed to concretise transition */"
                                   (maybe "/* failed to convert transition to code */" 
-                                         ((++ "; ...") . id)
+                                         (++ ";\n" ++ replicate (sourceColumn (fst p) - 1) ' ' ++ "...")
                                    . contTransToSource svInputSpec svFlatSpec svSpec)
                                   mt')
                  mtran
     -- insert it into magic block
-    let ActStat (F.SMagic p) = locAct $ currentLocLabel sv
     mactive <- codeWinActiveMB svCodeWin
     let mbid = maybe (MBID p []) (\m -> mbidChild m $ currentLoc sv) mactive
     codeWinSetMBText svCodeWin mbid txt

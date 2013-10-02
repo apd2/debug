@@ -201,7 +201,7 @@ codeWinMBRefresh ref mbid cfa = do
     txt <- regionGetText cwAPI ireg
     writeIORef ref $ cwSetMB cw mbid $ MBI $ MBICurrent (Left ireg) mbiEpoch txt cfa (M.fromList nested)
     activate ref mbid
-
+    
 -- Activate MB
 -- Assumes: MBID refer to an existing non-stale MB
 codeWinMBActivate :: RCodeWin -> Maybe MBID -> IO ()
