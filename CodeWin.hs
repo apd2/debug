@@ -15,6 +15,7 @@ module CodeWin(MBID(..),
                cwLookupMB,
                codeWinNew,
                codeWinWidget,
+               codeWinPos,
                codeWinActiveMB,
                codeWinLookupMB,
                codeWinGetMB,
@@ -110,6 +111,7 @@ isParentOf (MBID p1 ls1) (MBID p2 ls2) = (p1 == p2) && length ls1 < length ls2 &
 
 data CodeWin = CodeWin { cwAPI       :: CwAPI
                        , cwView      :: G.Widget
+                       , cwPos       :: G.Widget
                        , cwFiles     :: M.Map SourceName (Region, G.TextTag, String) -- Source files and corresponding regions, tags, and last saved content
                        , cwMBRoots   :: M.Map Pos MBDescr                            -- Roots of the MB hierarchy
                        , cwActiveMB  :: Maybe MBID                                   -- Currently active MB
@@ -149,8 +151,9 @@ type RCodeWin = IORef CodeWin
 -- Load all spec files and initialise cwMBRoots
 codeWinNew :: F.Spec -> IO RCodeWin
 codeWinNew spec@F.Spec{..} = do
-    Code cwAPI cwView <- codeWidgetNew "tsl" 600 600
+    Code cwAPI cwView cwPos <- codeWidgetNew "tsl" 600 600
     G.widgetShow cwView
+    G.widgetShow cwPos
 
     ref <- newIORef $ error "codeWinNew: undefined"
 
@@ -174,6 +177,9 @@ codeWinNew spec@F.Spec{..} = do
 
 codeWinWidget :: RCodeWin -> IO G.Widget
 codeWinWidget = getIORef cwView
+
+codeWinPos    :: RCodeWin -> IO G.Widget
+codeWinPos    = getIORef cwPos
 
 codeWinActiveMB :: RCodeWin -> IO (Maybe MBID)
 codeWinActiveMB = getIORef cwActiveMB

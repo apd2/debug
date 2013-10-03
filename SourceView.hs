@@ -885,6 +885,7 @@ sourceWindowCreate ref = do
     spec <- getIORef svInputSpec ref
     code <- codeWinNew spec
     codewid <- codeWinWidget code
+    codepos <- codeWinPos code
     G.boxPackStart vbox codewid G.PackGrow 0
     -- Status bar at the bottom
     sbar <- G.hBoxNew True 0
@@ -894,6 +895,7 @@ sourceWindowCreate ref = do
     lprog <- G.labelNew Nothing
     G.widgetShow lprog
     G.boxPackStart sbar lprog G.PackGrow 0
+    G.boxPackEnd sbar codepos G.PackNatural 0
   
     modifyIORef ref (\sv -> sv { svCodeWin   = code
                                , svInprogLab = lprog})
