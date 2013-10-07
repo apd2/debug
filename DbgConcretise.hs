@@ -9,6 +9,7 @@ module DbgConcretise (concretiseRel,
 
                       
 import Data.List
+import Data.Maybe
 import qualified Data.Map    as M
 import Debug.Trace
 
@@ -61,7 +62,11 @@ concretiseLabel :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?mode
 concretiseLabel cstate alabel = do
    -- extract predicates from abstract label
    asn <- D.oneSatVal alabel (D.mCurStateVars ?model ++ D.mLabelVars ?model)
-   let lfs = map (\(mvar, val) -> avarAsnToFormula (?absvars M.! D.mvarName mvar) val) 
+   let lfs = mapMaybe (\(mvar, val) -> case find ((==(D.mkEnVarName $ D.mvarName mvar)) . D.mvarName . fst) asn of
+                                            Nothing            -> Just $ avarAsnToFormula (?absvars M.! D.mvarName mvar) val 
+                                            Just (_, val') -> if val' == 0
+                                                                 then Nothing
+                                                                 else Just $ avarAsnToFormula (?absvars M.! D.mvarName mvar) val) 
              $ filter (not . D.isEnVarName . D.mvarName . fst) asn
        -- extract values of relevant state variables from concrete 
        -- state and transform them into additional predicates
