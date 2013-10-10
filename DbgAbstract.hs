@@ -22,7 +22,7 @@ abstractRel vars store = Imp.conj $ map (evalAbsVar store) vars
 
 abstractState :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a Store SVStore, ?absvars::M.Map String AbsVar) => Store -> [MBFrame] -> D.State a SVStore
 abstractState store mbs = D.State { D.sAbstract = abstractRel (D.mCurStateVars ?model) store
-                                  , D.sConcrete = Just $ SVStore (storeProject store $ map varName $ specStateVar ?spec) mbs
+                                  , D.sConcrete = Just $ (SVStore (storeProject store $ map varName $ specStateVar ?spec) mbs, abstractUntracked store)
                                   }
 
 abstractUntracked :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a Store SVStore, ?absvars::M.Map String AbsVar) => Store -> a
@@ -35,7 +35,7 @@ abstractTransition :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?model::D.Model c a St
 abstractTransition from to mbs = D.Transition {
         tranFrom = from,
         -- compute untracked and label predicates over to
-        tranUntracked     = abstractUntracked $ sstStore $ fromJust $ D.sConcrete from,
+        tranUntracked     = snd $ fromJust $ D.sConcrete from,
         tranAbstractLabel = abstractLabel     to,
         -- project "to" state on "tmp" variables
         tranConcreteLabel = Just $ storeProject to (map varName $ specTmpVar ?spec),

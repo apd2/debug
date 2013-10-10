@@ -143,8 +143,9 @@ data StateCategory = StateControllable
                    | StateBoth
 
 data State a d = State {
-    sAbstract :: a,      -- abstract state
-    sConcrete :: Maybe d -- concrete state
+    sAbstract :: a,          -- abstract state
+    sConcrete :: Maybe (d,a) -- concrete state consists of concrete variable assignment 
+                             -- and abstract untracked var assignment
 }
 
 isConcreteState :: State a d -> Bool
@@ -152,7 +153,7 @@ isConcreteState = isJust . sConcrete
 
 
 instance (?m::c, L.Boolean c a, Eq d) => Eq (State a d) where
-    (==) x y = sAbstract x .== sAbstract y && sConcrete x == sConcrete y
+    (==) x y = sAbstract x .== sAbstract y && (fmap fst $ sConcrete x) == (fmap fst $ sConcrete y)
 
 stateCategory :: (Rel c v a s, ?m::c) => Model c a b d -> a -> IO StateCategory
 stateCategory model rel = 

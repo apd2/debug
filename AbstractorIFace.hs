@@ -213,7 +213,7 @@ mkModel' sr@SynthesisRes{..} = model
             ?model   = model
             ?absvars = srAbsVars
         cstate <- D.sConcrete tranFrom
-        cnext  <- D.concretiseTransition (D.sstStore cstate) tranAbstractLabel
+        cnext  <- D.concretiseTransition (D.sstStore $ fst cstate) tranAbstractLabel
         let tr' = D.abstractTransition tranFrom cnext []
         let msrc = D.contTransToSource ?inspec ?flatspec ?spec tr'
         return tr'{D.tranSrc = msrc}

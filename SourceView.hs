@@ -441,7 +441,7 @@ simulateTransition flatspec spec absvars st lab =
                               , svFlatSpec   = flatspec
                               , svAbsVars    = absvars
                               , svState      = D.State { sAbstract = error "simulateTransition: sAbstract is undefined"
-                                                       , sConcrete = Just $ SVStore st []}
+                                                       , sConcrete = Just $ (SVStore st [], error "simulateTransition: untracked is undefined")}
                               , svTmp        = lab
                               , svTracePos   = 0
                               , svStackFrame = 0
@@ -479,8 +479,8 @@ saveAll ref = do
 
 contTransToSource :: F.Spec -> F.Spec -> Spec -> D.Transition a Store SVStore -> Maybe String
 contTransToSource inspec flatspec spec D.Transition{..} = do
-    iid <- findActiveMagicBlock flatspec spec (sstStore $ fromJust $ D.sConcrete tranFrom)
-    act <- transitionToAction inspec flatspec spec (storeUnion (sstStore $ fromJust $ D.sConcrete tranTo) (fromJust tranConcreteLabel))
+    iid <- findActiveMagicBlock flatspec spec (sstStore $ fst $ fromJust $ D.sConcrete tranFrom)
+    act <- transitionToAction inspec flatspec spec (storeUnion (sstStore $ fst $ fromJust $ D.sConcrete tranTo) (fromJust tranConcreteLabel))
     doc <- ppContAction inspec iid act
     return $ PP.render doc
 
@@ -1218,7 +1218,7 @@ findActiveMagicBlock flatspec spec st =
        sv0 = sourceViewEmpty { svSpec       = spec
                              , svFlatSpec   = flatspec
                              , svState      = D.State { sAbstract = error "findMagicBlock: sAbstract is undefined"
-                                                      , sConcrete = Just $ SVStore st []}
+                                                      , sConcrete = Just $ (SVStore st [], error "findMagicBlock: untracked is undefined")}
                              , svTracePos   = 0
                              , svStackFrame = 0
                              }
@@ -1374,7 +1374,7 @@ mbStackToProcStack' st0 cw mbid (MBFrame{..}:fs) =
 -- Otherwise, leave MB stack unmodified
 currentMBStack :: SourceView c a -> IO [MBFrame]
 currentMBStack sv | findProcInsideMagic sv == Just (svPID sv) = procStackToMBStack sv (currentStack sv)
-                  | otherwise                                 = return $ sstMBStack $ fromJust $ D.sConcrete $ svState sv
+                  | otherwise                                 = return $ sstMBStack $ fst $ fromJust $ D.sConcrete $ svState sv
 
 procStackToMBStack :: SourceView c a -> EProcStack -> IO [MBFrame]
 procStackToMBStack sv stack@(EProcStack fs) = do
@@ -1421,7 +1421,7 @@ storeGetLoc s pid = pcEnumToLoc pc
 -- Used to highlight enabled processes in process selector
 isProcEnabled :: SourceView c a -> PrID -> IO Bool
 isProcEnabled sv pid = do
-    let store@SVStore{..} = fromJust $ D.sConcrete $ svState sv
+    let store@SVStore{..} = fst $ fromJust $ D.sConcrete $ svState sv
     stack@(EProcStack (frame:_)) <- extStackFromStore sv store pid
     let loc   = frLoc frame
         cfa   = stackGetCFA sv pid stack
@@ -1447,7 +1447,7 @@ isProcEnabled sv pid = do
 isProcControllableCode :: SourceView c a -> PrID -> Bool
 isProcControllableCode sv pid = isControllableCode sv pid (EProcStack stack)
     where
-    store = sstStore $ fromJust $ D.sConcrete $ svState sv
+    store = sstStore $ fst $ fromJust $ D.sConcrete $ svState sv
     stack = stackFromStore sv store pid
 
 findProcInsideMagic :: SourceView c a -> Maybe PrID
@@ -1458,7 +1458,7 @@ findProcInsideMagic sv = find (isProcControllableCode sv)
 isControllableCode :: SourceView c a -> PrID -> EProcStack -> Bool
 isControllableCode sv pid (EProcStack frames) = isMBLabel lab && storeEvalBool store mkMagicVar
     where
-    store = sstStore $ fromJust $ D.sConcrete $ svState sv
+    store  = sstStore $ fst $ fromJust $ D.sConcrete $ svState sv
     pstack = reverse $ takeWhile (not . isFrameMagic) $ reverse frames
     cfa    = stackGetCFA sv pid (EProcStack pstack)
     loc    = frLoc $ head pstack
@@ -1487,14 +1487,14 @@ reset :: RSourceView c a -> IO ()
 reset ref = do
     -- processSelectorUpdate expects initialised store
     sv0 <- readIORef ref
-    let store = storeUnion (sstStore $ fromJust $ D.sConcrete $ svState sv0) (svTmp sv0)
+    let store = storeUnion (sstStore $ fst $ fromJust $ D.sConcrete $ svState sv0) (svTmp sv0)
         tr = [TraceEntry { teStack = error "teStack is undefined"
                          , teStore = store }] 
     writeIORef ref (sv0 {svTrace = tr, svTracePos = 0, svStackFrame = 0})
     processSelectorUpdate ref
     
     sv1 <- readIORef ref
-    stack <- extStackFromStore sv1 (fromJust $ D.sConcrete $ svState sv1) (svPID sv1)
+    stack <- extStackFromStore sv1 (fst $ fromJust $ D.sConcrete $ svState sv1) (svPID sv1)
     -- initialise trace
     let tr = [TraceEntry { teStack = stack
                          , teStore = store}]

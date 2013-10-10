@@ -106,7 +106,7 @@ update ref = do
     trel <- D.modelActiveTransRel vvModel
     let rel = case vvSelection of
                    Nothing         -> trel
-                   Just (Left st)  -> (D.sAbstract st) .& trel 
+                   Just (Left st)  -> (D.sAbstract st) .& (maybe t snd $ D.sConcrete st) .& trel 
                    Just (Right tr) -> D.tranRel model tr
     setExplorerSetRelation vvExplorer rel
 
