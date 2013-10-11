@@ -163,6 +163,7 @@ data SourceView c a = SourceView {
     svInprogLab      :: G.Label,                    -- transition in progress
 
     -- Resolve view
+    svResolveView    :: G.TreeView,
     svResolveStore   :: G.TreeStore Expr,           -- tmp variables in the scope of the current expression
     svAutoResolve    :: Bool,                       -- resolve non-determinism automatically
     svAutoResolveTog :: G.CheckButton               -- toggle auto-resolve mode button
@@ -200,6 +201,7 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svWatchStore     = error "SourceView: svWatchStore undefined"
                              , svCodeWin        = error "SourceView: svCodeWin undefined"
                              , svInprogLab      = error "SourceView: svInprogLab undefined"
+                             , svResolveView    = error "SourceView: svResolveView undefined"
                              , svResolveStore   = error "SourceView: svResolveStore undefined"
                              , svAutoResolve    = True
                              , svAutoResolveTog = error "SourceView: svAutoResolveTog undefined"
@@ -1052,7 +1054,8 @@ resolveViewCreate ref = do
     _ <- G.on combrend G.edited (textAsnChanged ref) 
 
     _ <- G.treeViewAppendColumn view valcol
-    modifyIORef ref (\sv -> sv { svResolveStore   = store
+    modifyIORef ref (\sv -> sv { svResolveView    = view
+                               , svResolveStore   = store
                                , svAutoResolveTog = bauto})
     panel <- D.framePanelNew (G.toWidget vbox) "Resolve non-determinism" (return ())
     D.panelGetWidget panel
@@ -1098,6 +1101,7 @@ resolveViewUpdate ref = do
         store = svResolveStore sv
     G.treeStoreClear store
     G.treeStoreInsertForest store [] 0 exprs
+    G.treeViewExpandAll (svResolveView sv)
 
 resolveViewDisable :: RSourceView c a -> IO ()
 resolveViewDisable ref = do
