@@ -437,9 +437,10 @@ exitMagicBlock ref = do
 -- simulate transition without GUI 
 simulateTransition :: F.Spec -> Spec -> M.Map String AbsVar -> Store -> Store -> Maybe Store
 simulateTransition flatspec spec absvars st lab =
-    let -- create enough of source view to call run
+    let spec' = specInlineWirePrefix spec
+        -- create enough of source view to call run
         sv0 :: SourceView () ()
-        sv0 = sourceViewEmpty { svSpec       = spec
+        sv0 = sourceViewEmpty { svSpec       = spec'
                               , svFlatSpec   = flatspec
                               , svAbsVars    = absvars
                               , svState      = D.State { sAbstract = error "simulateTransition: sAbstract is undefined"
@@ -459,7 +460,7 @@ simulateTransition flatspec spec absvars st lab =
                  then -- execute controllable CFA
                       sv0 { svPID   = pid
                           , svTrace = [TraceEntry { teStore = storeUnion st lab
-                                                  , teStack = EProcStack [FrameMagic F.ScopeTop cfaInitLoc (specCAct spec)]}]}
+                                                  , teStack = EProcStack [FrameMagic F.ScopeTop cfaInitLoc (specCAct spec')]}]}
                  else -- execute uncontrollable process from its current location
                       sv0 { svPID   = pid
                           , svTrace = [TraceEntry { teStore = storeUnion st lab 
