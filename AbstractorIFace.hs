@@ -71,10 +71,11 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
                                   lift $ mapM (mapM (\s -> do s' <- bor m s $ bnot cont
                                                               deref m s
                                                               return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
-                  Just False -> do s0 <- cex ri
-                                   lift $ mapM (mapM (\s -> do s' <- bor m s cont
-                                                               deref m s
-                                                               return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
+                  Just False -> return [[t]]
+                                --do s0 <- cex ri
+                                --   lift $ mapM (mapM (\s -> do s' <- bor m s cont
+                                --                               deref m s
+                                --                               return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
                   Nothing    -> return []
     let SectionInfo{..} = _sections pdb
         SymbolInfo{..}  = _symbolTable pdb
@@ -184,7 +185,7 @@ mkModel' sr@SynthesisRes{..} = model
                                     Just False -> "trel_lose" 
                                     Nothing    -> "trel", 
                                mkTRel sr)-}
-                              ("trel"                           , let ?m = srCtx in srTran .& srStateLabConstr)
+                              ("trel"                           , let ?m = srCtx in srTran {-.& srStateLabConstr-})
                             --, ("c-c"                            , srCMinusC)
                             --, ("c+c"                            , srCPlusC)
                             --, ("c-u"                            , srCMinusU)

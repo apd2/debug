@@ -123,8 +123,11 @@ strategyViewNew strat@Strategy{..} model = do
                     , D.viewHide      = G.toggleButtonSetActive apply False
                     , D.viewGetWidget = return $ G.toWidget scroll
                     , D.viewQuit      = return True
-                    , D.viewCB        = D.ViewEvents { D.evtStateSelected      = (\mst -> do {highlightActive ref mst; maybe (return ()) (autoSchedule ref) mst})
-                                                     , D.evtTransitionSelected = (\_   -> highlightActive ref Nothing)
+                    , D.viewCB        = D.ViewEvents { D.evtStateSelected      = (\mst -> do highlightActiveGoals ref mst
+                                                                                             highlightActiveFair ref Nothing
+                                                                                             maybe (return ()) (autoSchedule ref) mst)
+                                                     , D.evtTransitionSelected = (\tr -> do highlightActiveGoals ref $ Just $ D.tranFrom tr
+                                                                                            highlightActiveFair ref $ Just tr)
                                                      , D.evtTRelUpdated        = return ()
                                                      }
                     }
@@ -133,8 +136,21 @@ strategyViewNew strat@Strategy{..} model = do
 -- GUI Actions
 --------------------------------------------------------------
 
-highlightActive :: (D.Rel c v a s) => RStrategyView c a b d -> Maybe (D.State a d) -> IO ()
-highlightActive ref mst = do
+highlightActiveFair :: (D.Rel c v a s) => RStrategyView c a b d -> Maybe (D.Transition a b d) -> IO ()
+highlightActiveFair ref mtr = do
+    let Just tr = mtr
+    StrategyView{..} <- readIORef ref
+    let Strategy{..} = svStrat
+    ctx <- D.modelCtx svModel
+    let ?m = ctx
+    _ <- mapIdxM (\bt i -> do lab <- (liftM $ G.castToLabel . fromJust) $ G.binGetChild bt
+                              let w = if' ((isJust mtr) && (((D.sAbstract $ D.tranFrom tr) .& (D.tranAbstractLabel tr) .& (snd $ stratFair !! i)) ./= b)) "bold" "normal"
+                              G.labelSetMarkup lab $ "<span weight=\"" ++ w ++ "\">" ++ (fst $ stratFair !! i) ++ "</span>") 
+                 svFairButs
+    return ()
+
+highlightActiveGoals :: (D.Rel c v a s) => RStrategyView c a b d -> Maybe (D.State a d) -> IO ()
+highlightActiveGoals ref mst = do
     let (Just st) = mst
     StrategyView{..} <- readIORef ref
     let Strategy{..} = svStrat
@@ -144,10 +160,6 @@ highlightActive ref mst = do
                               let w = if' ((isJust mst) && ((D.sAbstract st .& (snd $ stratGoals !! i)) .== b)) "bold" "normal"
                               G.labelSetMarkup lab $ "<span weight=\"" ++ w ++ "\">" ++ (fst $ stratGoals !! i) ++ "</span>")
                  svGoalButs
-    _ <- mapIdxM (\bt i -> do lab <- (liftM $ G.castToLabel . fromJust) $ G.binGetChild bt
-                              let w = if' ((isJust mst) && ((D.sAbstract st .& (snd $ stratFair !! i)) ./= b)) "bold" "normal"
-                              G.labelSetMarkup lab $ "<span weight=\"" ++ w ++ "\">" ++ (fst $ stratFair !! i) ++ "</span>") 
-                 svFairButs
     return ()
 
 goalToggled :: (D.Rel c v a s) => RStrategyView c a b d -> Int -> IO ()
