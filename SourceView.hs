@@ -133,7 +133,7 @@ data SourceView c a = SourceView {
     svStepButton     :: G.ToolButton,
     svRunButton      :: G.ToolButton,
     svMagExitButton  :: G.ToolButton,               -- exit magic block
-    svContButton     :: G.ToolButton,               -- switch to controllable state
+    -- svContButton     :: G.ToolButton,               -- switch to controllable state
     svMagicButton    :: G.ToolButton,               -- generate code automatically
 
     -- Trace
@@ -183,7 +183,7 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svStepButton     = error "SourceView: svStepButton undefined"
                              , svRunButton      = error "SourceView: svRunButton undefined"
                              , svMagExitButton  = error "SourceView: svMagExitButton undefined"
-                             , svContButton     = error "SourceView: svContButton undefined"
+                             -- , svContButton     = error "SourceView: svContButton undefined"
                              , svMagicButton    = error "SourceView: svMagicButton undefined"
                              , svTrace          = []
                              , svTracePos       = 0
@@ -278,17 +278,17 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
     G.widgetShow bexit
     G.toolbarInsert tbar bexit (-1)    
 
-    bcont <- G.toolButtonNewFromStock G.stockIndex
-    G.set bcont [G.widgetTooltipText G.:= Just "Switch to Controllable State"]
-    _ <- G.onToolButtonClicked bcont (switchToControllable ref)
-    G.widgetShow bcont
-    G.toolbarInsert tbar bcont (-1)    
+--    bcont <- G.toolButtonNewFromStock G.stockIndex
+--    G.set bcont [G.widgetTooltipText G.:= Just "Switch to Controllable State"]
+--    _ <- G.onToolButtonClicked bcont (switchToControllable ref)
+--    G.widgetShow bcont
+--    G.toolbarInsert tbar bcont (-1)    
 
     modifyIORef ref (\sv -> sv { svRunButton     = butrun
                                , svSaveAllButton = butsaveall
                                , svStepButton    = butstep
                                , svMagExitButton = bexit
-                               , svContButton    = bcont
+                               -- , svContButton    = bcont
                                , svMagicButton   = bmagic})
 
     sep2 <- G.separatorToolItemNew
@@ -373,7 +373,7 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
 stepAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
 stepAction ref = do 
     sv' <- readIORef ref
-    when (isProcControllableCode sv' (svPID sv')) $ switchToControllable ref
+    -- when (isProcControllableCode sv' (svPID sv')) $ switchToControllable ref
     sv <- readIORef ref
     -- sync PID
     let sv0 = maybeSetLCont $ setLEPID (procGetEPID sv (svPID sv)) sv
@@ -403,7 +403,7 @@ step sv =
 runAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
 runAction ref = do
     sv' <- readIORef ref
-    when (isProcControllableCode sv' (svPID sv')) $ switchToControllable ref
+    -- when (isProcControllableCode sv' (svPID sv')) $ switchToControllable ref
     sv <- readIORef ref
     -- sync PID
     let sv0 = maybeSetLCont $ setLEPID (procGetEPID sv (svPID sv)) sv
@@ -430,7 +430,7 @@ run sv = case step sv of
 
 exitMagicBlock :: (D.Rel c v a s) => RSourceView c a -> IO ()
 exitMagicBlock ref = do
-    switchToControllable ref
+    -- switchToControllable ref
     modifyIORef ref (\sv -> modifyCurrentStore sv (\st0 -> storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)))
     makeTransition ref
 
@@ -456,7 +456,7 @@ simulateTransition flatspec spec absvars st lab =
                                       Just p -> p
                                       _      -> error $ "simulateTransition no process inside a magic block"
 
-        sv1 = if storeEvalBool st mkContVar
+        sv1 = if storeEvalBool st mkContLVar
                  then -- execute controllable CFA
                       sv0 { svPID   = pid
                           , svTrace = [TraceEntry { teStore = storeUnion st lab
@@ -969,10 +969,10 @@ commandButtonsUpdate ref = do
                                             && (currentMagic sv)
                                             && (svTracePos sv == 0)                                 -- there is no transition in progress
 
-    G.widgetSetSensitive (svContButton sv) $  (currentMagic sv)                                  -- we're inside a magic block
-                                           && (svTracePos sv == 0)                               -- there is no transition in progress
-                                           && (not $ currentControllable sv)                     -- we're in an uncontrollable state
-                                           && isControllableCode sv (svPID sv) (currentStack sv) -- current process is inside the MB
+--    G.widgetSetSensitive (svContButton sv) $  (currentMagic sv)                                  -- we're inside a magic block
+--                                           && (svTracePos sv == 0)                               -- there is no transition in progress
+--                                           && (not $ currentControllable sv)                     -- we're in an uncontrollable state
+--                                           && isControllableCode sv (svPID sv) (currentStack sv) -- current process is inside the MB
 
 commandButtonsDisable :: RSourceView c a -> IO ()
 commandButtonsDisable ref = do
@@ -982,7 +982,7 @@ commandButtonsDisable ref = do
     G.widgetSetSensitive (svStepButton sv)    False
     G.widgetSetSensitive (svRunButton sv)     False
     G.widgetSetSensitive (svMagExitButton sv) False
-    G.widgetSetSensitive (svContButton sv)    False
+    -- G.widgetSetSensitive (svContButton sv)    False
     G.widgetSetSensitive (svMagicButton sv)   False
 
 -- Resolve --
@@ -1141,14 +1141,14 @@ autoResolve1 ref e = do
 --                        writeFile fpath text
 --                        runControllableCFA ref cfa
     
-switchToControllable :: (D.Rel c v a s) => RSourceView c a -> IO ()
-switchToControllable ref = do
-    sv0 <- readIORef ref
-    let sv1 = setLEPID (EPIDProc pidIdle) sv0
-        sv2 = modifyCurrentStore sv1 (\st0 -> storeSet st0 mkContLVar (Just $ SVal $ BoolVal True))
-    when (not $ storeEvalBool (currentStore sv1) mkContVar) $ do
-        writeIORef ref sv2
-        makeTransition ref
+--switchToControllable :: (D.Rel c v a s) => RSourceView c a -> IO ()
+--switchToControllable ref = do
+--    sv0 <- readIORef ref
+--    let sv1 = setLEPID (EPIDProc pidIdle) sv0
+--        sv2 = modifyCurrentStore sv1 (\st0 -> storeSet st0 mkContLVar (Just $ SVal $ BoolVal True))
+--    when (not $ storeEvalBool (currentStore sv1) mkContVar) $ do
+--        writeIORef ref sv2
+--        makeTransition ref
 
 runControllableCFA :: RSourceView c a -> CFA -> IO ()
 runControllableCFA ref cfa = do
@@ -1248,7 +1248,7 @@ findActiveMagicBlock flatspec spec st =
 autogen :: (D.Rel c v a s) => RSourceView c a -> IO ()
 autogen ref = do
     -- make sure we're in controllable state
-    switchToControllable ref
+    --switchToControllable ref
     sv@SourceView{..} <- readIORef ref
     let ActStat (F.SMagic p) = locAct $ currentLocLabel sv
     -- request transition from oracle
@@ -1433,7 +1433,7 @@ isProcEnabled sv pid = do
     let loc   = frLoc frame
         cfa   = stackGetCFA sv pid stack
         lab   = cfaLocLabel loc cfa
-        cont  = storeEvalBool sstStore mkContVar
+        -- cont  = storeEvalBool sstStore mkContVar
         cond  = case lab of
                      LPause _ _ c -> storeEvalBool sstStore c
                      LFinal _ _   -> (not $ null $ Graph.lsuc cfa loc) || isFrameMagic frame
@@ -1442,14 +1442,14 @@ isProcEnabled sv pid = do
                   Just e -> case parseEPIDEnumerator e of
                                  EPIDCont -> isControllableCode sv pid stack
                                  epid     -> procGetEPID sv pid == epid
-                  _      -> -- If the process is running uncontrollable code, then the enabled condition is:
-                            -- !cont /\ wait_condition holds
+                  _      -> -- If the process is running uncontrollable code, then the enabled condition is
+                            -- its wait condition
                             -- If the process is running controllable code, then it is enabled if its program
                             -- counter (at the top of the stack) is either inside a magic block or at a pause
                             -- location in a nested CFA whose wait condition is satisfied.
                             if' (isControllableCode sv pid stack) 
                                 (cond || (isMBLabel lab))
-                                ((not cont) && cond)
+                                cond
 
 isProcControllableCode :: SourceView c a -> PrID -> Bool
 isProcControllableCode sv pid = isControllableCode sv pid (EProcStack stack)
@@ -1559,8 +1559,8 @@ currentStackFrames = stackFrames . currentStack
 currentTmpExprTree :: SourceView c a -> Forest Expr
 currentTmpExprTree sv = getTmpExprTree sv (svTracePos sv)
 
-currentControllable :: SourceView c a -> Bool
-currentControllable sv = storeEvalBool (currentStore sv) mkContVar
+--currentControllable :: SourceView c a -> Bool
+--currentControllable sv = storeEvalBool (currentStore sv) mkContVar
 
 currentMagic :: SourceView c a -> Bool
 currentMagic sv = storeEvalBool (currentStore sv) mkMagicVar
