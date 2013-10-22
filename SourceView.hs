@@ -1250,7 +1250,7 @@ autogen ref = do
     -- make sure we're in controllable state
     --switchToControllable ref
     sv@SourceView{..} <- readIORef ref
-    let ActStat (F.SMagic p) = locAct $ currentLocLabel sv
+    let ActStat (F.SMagic p _) = locAct $ currentLocLabel sv
     -- request transition from oracle
     mtran <- D.modelAdviseTransition svModel
     -- translate transition to source
@@ -1276,7 +1276,7 @@ maybeEnterMB :: SourceView c a -> IO (Maybe (SourceView c a), Bool)
 maybeEnterMB sv = do
     let lab = currentLocLabel sv
     if' (isMBLabel lab && currentMagic sv)
-        (do let ActStat (F.SMagic p) = locAct lab
+        (do let ActStat (F.SMagic p _) = locAct lab
             liftM (,True) $ enterMB sv (p, currentLoc sv))
         (return (Just sv, False))
 
@@ -1349,8 +1349,8 @@ extStackFromStore sv SVStore{..} pid = do
         loc  = storeGetLoc sstStore pid
         lab  = cfaLocLabel loc cfa
         mbst = case locAct lab of
-                    ActStat (F.SMagic p) -> mbStackToProcStack cw p sstMBStack
-                    _                    -> []
+                    ActStat (F.SMagic p _) -> mbStackToProcStack cw p sstMBStack
+                    _                      -> []
     return $ EProcStack $ mbst ++ stackToProcStack (locStack lab)
 
 
@@ -1400,7 +1400,7 @@ stackGetMBID' :: SourceView c a -> Maybe MBID -> [ProcStackFrame] -> Maybe MBID
 stackGetMBID' _  mmbid [_]        = mmbid
 stackGetMBID' sv mmbid (f0:f1:fs) | isFrameMagic f1 = 
     maybe (let cfa = specGetCFA (svSpec sv) (EPIDProc $ svPID sv)
-               ActStat (F.SMagic p) = locAct $ cfaLocLabel (frLoc f0) cfa 
+               ActStat (F.SMagic p _) = locAct $ cfaLocLabel (frLoc f0) cfa 
            in stackGetMBID' sv (Just $ MBID p []) (f1:fs))
           (\mbid -> stackGetMBID' sv (Just $ mbidChild mbid $ frLoc f0) (f1:fs))
           mmbid
@@ -1474,8 +1474,8 @@ isControllableCode sv pid (EProcStack frames) = isMBLabel lab && storeEvalBool s
 isMBLabel :: LocLabel -> Bool
 isMBLabel lab = isDelayLabel lab && 
                          case locAct lab of
-                              ActStat (F.SMagic _) -> True
-                              _                    -> False                             
+                              ActStat (F.SMagic _ _) -> True
+                              _                      -> False                             
 
 -- update all displays
 updateDisplays :: RSourceView c a -> IO ()
@@ -1732,12 +1732,12 @@ compileMB sv@SourceView{..} pid str = do
     let sc = frScope $ head $ currentStackFrames sv
     -- Apply all transformations that the input spec goes through to the statement:
     -- 1. parse
-    stat <- liftM (F.sSeq F.nopos)
+    stat <- liftM (F.sSeq F.nopos Nothing)
             $ case parse (Grammar.statements1Parser <* eof) "" str of
                    Left  e  -> Left $ show e
                    Right st -> do assert (case head st of 
-                                               F.SMagic _ -> False
-                                               _          -> True)
+                                               F.SMagic _ _ -> False
+                                               _            -> True)
                                          (F.pos $ head st) "Magic block body can not start with a magic block"
                                   return st
     let (scope,iid) = flatScopeToScope svInputSpec sc
@@ -1784,10 +1784,10 @@ validateControllableStat sc stat = do
                                 assert (F.methCat m /= F.Task F.Invisible)      p "Invisible task invocations are not allowed inside controllable actions")
          $ F.statCallees sc stat
     _ <- F.mapStatM (\_ st -> case st of
-                                       F.SVarDecl p _   -> err p "Variable declarations are not allowed inside controllable actions"
-                                       F.SReturn  p _   -> err p "Return statements are not allowed inside controllable actions"
-                                       F.SPar     p _   -> err p "Fork statements are not allowed inside controllable actions"
-                                       F.SStop    p     -> err p "Stop statements are not allowed inside controllable actions"
+                                       F.SVarDecl p _ _ -> err p "Variable declarations are not allowed inside controllable actions"
+                                       F.SReturn  p _ _ -> err p "Return statements are not allowed inside controllable actions"
+                                       F.SPar     p _ _ -> err p "Fork statements are not allowed inside controllable actions"
+                                       F.SStop    p _   -> err p "Stop statements are not allowed inside controllable actions"
                                        _                -> return st) sc stat
     return ()
 

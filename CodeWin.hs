@@ -379,26 +379,26 @@ methFindMBs meth = case F.methBody meth of
                         Right s       -> statFindMBs s
 
 statFindMBs :: F.Statement -> [Pos]
-statFindMBs (F.SSeq     _ ss)      = concatMap statFindMBs ss
-statFindMBs (F.SPar     _ ps)      = concatMap (statFindMBs . snd) ps
-statFindMBs (F.SForever _ b)       = statFindMBs b
-statFindMBs (F.SDo      _ b _)     = statFindMBs b
-statFindMBs (F.SWhile   _ _ b)     = statFindMBs b
-statFindMBs (F.SFor     _ _ b)     = statFindMBs b
-statFindMBs (F.SChoice  _ ss)      = concatMap statFindMBs ss
-statFindMBs (F.SITE     _ _ t me)  = concatMap statFindMBs $ t : maybeToList me 
-statFindMBs (F.SCase    _ _ cs md) = concatMap statFindMBs $ map snd cs ++ maybeToList md
-statFindMBs (F.SMagic   p)         = [p]
-statFindMBs _                      = []
+statFindMBs (F.SSeq     _ _ ss)      = concatMap statFindMBs ss
+statFindMBs (F.SPar     _ _ ps)      = concatMap statFindMBs ps
+statFindMBs (F.SForever _ _ b)       = statFindMBs b
+statFindMBs (F.SDo      _ _ b _)     = statFindMBs b
+statFindMBs (F.SWhile   _ _ _ b)     = statFindMBs b
+statFindMBs (F.SFor     _ _ _ b)     = statFindMBs b
+statFindMBs (F.SChoice  _ _ ss)      = concatMap statFindMBs ss
+statFindMBs (F.SITE     _ _ _ t me)  = concatMap statFindMBs $ t : maybeToList me 
+statFindMBs (F.SCase    _ _ _ cs md) = concatMap statFindMBs $ map snd cs ++ maybeToList md
+statFindMBs (F.SMagic   p _)         = [p]
+statFindMBs _                        = []
 
 
 cfaGetMBPos :: CFA -> Loc -> Pos
 cfaGetMBPos cfa l = p
-    where ActStat (F.SMagic p) = locAct $ cfaLocLabel l cfa
+    where ActStat (F.SMagic p _) = locAct $ cfaLocLabel l cfa
 
 cfaFindMBs :: CFA -> [Loc]
 cfaFindMBs cfa = nub 
                  $ filter (\l -> case locAct $ cfaLocLabel l cfa of
-                                      ActStat (F.SMagic _) -> True
-                                      _                    -> False)
+                                      ActStat (F.SMagic _ _) -> True
+                                      _                      -> False)
                  $ cfaDelayLocs cfa
