@@ -10,8 +10,11 @@ module AbstractorIFace( SynthesisRes(..)
 import qualified Data.Map as M
 import Data.List
 import Data.Maybe
+import Control.Monad
 import Control.Monad.ST
+import Control.Monad.Morph
 import Control.Monad.Trans.Class
+import Control.Monad.State
 
 import Util
 import Cudd
@@ -21,9 +24,11 @@ import Interface hiding (db)
 import TermiteGame
 import Implicit
 import CuddSymTab
+import BddRecord hiding ((.&), (.|))
 import Predicate
 import Store
 import SMTSolver
+import TSLAbsGame
 import qualified Spec            as F
 import qualified ISpec           as I
 import qualified TranSpec        as I
@@ -66,11 +71,15 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
     let RefineStatic{..}  = rs
         RefineDynamic{..} = rd
         pdb               = db
+    -- Compute state-label constraint
+    let ops = constructOps m
+    stateLabelExpr <- flip evalStateT pdb $ hoist lift $ doUpdate ops (tslStateLabelConstraintAbs ?spec m)
     srStrat <- case res of
-                  Just True -> do s0 <- strat ri
-                                  lift $ mapM (mapM (\s -> do s' <- bor m s $ bnot cont
-                                                              deref m s
-                                                              return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
+                  Just True -> liftM (map (map (toDdNode ?m))) $ strat ri
+--                               do s0 <- strat ri
+--                                  lift $ mapM (mapM (\s -> do s' <- bor m s $ bnot cont
+--                                                              deref m s
+--                                                              return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
                   Just False -> return [[t]]
                                 --do s0 <- cex ri
                                 --   lift $ mapM (mapM (\s -> do s' <- bor m s cont
@@ -99,7 +108,7 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         srGoals         = map (toDdNode srCtx) goal
         srFairs         = map (toDdNode srCtx) fair
         srTran          = conj $ map (toDdNode srCtx . snd) trans
-        srStateLabConstr = toDdNode srCtx slRel
+        srStateLabConstr = toDdNode srCtx stateLabelExpr
         srCMinusC       = toDdNode srCtx consistentMinusCULCont
         srCPlusC        = toDdNode srCtx consistentPlusCULCont
         srCMinusU       = toDdNode srCtx consistentMinusCULUCont
@@ -185,7 +194,7 @@ mkModel' sr@SynthesisRes{..} = model
                                     Just False -> "trel_lose" 
                                     Nothing    -> "trel", 
                                mkTRel sr)-}
-                              ("trel"                           , let ?m = srCtx in srTran {-.& srStateLabConstr-})
+                              ("trel"                           , let ?m = srCtx in srTran .& srStateLabConstr)
                             --, ("c-c"                            , srCMinusC)
                             --, ("c+c"                            , srCPlusC)
                             --, ("c-u"                            , srCMinusU)
