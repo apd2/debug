@@ -1435,9 +1435,9 @@ isProcEnabled sv pid = do
         lab   = cfaLocLabel loc cfa
         -- cont  = storeEvalBool sstStore mkContVar
         cond  = case lab of
-                     LPause _ _ c -> storeEvalBool sstStore c
-                     LFinal _ _   -> (not $ null $ Graph.lsuc cfa loc) || isFrameMagic frame
-                     _            -> True
+                     LPause _ _ _ c -> storeEvalBool sstStore c
+                     LFinal _ _ _   -> (not $ null $ Graph.lsuc cfa loc) || isFrameMagic frame
+                     _              -> True
     return $ case storeTryEvalEnum (svTmp sv) mkEPIDLVar of
                   Just e -> case parseEPIDEnumerator e of
                                  EPIDCont -> isControllableCode sv pid stack
@@ -1722,7 +1722,8 @@ storeEvalStr inspec flatspec store mpid sc str = do
                      , ctxBrkLocs = []
                      , ctxGNMap   = globalNMap
                      , ctxLastVar = 0
-                     , ctxVar     = []}
+                     , ctxVar     = []
+                     , ctxLabels  = []}
         iexpr = evalState (F.exprToIExprDet simpexpr) ctx
     -- 6. evaluate
     return $ storeEval store iexpr
@@ -1760,7 +1761,8 @@ compileMB sv@SourceView{..} pid str = do
                      , ctxBrkLocs = []
                      , ctxGNMap   = globalNMap
                      , ctxLastVar = 0
-                     , ctxVar     = []}
+                     , ctxVar     = []
+                     , ctxLabels  = []}
         ctx' = let ?procs = [] 
                    ?nestedmb = True
                in execState (do aft <- F.procStatToCFA simpstat cfaInitLoc
