@@ -456,7 +456,7 @@ simulateTransition flatspec spec absvars st lab =
                                       Just p -> p
                                       _      -> error $ "simulateTransition no process inside a magic block"
 
-        sv1 = if storeEvalBool st mkContLVar
+        sv1 = if storeEvalBool lab mkContLVar
                  then -- execute controllable CFA
                       sv0 { svPID   = pid
                           , svTrace = [TraceEntry { teStore = storeUnion st lab
