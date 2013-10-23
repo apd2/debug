@@ -1174,13 +1174,13 @@ ppContAction inspec iid (ActCall methiid t as) = do
              (PP.parens $ PP.hcat $ PP.punctuate PP.comma $ map (\a -> if' (F.argDir a == F.ArgOut) (PP.char '_') (pp $ fromJust $ lookup (F.sname a) as)) $ F.methArg t)
     
 -- Translate an abstract transition into a controllable action
--- cstate - concrete state before the transition
--- alabel - abstract transition label
+-- cnstate - concrete state before the transition
 transitionToAction :: F.Spec -> F.Spec -> Spec -> Store -> Maybe ContAction
 transitionToAction inspec flatspec spec cnstate = do
     let ?spec = inspec
     let tag = storeEvalEnum cnstate mkTagVar 
-    (if' (tag == mkTagNone) Nothing
+    let cont = storeEvalBool cnstate mkContLVar
+    (if' (not cont) Nothing
      $ if' (tag == mkTagIdle) (if' (not $ storeEvalBool cnstate mkMagicVar) (return ActExit) Nothing)
      $ do let flatmeth = let ?spec = flatspec in fromJust $ find ((== tag) . F.sname) $ F.tmMethod tmMain
           let (caIID, methname) = F.itreeParseName (F.Ident F.nopos tag)
@@ -1771,7 +1771,7 @@ compileMB sv@SourceView{..} pid str = do
     -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
     let cfa   = ctxCFA ctx'
         cfar  = cfaPruneUnreachable cfa [cfaInitLoc]
-    return $ cfaTraceFile cfar "action" cfar
+    return {-$ cfaTraceFile cfar "action"-} cfar
 
 -- Check whether statement specifies a valid controllable action:
 -- * Function, procedure, and controllable task calls only
