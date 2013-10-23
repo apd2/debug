@@ -80,8 +80,7 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
 --                                  lift $ mapM (mapM (\s -> do s' <- bor m s $ bnot cont
 --                                                              deref m s
 --                                                              return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
-                  Just False -> return [[t]]
-                                --do s0 <- cex ri
+                  Just False -> liftM (map (map (toDdNode ?m))) $ cex ri
                                 --   lift $ mapM (mapM (\s -> do s' <- bor m s cont
                                 --                               deref m s
                                 --                               return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
