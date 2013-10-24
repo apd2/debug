@@ -1408,9 +1408,9 @@ stackGetMBID' sv mmbid (f0:f1:fs) | isFrameMagic f1 =
 
 -- Find out what the process is about to do (or is currently doing) based on its stack:
 -- run a normal transition, or a controllable transition
-procGetEPID :: SourceView c a -> PrID -> EPID
-procGetEPID sv pid | isProcControllableCode sv pid = EPIDCont
-                   | otherwise                     = EPIDProc pid
+--procGetEPID :: SourceView c a -> PrID -> EPID
+--procGetEPID sv pid | isProcControllableCode sv pid = EPIDCont
+--                   | otherwise                     = EPIDProc pid
 
 stackGetCFA :: SourceView c a -> PrID -> EProcStack -> CFA
 stackGetCFA sv pid (EProcStack stack) = stackGetCFA' sv stack pid
@@ -1691,7 +1691,8 @@ setLPID pid sv = modifyCurrentStore sv (\s -> storeSet s mkPIDLVar (Just $ SVal 
 
 maybeSetLCont :: SourceView c a -> SourceView c a
 maybeSetLCont sv | (isNothing $ storeTryEvalBool (currentStore sv) mkContLVar) = 
-                   modifyCurrentStore sv (\s -> storeSet s mkContLVar $ Just $ SVal $ BoolVal False)
+                   let cont = isProcControllableCode sv (svPID sv)
+                   in modifyCurrentStore sv (\s -> storeSet s mkContLVar $ Just $ SVal $ BoolVal cont)
                  | otherwise                                                  = sv
 
 -- Evaluate expression written in terms of variables in the original input spec.
