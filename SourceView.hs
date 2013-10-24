@@ -132,8 +132,6 @@ data SourceView c a = SourceView {
     svSaveAllButton  :: G.ToolButton,
     svStepButton     :: G.ToolButton,
     svRunButton      :: G.ToolButton,
-    svMagExitButton  :: G.ToolButton,               -- exit magic block
-    -- svContButton     :: G.ToolButton,               -- switch to controllable state
     svMagicButton    :: G.ToolButton,               -- generate code automatically
 
     -- Trace
@@ -182,8 +180,6 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svSaveAllButton  = error "SourceView: svSaveAllButton undefined"
                              , svStepButton     = error "SourceView: svStepButton undefined"
                              , svRunButton      = error "SourceView: svRunButton undefined"
-                             , svMagExitButton  = error "SourceView: svMagExitButton undefined"
-                             -- , svContButton     = error "SourceView: svContButton undefined"
                              , svMagicButton    = error "SourceView: svMagicButton undefined"
                              , svTrace          = []
                              , svTracePos       = 0
@@ -272,23 +268,9 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
     G.widgetShow bmagic
     G.toolbarInsert tbar bmagic (-1)    
 
-    bexit <- G.toolButtonNewFromStock G.stockClose
-    G.set bexit [G.widgetTooltipText G.:= Just "Exit Magic Block"]
-    _ <- G.onToolButtonClicked bexit (exitMagicBlock ref)
-    G.widgetShow bexit
-    G.toolbarInsert tbar bexit (-1)    
-
---    bcont <- G.toolButtonNewFromStock G.stockIndex
---    G.set bcont [G.widgetTooltipText G.:= Just "Switch to Controllable State"]
---    _ <- G.onToolButtonClicked bcont (switchToControllable ref)
---    G.widgetShow bcont
---    G.toolbarInsert tbar bcont (-1)    
-
     modifyIORef ref (\sv -> sv { svRunButton     = butrun
                                , svSaveAllButton = butsaveall
                                , svStepButton    = butstep
-                               , svMagExitButton = bexit
-                               -- , svContButton    = bcont
                                , svMagicButton   = bmagic})
 
     sep2 <- G.separatorToolItemNew
@@ -357,11 +339,6 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
     putStrLn "sourceViewTransitionSelected"
     modifyIORef ref (\sv -> sv { svState    = D.tranFrom tran
                                , svTmp      = fromJust $ D.tranConcreteLabel tran})
---    let cont = storeEvalBool (fromJust $ D.sConcrete $ D.tranFrom tran) mkContVar
---    when (cont) $ maybe (return ()) (\str -> do txt <- getIORef svActSelectText ref
---                                                buf <- G.textViewGetBuffer txt
---                                                G.set buf [G.textBufferText G.:= str])
---                        (D.tranSrc tran)
     processSelectorChooseUniqueEnabled ref
     reset ref
     putStrLn "sourceViewTransitionSelected done"
@@ -373,7 +350,6 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
 stepAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
 stepAction ref = do 
     sv' <- readIORef ref
-    -- when (isProcControllableCode sv' (svPID sv')) $ switchToControllable ref
     sv <- readIORef ref
     -- sync PID
     let sv0 = maybeSetLCont $ setLPID (svPID sv) sv
@@ -403,7 +379,6 @@ step sv =
 runAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
 runAction ref = do
     sv' <- readIORef ref
-    -- when (isProcControllableCode sv' (svPID sv')) $ switchToControllable ref
     sv <- readIORef ref
     -- sync PID
     let sv0 = maybeSetLCont $ setLPID (svPID sv) sv
@@ -430,7 +405,6 @@ run sv = case step sv of
 
 exitMagicBlock :: (D.Rel c v a s) => RSourceView c a -> IO ()
 exitMagicBlock ref = do
-    -- switchToControllable ref
     modifyIORef ref (\sv -> modifyCurrentStore sv (\st0 -> storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)))
     makeTransition ref
 
@@ -502,7 +476,6 @@ saveQuitDialog ref fs = do
          $ "Save changes to the following files?\n" 
          ++ (intercalate "\n" $ fs) 
 
-    --G.widgetShow g
     _ <- G.dialogAddButton g "Yes"    G.ResponseYes
     _ <- G.dialogAddButton g "No"     G.ResponseNo
     _ <- G.dialogAddButton g "Cancel" G.ResponseCancel
@@ -933,8 +906,6 @@ sourceWindowDisable ref = do
     sv <- readIORef ref
     G.labelSetText (svInprogLab sv) ""
     codeWinClearSelection (svCodeWin sv)
-    --G.labelSetText       (svContLab sv)   ""
-    --G.widgetSetSensitive (svContTog sv)   False
 
 -- Command buttons --
 commandButtonsUpdate :: RSourceView c a -> IO ()
@@ -947,10 +918,6 @@ commandButtonsUpdate ref = do
     let lab = currentLocLabel sv
         en = -- current process must be enabled and ...
              pen
---             case lab of
---                  LInst _      -> True
---                  LPause _ _ c -> pen && (storeEvalBool (currentStore sv) c == True)
---                  LFinal _ _   -> pen && (not $ null $ Graph.lsuc (currentCFA sv) (currentLoc sv))
              && 
              -- ... non-determinism must be resolved
              -- (all scalar tmp variables that affect the next transition must be assigned)
@@ -962,17 +929,9 @@ commandButtonsUpdate ref = do
     G.widgetSetSensitive (svSaveAllButton sv) True
     G.widgetSetSensitive (svStepButton sv)    en
     G.widgetSetSensitive (svRunButton sv)     en
-    G.widgetSetSensitive (svMagExitButton sv) $  (currentMagic sv)                                  -- we're inside a magic block
-                                              && (svTracePos sv == 0)                               -- there is no transition in progress
-                                              && isControllableCode sv (svPID sv) (currentStack sv) -- current process is inside the MB
     G.widgetSetSensitive (svMagicButton sv) $  (isMBLabel $ currentLocLabel sv)                     -- we're at a magic block entrance
                                             && (currentMagic sv)
                                             && (svTracePos sv == 0)                                 -- there is no transition in progress
-
---    G.widgetSetSensitive (svContButton sv) $  (currentMagic sv)                                  -- we're inside a magic block
---                                           && (svTracePos sv == 0)                               -- there is no transition in progress
---                                           && (not $ currentControllable sv)                     -- we're in an uncontrollable state
---                                           && isControllableCode sv (svPID sv) (currentStack sv) -- current process is inside the MB
 
 commandButtonsDisable :: RSourceView c a -> IO ()
 commandButtonsDisable ref = do
@@ -981,8 +940,6 @@ commandButtonsDisable ref = do
     G.widgetSetSensitive (svSaveAllButton sv) False
     G.widgetSetSensitive (svStepButton sv)    False
     G.widgetSetSensitive (svRunButton sv)     False
-    G.widgetSetSensitive (svMagExitButton sv) False
-    -- G.widgetSetSensitive (svContButton sv)    False
     G.widgetSetSensitive (svMagicButton sv)   False
 
 -- Resolve --
@@ -1128,28 +1085,6 @@ autoResolve1 ref e = do
                                then modifyCurrentStore sv (\s -> storeSet s e (Just $ SVal $ valDefault e))
                                else sv)
     
-
---actionSelectorRun :: (D.Rel c v a s) => RSourceView c a -> IO ()
---actionSelectorRun ref = do
---    sv@SourceView{..} <- readIORef ref
---    text <- actionSelGetAction ref
---    let fname = hash text
---        fpath = "/tmp/" ++ show fname
---    case compileControllableAction svSolver svInputSpec svFlatSpec svPID (frScope $ head $ currentStack sv) text fpath of
---        Left e    -> D.showMessage svModel G.MessageError e
---        Right cfa -> do switchToControllable ref 
---                        writeFile fpath text
---                        runControllableCFA ref cfa
-    
---switchToControllable :: (D.Rel c v a s) => RSourceView c a -> IO ()
---switchToControllable ref = do
---    sv0 <- readIORef ref
---    let sv1 = setLEPID (EPIDProc pidIdle) sv0
---        sv2 = modifyCurrentStore sv1 (\st0 -> storeSet st0 mkContLVar (Just $ SVal $ BoolVal True))
---    when (not $ storeEvalBool (currentStore sv1) mkContVar) $ do
---        writeIORef ref sv2
---        makeTransition ref
-
 runControllableCFA :: RSourceView c a -> CFA -> IO ()
 runControllableCFA ref cfa = do
     -- Push controllable cfa on the stack
@@ -1248,7 +1183,6 @@ findActiveMagicBlock flatspec spec st =
 autogen :: (D.Rel c v a s) => RSourceView c a -> IO ()
 autogen ref = do
     -- make sure we're in controllable state
-    --switchToControllable ref
     sv@SourceView{..} <- readIORef ref
     let ActStat (F.SMagic p _) = locAct $ currentLocLabel sv
     -- request transition from oracle
@@ -1405,12 +1339,6 @@ stackGetMBID' sv mmbid (f0:f1:fs) | isFrameMagic f1 =
           (\mbid -> stackGetMBID' sv (Just $ mbidChild mbid $ frLoc f0) (f1:fs))
           mmbid
                                   | otherwise       = stackGetMBID' sv mmbid (f1:fs)
-
--- Find out what the process is about to do (or is currently doing) based on its stack:
--- run a normal transition, or a controllable transition
---procGetEPID :: SourceView c a -> PrID -> EPID
---procGetEPID sv pid | isProcControllableCode sv pid = EPIDCont
---                   | otherwise                     = EPIDProc pid
 
 stackGetCFA :: SourceView c a -> PrID -> EProcStack -> CFA
 stackGetCFA sv pid (EProcStack stack) = stackGetCFA' sv stack pid
