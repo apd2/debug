@@ -376,7 +376,7 @@ stepAction ref = do
     -- when (isProcControllableCode sv' (svPID sv')) $ switchToControllable ref
     sv <- readIORef ref
     -- sync PID
-    let sv0 = maybeSetLCont $ setLEPID (procGetEPID sv (svPID sv)) sv
+    let sv0 = maybeSetLCont $ setLPID (svPID sv) sv
     (msv1, entered) <- maybeEnterMB sv0
     -- don't make another step if we entered MB
     let msv' = maybe Nothing (\sv1 -> if' entered (Just sv1) (step sv1)) msv1 
@@ -406,7 +406,7 @@ runAction ref = do
     -- when (isProcControllableCode sv' (svPID sv')) $ switchToControllable ref
     sv <- readIORef ref
     -- sync PID
-    let sv0 = maybeSetLCont $ setLEPID (procGetEPID sv (svPID sv)) sv
+    let sv0 = maybeSetLCont $ setLPID (svPID sv) sv
     (msv1, _) <- maybeEnterMB sv0
     let msv' = maybe Nothing run msv1
     case msv' of
@@ -449,12 +449,12 @@ simulateTransition flatspec spec absvars st lab =
                               , svTracePos   = 0
                               , svStackFrame = 0
                               }
-        pid = case parseEPIDEnumerator $ storeEvalEnum lab mkEPIDLVar of
-                   EPIDProc p -> p
-                   _          -> -- find process currently inside a magic block
-                                 case findProcInsideMagic sv0 of 
-                                      Just p -> p
-                                      _      -> error $ "simulateTransition no process inside a magic block"
+        pid = if storeEvalBool lab mkContLVar
+                 then -- find process currently inside a magic block
+                      case findProcInsideMagic sv0 of 
+                           Just p -> p
+                           _      -> error $ "simulateTransition no process inside a magic block"
+                 else parsePIDEnumerator $ storeEvalEnum lab mkPIDLVar
 
         sv1 = if storeEvalBool lab mkContLVar
                  then -- execute controllable CFA
@@ -1438,18 +1438,20 @@ isProcEnabled sv pid = do
                      LPause _ _ _ c -> storeEvalBool sstStore c
                      LFinal _ _ _   -> (not $ null $ Graph.lsuc cfa loc) || isFrameMagic frame
                      _              -> True
-    return $ case storeTryEvalEnum (svTmp sv) mkEPIDLVar of
-                  Just e -> case parseEPIDEnumerator e of
-                                 EPIDCont -> isControllableCode sv pid stack
-                                 epid     -> procGetEPID sv pid == epid
-                  _      -> -- If the process is running uncontrollable code, then the enabled condition is
-                            -- its wait condition
-                            -- If the process is running controllable code, then it is enabled if its program
-                            -- counter (at the top of the stack) is either inside a magic block or at a pause
-                            -- location in a nested CFA whose wait condition is satisfied.
-                            if' (isControllableCode sv pid stack) 
-                                (cond || (isMBLabel lab))
-                                cond
+    return $ case storeTryEvalBool (svTmp sv) mkContLVar of
+                  Just False -> case fmap parsePIDEnumerator $ storeTryEvalEnum (svTmp sv) mkPIDLVar of
+                                     Nothing   -> (not $ isControllableCode sv pid stack) && cond
+                                     Just pid' -> pid == pid'
+                  Just True  -> isControllableCode sv pid stack
+                  Nothing    -> -- If the process is running uncontrollable code, then the enabled condition is
+                                -- its wait condition
+                                -- If the process is running controllable code, then it is enabled if its program
+                                -- counter (at the top of the stack) is either inside a magic block or at a pause
+                                -- location in a nested CFA whose wait condition is satisfied.
+                                if' (isControllableCode sv pid stack) 
+                                    (cond || (isMBLabel lab))
+                                    cond
+
 
 isProcControllableCode :: SourceView c a -> PrID -> Bool
 isProcControllableCode sv pid = isControllableCode sv pid (EProcStack stack)
@@ -1684,8 +1686,8 @@ applyExplicitUpdates sv = foldl' (\s (n, upd) -> let asn = snd $ fromJust $ find
     initstore = storeUnion (initialStore sv) (storeProject (currentStore sv) (map varName $ specTmpVar spec))
 
 
-setLEPID :: EPID -> SourceView c a -> SourceView c a
-setLEPID epid sv = modifyCurrentStore sv (\s -> storeSet s mkEPIDLVar (Just $ SVal $ EnumVal $ mkEPIDEnumeratorName epid))
+setLPID :: PrID -> SourceView c a -> SourceView c a
+setLPID pid sv = modifyCurrentStore sv (\s -> storeSet s mkPIDLVar (Just $ SVal $ EnumVal $ mkPIDEnumeratorName pid))
 
 maybeSetLCont :: SourceView c a -> SourceView c a
 maybeSetLCont sv | (isNothing $ storeTryEvalBool (currentStore sv) mkContLVar) = 
