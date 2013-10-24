@@ -30,16 +30,20 @@ tranAnnotStyle      =   GC {gcFG = (65535, 0, 0),         gcLW=0, gcLS=True}
 stateAnnotStyle     =   GC {gcFG = (65535, 0, 0),         gcLW=0, gcLS=True}
 labelStyle          =   GC {gcFG = (0, 0, 0),             gcLW=0, gcLS=True}
 
-transitionStyle     =   GC {gcFG = (0, 40000, 0),         gcLW=2, gcLS=True}
+controllableStyle   =   GC {gcFG = (0    , 40000, 0),     gcLW=2, gcLS=True}
+uncontrollableStyle =   GC {gcFG = (65535, 0    , 0),     gcLW=2, gcLS=True}
+neutralStyle        =   GC {gcFG = (40000, 40000, 40000), gcLW=2, gcLS=True}
+
+-- transitionStyle     =   GC {gcFG = (0, 40000, 0),         gcLW=2, gcLS=True}
 subsetStyle         =   GC {gcFG = (40000, 40000, 40000), gcLW=1, gcLS=True}
 overlapStyle        =   GC {gcFG = (40000, 40000, 40000), gcLW=2, gcLS=False}
 eqStyle             =   GC {gcFG = (40000, 40000, 40000), gcLW=2, gcLS=True}
 
-controllableStyle   = ( GC {gcFG = (0    ,     0, 40000), gcLW=2, gcLS=True}
-                      , GC {gcFG = (0    , 65535, 0),     gcLW=0, gcLS=False})
-uncontrollableStyle = ( GC {gcFG = (0    ,     0, 40000), gcLW=2, gcLS=True}
-                      , GC {gcFG = (65535,     0, 0),     gcLW=0, gcLS=False})
-bothStyle           = ( GC {gcFG = (0    ,     0, 40000), gcLW=2, gcLS=True}
+--controllableStyle   = ( GC {gcFG = (0    ,     0, 40000), gcLW=2, gcLS=True}
+--                      , GC {gcFG = (0    , 65535, 0),     gcLW=0, gcLS=False})
+--uncontrollableStyle = ( GC {gcFG = (0    ,     0, 40000), gcLW=2, gcLS=True}
+--                      , GC {gcFG = (65535,     0, 0),     gcLW=0, gcLS=False})
+defStateStyle       = ( GC {gcFG = (0    ,     0, 40000), gcLW=2, gcLS=True}
                       , GC {gcFG = (40000, 40000, 40000), gcLW=0, gcLS=False})
 
 -- show concrete nodes as smaller circles
@@ -185,32 +189,36 @@ findTransition gv fromid toid tran =
                                _                      -> False) 
     $ G.labEdges $ gvGraph gv
 
+getTransition :: GraphView c a b d -> GEdgeId -> D.Transition a b d
+getTransition gv eid = tran
+    where Just (EdgeTransition _ tran) = findEdge gv eid
+
 setSelectedState :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> Maybe G.Node -> IO (GraphView c a b d)
 setSelectedState gv mid = do
     let gv' = gv {gvSelectedState = mid}
     -- Deselect previous active node
     case gvSelectedState gv of
          Nothing  -> return ()
-         Just sid -> do style <- stateStyle gv' sid
-                        graphDrawSetNodeStyle (gvGraphDraw gv) sid style
+         Just sid -> graphDrawSetNodeStyle (gvGraphDraw gv) sid $ stateStyle gv' sid
     -- Set new selection
     case mid of
          Nothing  -> return ()
-         Just sid -> do style <- stateStyle gv' sid
-                        graphDrawSetNodeStyle (gvGraphDraw gv) sid style
+         Just sid -> graphDrawSetNodeStyle (gvGraphDraw gv) sid $ stateStyle gv' sid
     return gv'
 
-setSelectedTrans :: GraphView c a b d -> (Maybe GEdgeId) -> IO (GraphView c a b d)
+setSelectedTrans :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> (Maybe GEdgeId) -> IO (GraphView c a b d)
 setSelectedTrans gv mid = do
     let gv' = gv {gvSelectedTrans = mid}
     -- Deselect previous active edge
     case gvSelectedTrans gv of
          Nothing  -> return ()
-         Just eid -> graphDrawSetEdgeStyle (gvGraphDraw gv) eid transitionStyle
+         Just eid -> do style <- transitionStyle gv' $ getTransition gv' eid
+                        graphDrawSetEdgeStyle (gvGraphDraw gv) eid style
     -- Set new selection
     case mid of
          Nothing  -> return ()
-         Just eid -> graphDrawSetEdgeStyle (gvGraphDraw gv) eid (transitionStyle {gcLW = gcLW transitionStyle + 2})
+         Just eid -> do style <- transitionStyle gv' $ getTransition gv' eid
+                        graphDrawSetEdgeStyle (gvGraphDraw gv) eid (style {gcLW = gcLW style + 2})
     return gv'
 
 findOrCreateState :: (D.Rel c v a s, D.Vals b, D.Vals d, ?m::c) => GraphView c a b d -> Maybe G.Node -> D.State a d -> IO (G.Node, GraphView c a b d)
@@ -236,7 +244,7 @@ createState gv coords s = do
         (supersets, other2) = partition ((.== t) . (rel .->) . D.sAbstract . getState gv) other1
         overlaps            = filter    ((./= b) . (.& rel)  . D.sAbstract . getState gv) other2
         rscale = if isNothing (D.sConcrete s) then 1.0 else scaleConcreteNode
-    (ls, as) <- stateStyle gv' sid
+        (ls, as) = stateStyle gv' sid
     annots <- stateAnnots gv' rel
     graphDrawInsertNode (gvGraphDraw gv') sid annots coords rscale (ls, as)
     gv0 <- foldM (\_gv sid' -> (liftM snd) $ createEqEdge      _gv sid  sid') gv' eqsets
@@ -273,10 +281,11 @@ concretiseState ref nid = do
                        writeIORef ref gv'
                        D.modelSelectState (gvModel gv') (Just $ getState gv' nid')
 
-createTransition :: (D.Rel c v a s, ?m::c) => GraphView c a b d -> G.Node -> G.Node -> D.Transition a b d -> IO (GEdgeId, GraphView c a b d)
+createTransition :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> G.Node -> G.Node -> D.Transition a b d -> IO (GEdgeId, GraphView c a b d)
 createTransition gv fromid toid tran = do
     annots <- transitionAnnots gv tran
-    createEdge gv fromid toid (\eid -> EdgeTransition {eId = eid, eTran =  tran}) annots transitionStyle EndArrow True
+    style <- transitionStyle gv tran
+    createEdge gv fromid toid (\eid -> EdgeTransition {eId = eid, eTran =  tran}) annots style EndArrow True
 
 createSubsetEdge :: GraphView c a b d -> G.Node -> G.Node -> IO (GEdgeId, GraphView c a b d)
 createSubsetEdge gv fromid toid = 
@@ -313,18 +322,11 @@ chooseLocationFrom gv (x,y) = do
          [] -> return (x,y)
          _  -> chooseLocationFrom gv (x,y+graphSearchStep)
 
-stateStyle :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> G.Node -> IO (GC, GC)
-stateStyle gv sid = do
-    model <- readIORef $ gvModel gv
-    cat   <- D.stateCategory model $ D.sAbstract $ getState gv sid
-    -- style depends on state category and whether it is a selected state
-    let (ls, as) = case cat of
-                        D.StateControllable   -> controllableStyle
-                        D.StateUncontrollable -> uncontrollableStyle
-                        D.StateBoth           -> bothStyle
-    return $ if Just sid == gvSelectedState gv
-                then (ls{gcLW = gcLW ls + 1}, as{gcFG = map3 ((`shiftR` 1),(`shiftR` 1),(`shiftR` 1)) $ gcFG as})
-                else (ls,as)
+stateStyle :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> G.Node -> (GC, GC)
+stateStyle gv sid = if Just sid == gvSelectedState gv
+                       then (ls{gcLW = gcLW ls + 1}, as{gcFG = map3 ((`shiftR` 1),(`shiftR` 1),(`shiftR` 1)) $ gcFG as})
+                       else (ls,as)
+    where (ls, as) = defStateStyle
 
 stateAnnots :: (D.Rel c v a s, ?m::c) => GraphView c a b d -> a -> IO [GAnnotation]
 stateAnnots gv srel = do
@@ -335,6 +337,15 @@ stateAnnots gv srel = do
                     $ filter ((/= D.contRelName) . fst) staterels 
     return $ map (\n -> GAnnotation n AnnotRight stateAnnotStyle) supersets
 
+transitionStyle :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> D.Transition a b d -> IO GC
+transitionStyle gv tran = do
+    model <- readIORef $ gvModel gv
+    cat <- D.transitionCategory model tran
+    return $ case cat of
+                  D.TranControllable   -> controllableStyle
+                  D.TranUncontrollable -> uncontrollableStyle
+                  _                    -> neutralStyle
+  
 transitionAnnots :: (D.Rel c v a s, ?m::c) => GraphView c a b d -> D.Transition a b d -> IO [GAnnotation]
 transitionAnnots gv tran = do
     model <- readIORef $ gvModel gv

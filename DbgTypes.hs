@@ -7,8 +7,8 @@ module DbgTypes(Rel,
                 Type(..),
                 State(..),
                 isConcreteState,
-                StateCategory(..),
-                stateCategory,
+                TranCategory(..),
+                transitionCategory,
                 Transition(..),
                 tranTo',
                 tranRel,
@@ -138,9 +138,9 @@ data ViewEvents a b d = ViewEvents {
      evtTRelUpdated        :: IO ()
 }
 
-data StateCategory = StateControllable
-                   | StateUncontrollable
-                   | StateBoth
+data TranCategory = TranControllable
+                  | TranUncontrollable
+                  | TranNeutral
 
 data State a d = State {
     sAbstract :: a,          -- abstract state
@@ -155,13 +155,17 @@ isConcreteState = isJust . sConcrete
 instance (?m::c, L.Boolean c a, Eq d) => Eq (State a d) where
     (==) x y = sAbstract x .== sAbstract y && (fmap fst $ sConcrete x) == (fmap fst $ sConcrete y)
 
-stateCategory :: (Rel c v a s, ?m::c) => Model c a b d -> a -> IO StateCategory
-stateCategory model rel = 
+transitionCategory :: (Rel c v a s, ?m::c) => Model c a b d -> Transition a b d -> IO TranCategory
+transitionCategory model tran = do
+    let c = sAbstract $ tranFrom tran
+        l = tranAbstractLabel tran
+        u = tranUntracked tran
+        trel = c .& l .& u
     case find ((==contRelName) . fst) (mStateRels model) of
-         Nothing        -> return StateBoth
-         Just (_, cont) -> if' (rel `leq` cont) (return StateControllable) $
-                           if' (rel `leq` nt cont) (return StateUncontrollable) $
-                           return StateBoth
+         Nothing        -> return TranNeutral
+         Just (_, cont) -> if' (trel `leq` cont)    (return TranControllable) $
+                           if' (trel `leq` nt cont) (return TranUncontrollable) $
+                           return TranNeutral
 
 data Transition a b d = Transition {
     tranFrom          :: State a d,
