@@ -14,6 +14,7 @@ import Util
 
 data VarView c a b d = VarView {
     vvModel     :: D.RModel c a b d,
+    vvApplyBut  :: G.Button,
     vvSelection :: Maybe (Either (D.State a d) (D.Transition a b d)),
     vvExplorer  :: RSetExplorer c a
 }
@@ -45,12 +46,17 @@ varViewNew rmodel = do
                    , ("Label Variables",      False, D.mLabelVars      model)
                    , ("Next-state Variables", True,  D.mNextStateVars  model)
                    ]
-    explorer         <- setExplorerNew ?m sections (SetExplorerEvents {evtValueChanged = return ()})
-    w                <- setExplorerGetWidget explorer
+    runbutton <- G.buttonNewFromStock G.stockApply
+    G.widgetShow runbutton
     ref <- newIORef $ VarView { vvModel     = rmodel
+                              , vvApplyBut  = runbutton
                               , vvSelection = Nothing 
-                              , vvExplorer  = explorer
-                              }
+                              , vvExplorer  = error "VarView: vvExplorer undefined"
+                              }                  
+    explorer         <- setExplorerNew ?m sections (SetExplorerEvents {evtValueChanged = valueChanged ref})
+    w                <- setExplorerGetWidget explorer
+    modifyIORef ref $ \vv -> vv{vvExplorer = explorer}
+
     -- Top-level vbox
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox
@@ -68,8 +74,6 @@ varViewNew rmodel = do
     G.widgetShow resetbutton
     G.boxPackStart bbox resetbutton G.PackNatural 10
 
-    runbutton <- G.buttonNewFromStock G.stockApply
-    G.widgetShow runbutton
     _ <- G.on runbutton G.buttonActivated (executeTransition ref)
     G.boxPackStart bbox runbutton G.PackNatural 0
 
@@ -109,6 +113,16 @@ update ref = do
                    Just (Left st)  -> (D.sAbstract st) .& (maybe t snd $ D.sConcrete st) .& trel 
                    Just (Right tr) -> D.tranRel model tr
     setExplorerSetRelation vvExplorer rel
+
+valueChanged :: (D.Rel c v a s) => RVarView c a b d -> IO ()
+valueChanged ref = do
+    VarView{..} <- readIORef ref
+    model <- readIORef vvModel
+    let ?m = D.mCtx model
+    [from, _, label, _] <- setExplorerGetVarAssignment vvExplorer
+    if ((conj $ map snd label ++ map snd from) .== b)
+       then G.widgetSetSensitive vvApplyBut False
+       else G.widgetSetSensitive vvApplyBut True
 
 ---------------------------------------------------------------------
 -- Private functions
