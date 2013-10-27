@@ -41,25 +41,26 @@ import SMTSolver
 
 import CodeWin
 
-import qualified NS              as F
-import qualified Method          as F
-import qualified Process         as F
-import qualified InstTree        as F
-import qualified Template        as F
-import qualified TemplateOps     as F
-import qualified ExprInline      as F
-import qualified Spec            as F
-import qualified Expr            as F
-import qualified ExprFlatten     as F
-import qualified ExprOps         as F
-import qualified ExprValidate    as F
-import qualified Statement       as F
-import qualified StatementOps    as F
-import qualified StatementInline as F
-import qualified Name            as F
-import qualified Type            as F
-import qualified Pos             as F
-import qualified TypeOps         as F
+import qualified NS                as F
+import qualified Method            as F
+import qualified Process           as F
+import qualified InstTree          as F
+import qualified Template          as F
+import qualified TemplateOps       as F
+import qualified ExprInline        as F
+import qualified Spec              as F
+import qualified Expr              as F
+import qualified ExprFlatten       as F
+import qualified ExprOps           as F
+import qualified ExprValidate      as F
+import qualified Statement         as F
+import qualified StatementOps      as F
+import qualified StatementValidate as F
+import qualified StatementInline   as F
+import qualified Name              as F
+import qualified Type              as F
+import qualified Pos               as F
+import qualified TypeOps           as F
 
 --------------------------------------------------------------
 -- Constants
