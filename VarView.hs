@@ -77,7 +77,7 @@ varViewNew rmodel = do
                           , D.evtTransitionSelected = varViewTransitionSelected ref
                           , D.evtTRelUpdated        = update                    ref
                           }
-    D.modelAddOracle rmodel (D.Oracle "VarView_oracle" (fmap Just $ getTransition ref))
+    D.modelAddOracle rmodel (D.Oracle "VarView_oracle" (fmap (\tr -> if' (D.tranAbstractLabel tr .== b) Nothing (Just tr)) $ getTransition ref))
     return $ D.View { D.viewName      = "Variables"
                     , D.viewDefAlign  = D.AlignLeft
                     , D.viewShow      = return ()
