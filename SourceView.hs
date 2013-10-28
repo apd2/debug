@@ -796,7 +796,7 @@ watchCreate ref = do
                      G.set valrend [G.cellTextMarkup G.:= Just $ G.escapeMarkup 
                                                           $ case mexp of 
                                                                  Nothing  -> ""
-                                                                 Just e -> case storeEvalStr svInputSpec svFlatSpec  
+                                                                 Just e -> case storeEvalStr svInputSpec svFlatSpec svSpec
                                                                                              (currentStore sv) 
                                                                                              (Just svPID) 
                                                                                              (frScope $ currentStackFrames sv !! svStackFrame) e of
@@ -1625,8 +1625,8 @@ maybeSetLCont sv | (isNothing $ storeTryEvalBool (currentStore sv) mkContLVar) =
                  | otherwise                                                  = sv
 
 -- Evaluate expression written in terms of variables in the original input spec.
-storeEvalStr :: F.Spec -> F.Spec -> Store -> Maybe PrID -> F.Scope -> String -> Either String Store
-storeEvalStr inspec flatspec store mpid sc str = do
+storeEvalStr :: F.Spec -> F.Spec -> Spec -> Store -> Maybe PrID -> F.Scope -> String -> Either String Store
+storeEvalStr inspec flatspec spec store mpid sc str = do
     -- Apply all transformations that the input spec goes through to the expression:
     -- 1. parse
     expr <- case parse (Grammar.detexprParser <* eof) "" str of
@@ -1636,6 +1636,7 @@ storeEvalStr inspec flatspec store mpid sc str = do
     -- 2. validate
     let ?spec  = inspec
         ?privoverride = True 
+        ?ispec = spec
     F.validateExpr scope expr
     let ?scope = scope
         in when (not $ F.exprNoSideEffects expr) $ throwError "Expression has side effects"
@@ -1676,6 +1677,7 @@ compileMB sv@SourceView{..} pid str = do
     let (scope,iid) = flatScopeToScope svInputSpec sc
     -- 2. validate
     let ?spec = svInputSpec
+        ?ispec = svSpec
         ?privoverride = False
     F.validateStat scope stat
     validateControllableStat scope stat
