@@ -1298,14 +1298,14 @@ mbStackToProcStack' st0 cw mbid (MBFrame{..}:fs) =
     case cwLookupMB cw mbid of
          Nothing -> []
          Just mb -> if mbEpoch mb == mbfEpoch
-                       then let st1 = FrameMagic sc mbfLoc cfa : st0 
-                                -- compute CFA stack for the innermost MB
+                       then let -- compute CFA stack for the innermost MB
                                 cfa = case mb of
                                            MBA mba -> mbaCFA mba
                                            MBI mbi -> mbiCFA mbi
                                 lab = cfaLocLabel mbfLoc cfa
                                 st' = stackToProcStack (locStack lab) 
-                                sc  = frScope $ head st' in
+                                sc  = frScope $ head st' 
+                                st1 = FrameMagic sc mbfLoc cfa : st0 in
                             if' (null fs) 
                                 ((init st') ++ st1) {- bottom of st' is the same as FrameMagic -}
                                 (mbStackToProcStack' st1 cw (mbidChild mbid mbfLoc) fs)
@@ -1564,14 +1564,12 @@ microstep sv =
                                 $ Just $ traceAppend sv store stack
 
 microstep' :: SourceView c a -> (Loc, TranLabel) -> Maybe (Store, EProcStack)
-microstep' sv (to, TranCall meth mretloc)  = -- insert new stack frame and mofify the old frame to point to return location,
-                                             -- so that Return can be performed later
-                                             let ?spec = svFlatSpec sv in
-                                             let f0:frames = currentStackFrames sv
-                                                 stack' = case mretloc of
-                                                               Nothing -> f0 : frames
-                                                               Just l  -> f0{frLoc = l} : frames
-                                                 sc = F.ScopeMethod tmMain meth
+microstep' sv (to, TranCall meth retloc)  = -- insert new stack frame and mofify the old frame to point to return location,
+                                            -- so that Return can be performed later
+                                            let ?spec = svFlatSpec sv in
+                                            let f0:frames = currentStackFrames sv
+                                                stack' = f0{frLoc = retloc} : frames
+                                                sc = F.ScopeMethod tmMain meth
                                              in if frScope f0 == sc -- avoid creating duplicate frames (happens with task calls)
                                                    then Just (currentStore sv, EProcStack $ f0{frLoc=to} : frames)
                                                    else Just (currentStore sv, EProcStack $ (FrameRegular sc to) : stack')
