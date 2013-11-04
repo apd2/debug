@@ -65,7 +65,7 @@ data SynthesisRes c a = SynthesisRes { srWin           :: Maybe Bool
                                      , srCMinusU       :: a
                                      }
 
-mkSynthesisRes :: (MonadResource (DDNode s u) (ST s) mr) => I.Spec -> STDdManager s u -> (Maybe Bool, RefineInfo s u AbsVar AbsVar) -> mr (ST s) (SynthesisRes DdManager DdNode) 
+mkSynthesisRes :: (MonadResource (DDNode s u) (ST s) mr) => I.Spec -> STDdManager s u -> (Maybe Bool, RefineInfo s u AbsVar AbsVar AbsPriv) -> mr (ST s) (SynthesisRes DdManager DdNode) 
 mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
     let ?spec = spec 
         ?m    = toDdManager m
