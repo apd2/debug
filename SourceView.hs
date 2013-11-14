@@ -1701,7 +1701,7 @@ compileMB sv@SourceView{..} pid str = do
                                 ctxFinal aft) ctx
     assert (null $ ctxVar ctx') (F.pos stat) "Cannot perform non-deterministic controllable action"
     -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
-    let cfa   = ctxCFA ctx'
+    let cfa   = cfaMapExpr (ctxCFA ctx') $ F.exprExpandLabels svSpec
         cfar  = cfaPruneUnreachable cfa [cfaInitLoc]
     return {-$ cfaTraceFile cfar "action"-} cfar
 
