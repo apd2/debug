@@ -13,6 +13,7 @@ import Data.Maybe
 import qualified Data.Map    as M
 import Debug.Trace
 
+import Util hiding (trace)
 import Store
 import SMTSolver
 import Predicate
@@ -37,7 +38,8 @@ concretiseRel mvars0 rel = do
     -- if one does not exist)
     qb <- oneCube (D.idxToVS $ concatMap D.mvarIdx mvars) rel
     asn <- D.oneSatVal qb mvars
-    let fs = map (\(mvar, val) -> avarAsnToFormula (?absvars M.! D.mvarName mvar) val) asn
+    let fs = mapMaybe (\(mvar, val) -> let av = ?absvars M.! D.mvarName mvar in 
+                                       if' (avarIsPred av) Nothing (Just $ avarAsnToFormula av val)) asn
     -- Try to concretise this assignment
     case smtGetModel ?solver fs of
          Nothing            -> Nothing

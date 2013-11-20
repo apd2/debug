@@ -801,7 +801,8 @@ watchCreate ref = do
                                                                                              (Just svPID) 
                                                                                              (frScope $ currentStackFrames sv !! svStackFrame) e of
                                                                                 Left er -> er
-                                                                                Right v -> show v])
+                                                                                Right v -> let str = show v in
+                                                                                           if' (length str > 256) ((take 256 str) ++ "...") str])
     _ <- G.treeViewAppendColumn view valcol
 
     _ <- G.on view G.keyPressEvent (do key <- G.eventKeyVal
