@@ -79,9 +79,9 @@ concretiseLabel cstate alabel = do
              $ concatMap (concatMap avarTerms . fAbsVars) lfs
    -- Check for model
    case smtGetModel ?solver $ lfs ++ sfs of
-        Just (Right (SStruct fs)) -> -- Keep temporary variables only
-                                     Just $ storeExtendDefaultLabel $ SStruct $ M.filterWithKey (\n _ -> (varCat $ getVar n) == VarTmp) fs
-        _                         -> Nothing
+        Just (Right (SStruct fs sp)) -> -- Keep temporary variables only
+                                        Just $ storeExtendDefaultLabel $ SStruct (M.filterWithKey (\n _ -> (varCat $ getVar n) == VarTmp) fs) sp
+        _                            -> Nothing
 
 -- Inputs:
 -- * Concrete from-state

@@ -329,7 +329,7 @@ sourceViewStateSelected ref (Just s) | (not $ D.isConcreteState s) = disable ref
                                      | otherwise                   = do
     putStrLn $ "sourceViewStateSelected: store: " ++ (show $ D.sConcrete s)
     modifyIORef ref (\sv -> sv { svState    = s
-                               , svTmp      = SStruct $ M.empty})
+                               , svTmp      = SStruct M.empty (svSpec sv)})
     processSelectorChooseUniqueEnabled ref
     reset ref
     putStrLn "sourceViewStateSelected done"
@@ -1141,7 +1141,7 @@ storeToFExpr x s =
                                         tname' = case tsc of 
                                                       F.ScopeTop         -> [F.name decl]
                                                       F.ScopeTemplate tm -> [F.name tm, F.name decl]
-                                        SStruct sfs = s
+                                        SStruct sfs _ = s
             F.ArraySpec  _ _ _ -> error "storeToFExpr does not support array arguments"
             _                  -> valToFExpr (F.tspec $ F.typ' x) v
                                   where SVal v = s
@@ -1521,7 +1521,7 @@ getDelay sv p = (isDelayLabel $ getLocLabel sv p) &&
                 (not $ (getLoc sv p == cfaInitLoc) && (isJust $ stackGetMBID sv $ getStack sv p))
                 
 getStore :: SourceView c a -> Int -> Store
-getStore sv p | p >= (length $ svTrace sv) = SStruct $ M.empty
+getStore sv p | p >= (length $ svTrace sv) = SStruct M.empty (svSpec sv)
               | otherwise                  = teStore $ svTrace sv !! p
 
 getStack :: SourceView c a -> Int -> EProcStack
