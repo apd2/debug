@@ -41,7 +41,7 @@ concretiseRel mvars0 rel = do
     let fs = mapMaybe (\(mvar, val) -> let av = ?absvars M.! D.mvarName mvar in 
                                        if' (avarIsPred av) Nothing (Just $ avarAsnToFormula av val)) asn
     -- Try to concretise this assignment
-    case smtGetModel ?solver fs of
+    case smtGetModelOrCore ?solver fs of
          Nothing            -> Nothing
          Just (Left core)   -> do -- Remove unsat core from rel and repeat
                 let unsatcube = trace ("concretiseRel (" ++ (show $ length mvars) ++ " vars): core = " ++ show core)
@@ -79,9 +79,9 @@ concretiseLabel cstate alabel = do
              $ concatMap (concatMap avarTerms . fAbsVars) lfs
    -- Check for model
    case smtGetModel ?solver $ lfs ++ sfs of
-        Just (Right (SStruct fs sp)) -> -- Keep temporary variables only
-                                        Just $ storeExtendDefaultLabel $ SStruct (M.filterWithKey (\n _ -> (varCat $ getVar n) == VarTmp) fs) sp
-        _                            -> Nothing
+        Just (Just (SStruct fs sp)) -> -- Keep temporary variables only
+                                       Just $ storeExtendDefaultLabel $ SStruct (M.filterWithKey (\n _ -> (varCat $ getVar n) == VarTmp) fs) sp
+        _                           -> Nothing
 
 -- Inputs:
 -- * Concrete from-state
