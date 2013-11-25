@@ -14,6 +14,7 @@ import IDE
 import Icon
 import VarView
 import GraphView
+import RelationView
 
 dbgDefaultWidth  = 1024
 dbgDefaultHeight = 768
@@ -49,9 +50,9 @@ dbgSetView ref idx view = do
 
 -- List of available views
 viewFactories :: (Rel c v a s, Vals b, Vals d) => [(RModel c a b d -> IO (View a b d), Bool)]
-viewFactories = [ (varViewNew,   True)
-                , (graphViewNew, True)]
-
+viewFactories = [ (varViewNew     ,   True)
+                , (relationViewNew,   True)
+                , (graphViewNew   , True)]
 
 -- GUI manager
 debugGUI :: (Rel c v a s, Vals b, Vals d) => [(RModel c a b d -> IO (View a b d), Bool)] -> Model c a b d -> IO ()

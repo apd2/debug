@@ -261,7 +261,7 @@ mSetConstraint m cname (Just r) = mUpdateTRel $ m {mConstraints = M.insert cname
 mUpdateTRel :: (Rel c v a s) => Model c a b d -> Model c a b d
 mUpdateTRel m@Model{..} = m {mTransRel = r}
     where r = let ?m = mCtx in 
-              conj $ (snd $ head mTransRels) : (map snd $ M.toList mConstraints)
+              conj $ map snd $ M.toList mConstraints
 
 mAddOracle :: Model c a b d -> Oracle a b d -> Model c a b d
 mAddOracle m oracle = m {mOracles = mOracles m ++ [oracle]}
