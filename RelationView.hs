@@ -3,7 +3,6 @@
 module RelationView (relationViewNew) where
 
 import Data.IORef
-import Data.Tuple.Select
 import Control.Monad
 import qualified Graphics.UI.Gtk            as G
 
@@ -41,16 +40,17 @@ relationViewNew model = do
 
     G.scrolledWindowAddWithViewport scroll vbox
 
-    trels' <- mapM (\(n,r) -> do enbut <- G.checkButtonNewWithLabel n
-                                 _ <- G.on enbut G.toggled (update ref)
-                                 G.widgetShow enbut
-                                 G.boxPackStart vbox enbut G.PackNatural 0
-                                 return (n,r,enbut))
+    trels' <- mapM (\(n,_,r) -> do enbut <- G.checkButtonNewWithLabel n
+                                   _ <- G.on enbut G.toggled (update ref)
+                                   G.widgetShow enbut
+                                   G.boxPackStart vbox enbut G.PackNatural 0
+                                   return (n,r,enbut))
               trels
 
     modifyIORef ref $ \rv -> rv {rvTrans = trels'}
 
-    G.toggleButtonSetActive (sel3 $ head trels') True
+    _ <- mapM (\((_,e,_), (_,_,enbut)) -> G.toggleButtonSetActive enbut e) 
+         $ zip trels trels'
 
     return $ D.View { D.viewName      = "Relations"
                     , D.viewDefAlign  = D.AlignLeft

@@ -350,7 +350,7 @@ transitionAnnots :: (D.Rel c v a s, ?m::c) => GraphView c a b d -> D.Transition 
 transitionAnnots gv tran = do
     model <- readIORef $ gvModel gv
     let tranrels = D.mTransRels model
-        relnames = map fst $ filter (\(_,r) -> (D.tranRel model tran .& r) ./= b) tranrels
+        relnames = map sel1 $ filter (\(_,_,r) -> (D.tranRel model tran .& r) ./= b) tranrels
     labstr <- case D.tranSrc tran of
                    Nothing  -> transitionLabel (gvModel gv) (D.tranAbstractLabel tran)
                    Just str -> return str

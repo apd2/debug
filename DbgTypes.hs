@@ -224,7 +224,7 @@ data Model c a b d = Model {
 
     -- State and transition relations being debugged
     mStateRels            :: [(String, a)],
-    mTransRels            :: [(String, a)],
+    mTransRels            :: [(String, Bool, a)],
 
     -- Callbacks
     mConcretiseState      :: a                -> Maybe (State a d),
@@ -295,7 +295,7 @@ modelLabelVars ref = getIORef mLabelVars ref
 modelInitVars :: RModel c a b d -> IO [ModelVar]
 modelInitVars ref = getIORef mInitVars ref
 
-modelTransRels :: RModel c a b d -> IO [(String, a)]
+modelTransRels :: RModel c a b d -> IO [(String, Bool, a)]
 modelTransRels ref = getIORef mTransRels ref
 
 modelStateRels :: RModel c a b d -> IO [(String, a)]

@@ -10,6 +10,7 @@ module AbstractorIFace( SynthesisRes(..)
 import qualified Data.Map as M
 import Data.List
 import Data.Maybe
+import Data.Tuple.Select
 import Control.Monad
 import Control.Monad.ST
 import Control.Monad.Morph
@@ -24,7 +25,7 @@ import Interface hiding (db)
 import TermiteGame
 import Implicit
 import CuddSymTab
-import BddRecord hiding ((.&), (.|))
+import BddRecord hiding ((.&), (.|), mapVars, bexists, deref)
 import Predicate
 import Store
 import SMTSolver
@@ -43,26 +44,28 @@ import Resource hiding (trace,d)
 
 instance D.Rel DdManager VarData DdNode [[SatBit]]
 
-data SynthesisRes c a = SynthesisRes { srWin           :: Maybe Bool
-                                     , srWinningRegion :: DdNode
-                                     , srStrat         :: [[DdNode]]  -- winning strategy or counterexample
-                                     , srCtx           :: c
-                                     , srStateVars     :: [D.ModelStateVar]
-                                     , srUntrackedVars :: [D.ModelVar]
-                                     , srLabelVars     :: [D.ModelVar]
-                                     , srInitVars      :: [D.ModelVar]
-                                     , srAbsVars       :: M.Map String AbsVar
-                                     , srCont          :: a
-                                     , srInit          :: a
-                                     , srGoals         :: [a]
-                                     , srFairs         :: [a]
-                                     , srTran          :: a
-                                     , srStateLabConstr:: a
-                                     , srInconsistent  :: a
-                                     , srCPlusC        :: a
-                                     , srCMinusC       :: a
-                                     , srCPlusU        :: a
-                                     , srCMinusU       :: a
+data SynthesisRes c a = SynthesisRes { srWin            :: Maybe Bool
+                                     , srWinningRegion  :: DdNode
+                                     , srStrat          :: [[DdNode]]  -- winning strategy or counterexample
+                                     , srCtx            :: c
+                                     , srStateVars      :: [D.ModelStateVar]
+                                     , srUntrackedVars  :: [D.ModelVar]
+                                     , srLabelVars      :: [D.ModelVar]
+                                     , srInitVars       :: [D.ModelVar]
+                                     , srAbsVars        :: M.Map String AbsVar
+                                     , srCont           :: a
+                                     , srInit           :: a
+                                     , srGoals          :: [a]
+                                     , srFairs          :: [a]
+                                     , srTran           :: [a]
+                                     , srStateLabConstr :: a
+                                     , srInconsistent   :: a
+                                     , srConsistent     :: a
+                                     , srConsistent'    :: a
+                                     , srCPlusC         :: a
+                                     , srCMinusC        :: a
+                                     , srCPlusU         :: a
+                                     , srCMinusU        :: a
                                      }
 
 mkSynthesisRes :: (MonadResource (DDNode s u) (ST s) mr) => I.Spec -> STDdManager s u -> (Maybe Bool, RefineInfo s u AbsVar AbsVar AbsPriv) -> mr (ST s) (SynthesisRes DdManager DdNode) 
@@ -87,9 +90,17 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
                                 --                               deref m s
                                 --                               return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
                   Nothing    -> return []
+
     let SectionInfo{..} = _sections pdb
         SymbolInfo{..}  = _symbolTable pdb
-        (state, untracked) = partition func $ M.toList _stateVars
+    consSU           <- lift $ bexists m consistentNoRefine _untrackedCube 
+    consS            <- lift $ bexists m consSU             _labelCube 
+    lift $ deref m consSU
+    srConsistent' <- lift $ (liftM $ toDdNode ?m) $ mapVars m consS
+    lift $ deref m consS
+
+    let srConsistent = toDdNode ?m consistentNoRefine
+    let (state, untracked) = partition func $ M.toList _stateVars
             where func (_, (_, is, _, _)) = not $ null $ intersect is _trackedInds
 
         srWin           = res 
@@ -108,7 +119,7 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         srInit          = toDdNode srCtx init
         srGoals         = map (toDdNode srCtx) goal
         srFairs         = map (toDdNode srCtx) fair
-        srTran          = conj $ map (toDdNode srCtx . snd) trans
+        srTran          = {-conj $-} map (toDdNode srCtx . snd) trans
         srStateLabConstr = toDdNode srCtx stateLabelExpr
         srInconsistent  = toDdNode srCtx inconsistent
         srCMinusC       = toDdNode srCtx consistentMinusCULCont
@@ -126,44 +137,44 @@ avarType (AVarInt  tr) = case I.typ tr of
                               I.SInt w -> D.SInt w
                               I.UInt w -> D.UInt w
 
--- Construct transition relation that represent the result of three-valued 
--- abstraction.
+---- Construct transition relation that represent the result of three-valued 
+---- abstraction.
+----
+---- If srWin == True then
+----   T := quantify_dis (Tc /\ c-c) \/ (Tu /\ c+u)
+---- else
+----   T := (Tc /\ c+c) \/ quantify_dis (Tc /\ c-u)
+----
+---- where Tc and Tu are controllable and uncontrollable transition relations,
+---- and the quantify_dis function quantifies away disabled variables.  For a 
+---- single variable X:
+----
+---- quantify_dis_X(rel) = (X.en /\ rel) \/ (!X.en /\ exists X. rel)
+---- 
+--mkTRel :: (D.Rel c v a s) => SynthesisRes c a -> a
+--mkTRel sr@SynthesisRes{..} =
+--    let ?m     = srCtx in
+--    let tcont  = srTran .& srCont
+--        tucont = srTran .& (nt srCont)
+--    in trace "mkTRel"
+--       $ case srWin of
+--            Just True  -> (quant_dis sr (tcont .& srCMinusC)) .| (tucont .& srCPlusU)
+--            Just False -> (tcont .& srCPlusC)                 .| (quant_dis sr (tucont .& srCMinusU))
+--            Nothing    -> srTran
 --
--- If srWin == True then
---   T := quantify_dis (Tc /\ c-c) \/ (Tu /\ c+u)
--- else
---   T := (Tc /\ c+c) \/ quantify_dis (Tc /\ c-u)
+--quant_dis :: (D.Rel c v a s, ?m :: c) => SynthesisRes c a -> a -> a
+--quant_dis SynthesisRes{..} rel = 
+--    foldl' quant_dis1 rel
+--    $ map (\(v,ev) -> trace ("quant_dis " ++ D.mvarName v ++ "(" ++ show (D.mvarIdx v) ++ ") " ++ D.mvarName ev ++ "(" ++ show (D.mvarIdx ev) ++ ")") $ (D.mvarToVS v, D.mvarToVS ev))
+--    $ mapMaybe (\v -> fmap (v,) (find ((== (D.mkEnVarName $ D.mvarName v)) . D.mvarName) srLabelVars))
+--    $ srLabelVars
 --
--- where Tc and Tu are controllable and uncontrollable transition relations,
--- and the quantify_dis function quantifies away disabled variables.  For a 
--- single variable X:
---
--- quantify_dis_X(rel) = (X.en /\ rel) \/ (!X.en /\ exists X. rel)
--- 
-mkTRel :: (D.Rel c v a s) => SynthesisRes c a -> a
-mkTRel sr@SynthesisRes{..} =
-    let ?m     = srCtx in
-    let tcont  = srTran .& srCont
-        tucont = srTran .& (nt srCont)
-    in trace "mkTRel"
-       $ case srWin of
-            Just True  -> (quant_dis sr (tcont .& srCMinusC)) .| (tucont .& srCPlusU)
-            Just False -> (tcont .& srCPlusC)                 .| (quant_dis sr (tucont .& srCMinusU))
-            Nothing    -> srTran
-
-quant_dis :: (D.Rel c v a s, ?m :: c) => SynthesisRes c a -> a -> a
-quant_dis SynthesisRes{..} rel = 
-    foldl' quant_dis1 rel
-    $ map (\(v,ev) -> trace ("quant_dis " ++ D.mvarName v ++ "(" ++ show (D.mvarIdx v) ++ ") " ++ D.mvarName ev ++ "(" ++ show (D.mvarIdx ev) ++ ")") $ (D.mvarToVS v, D.mvarToVS ev))
-    $ mapMaybe (\v -> fmap (v,) (find ((== (D.mkEnVarName $ D.mvarName v)) . D.mvarName) srLabelVars))
-    $ srLabelVars
-
-quant_dis1 :: (D.Rel c v a s, ?m :: c) => a -> (v,v) -> a
-quant_dis1 rel (var, envar) = 
-    let rel1 = ((eqConst envar (1::Int)) .& rel)
-        rel2 = ((eqConst envar (0::Int)) .& exists var rel)
-        --rel3 = rel1 .| rel2
-    in rel1 .| rel2
+--quant_dis1 :: (D.Rel c v a s, ?m :: c) => a -> (v,v) -> a
+--quant_dis1 rel (var, envar) = 
+--    let rel1 = ((eqConst envar (1::Int)) .& rel)
+--        rel2 = ((eqConst envar (0::Int)) .& exists var rel)
+--        --rel3 = rel1 .| rel2
+--    in rel1 .| rel2
 
 mkModel :: F.Spec -> 
            F.Spec ->
@@ -188,7 +199,7 @@ mkModel' sr@SynthesisRes{..} = model
     mStateRels            = [ (D.contRelName  , srCont)
                             , ("win"          , srWinningRegion)
                             --, ("uncontrollable", let ?m = srCtx in nt srCont)
-                            , ("init"          , trace "computing init" $  if' (srWin == Just True || srWin == Nothing) srInit (let ?m = srCtx in srInit .& (nt srWinningRegion)))] ++
+                            , ("init"          , trace "computing init" $  if' (srWin == Just True || srWin == Nothing) srInit (let ?m = srCtx in srInit .& (nt srWinningRegion){- .& srConsistentNxt-}))] ++
                             zip (map I.goalName $ I.tsGoal $ I.specTran ?spec) srGoals  {- ++ 
                             zip (map I.fairName $ I.tsFair $ I.specTran ?spec) srFairs -}
     mTransRels            = [ {- (case srWin of 
@@ -196,12 +207,17 @@ mkModel' sr@SynthesisRes{..} = model
                                     Just False -> "trel_lose" 
                                     Nothing    -> "trel", 
                                mkTRel sr)-}
-                              ("trel"                           , let ?m = srCtx in srTran .& srStateLabConstr {-.& (nt srInconsistent)-})
+                              ("trel"                           , True , let ?m = srCtx in (conj srTran))
+                            , ("consistentNoRefine"             , True , srConsistent)
+                            , ("consistentNoRefine'"            , True , srConsistent')
+                            , ("stateLabelConstr"               , True , srStateLabConstr)
+                            , ("nt srInconsistent"              , True , let ?m = srCtx in nt srInconsistent)
                             --, ("c-c"                            , srCMinusC)
                             --, ("c+c"                            , srCPlusC)
                             --, ("c-u"                            , srCMinusU)
                             --, ("c+u"                            , srCPlusU)
-                            ]
+                            ] ++ 
+                            zip3 (map show [0..]) (repeat False) srTran
     mViews                = []
     mConcretiseState      = concretiseS
     mConcretiseTransition = concretiseT
