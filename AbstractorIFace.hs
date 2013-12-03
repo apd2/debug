@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards, MultiParamTypeClasses, FlexibleInstances, TypeSynonymInstances, UndecidableInstances, ImplicitParams, TupleSections #-}
+{-# LANGUAGE RecordWildCards, MultiParamTypeClasses, FlexibleInstances, TypeSynonymInstances, UndecidableInstances, ImplicitParams, TupleSections, TemplateHaskell #-}
 
 -- Interface to the abstraction library
 
@@ -19,13 +19,13 @@ import Control.Monad.State
 
 import Util
 import Cudd
-import CuddExplicitDeref
+--import CuddExplicitDeref
 import CuddConvert
 import Interface hiding (db)
 import TermiteGame
 import Implicit
 import CuddSymTab
-import BddRecord hiding ((.&), (.|), mapVars, bexists, deref)
+import BddRecord hiding ((.&))
 import Predicate
 import Store
 import SMTSolver
@@ -40,7 +40,7 @@ import qualified DbgAbstract     as D
 import qualified StrategyView    as D
 import qualified SourceView      as D
 import qualified SourceViewTypes as D
-import Resource hiding (trace,d)
+import Resource hiding (trace)
 
 instance D.Rel DdManager VarData DdNode [[SatBit]]
 
@@ -60,13 +60,25 @@ data SynthesisRes c a = SynthesisRes { srWin            :: Maybe Bool
                                      , srTran           :: [a]
                                      , srStateLabConstr :: a
                                      , srInconsistent   :: a
-                                     , srConsistent     :: a
-                                     , srConsistent'    :: a
+                                     --, srConsistent     :: a
+                                     --, srConsistent'    :: a
                                      , srCPlusC         :: a
                                      , srCMinusC        :: a
                                      , srCPlusU         :: a
                                      , srCMinusU        :: a
+--                                     , srCPreCont       :: a
+                                     --, srCPreUCont      :: a
+--                                     , srCPre''         :: a
+--                                     , srSolveFairU     :: a
+--                                     , srSolveFairM     :: a
                                      }
+
+--cpreOverMy' :: (MonadResource (DDNode s u) (ST s) t) => Ops s u -> SectionInfo s u -> RefineStatic s u -> RefineDynamic s u -> DDNode s u -> Lab s u -> DDNode s u -> t (ST s) (DDNode s u)
+--cpreOverMy' ops si rs rd@RefineDynamic{..} hasOutgoingsCont labelPreds = cpre'' ops si rs rd hasOutgoingsCont labelPreds consistentPlusCULCont consistentPlusCULUCont
+
+--cPreOverMy :: (MonadResource (DDNode s u) (ST s) t) => Ops s u -> SectionInfo s u -> RefineStatic s u -> RefineDynamic s u -> DDNode s u -> Lab s u -> DDNode s u -> t (ST s) (DDNode s u)
+--cPreOverMy ops@Ops{..} = cPreHelper cpreOverMy' bforall ops  
+
 
 mkSynthesisRes :: (MonadResource (DDNode s u) (ST s) mr) => I.Spec -> STDdManager s u -> (Maybe Bool, RefineInfo s u AbsVar AbsVar AbsPriv) -> mr (ST s) (SynthesisRes DdManager DdNode) 
 mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
@@ -76,7 +88,7 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         RefineDynamic{..} = rd
         pdb               = db
     -- Compute state-label constraint
-    let ops = constructOps m
+    let ops@Ops{..} = constructOps m
     stateLabelExpr <- flip evalStateT pdb $ hoist lift $ doUpdate ops (tslStateLabelConstraintAbs ?spec m)
     inconsistent   <- flip evalStateT pdb $ hoist lift $ doUpdate ops (tslInconsistent ?spec m)
     srStrat <- case res of
@@ -89,20 +101,44 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
                                 --   lift $ mapM (mapM (\s -> do s' <- bor m s cont
                                 --                               deref m s
                                 --                               return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
-                  Nothing    -> return []
+                  Nothing    -> -- liftM (map (map (toDdNode ?m))) $ cexLiberalEnv ri
+                                return [[t]]
 
     let SectionInfo{..} = _sections pdb
         SymbolInfo{..}  = _symbolTable pdb
-    consSU           <- lift $ bexists m consistentNoRefine _untrackedCube 
-    consS            <- lift $ bexists m consSU             _labelCube 
-    lift $ deref m consSU
-    srConsistent' <- lift $ (liftM $ toDdNode ?m) $ mapVars m consS
-    lift $ deref m consS
+    --    labelVars = map (\l -> (sel1 l, sel3 l)) $ M.elems _labelVars
+    --consSU           <- lift $ bexists _untrackedCube consistentNoRefine 
+    --consS            <- lift $ bexists _labelCube     consSU
+    --lift $ deref consSU
+    --consistent'   <- lift $ mapVars consS
+    --lift $ deref consS
+   -- hasOutgoings <- doHasOutgoings ops trans
+   -- cPreCont     <- cpreCont'  ops si rd labelVars cont hasOutgoings wn
+--    cPreUCont    <- cpreUCont' ops si rd labelVars cont wn
+--    fairorwin    <- $r2 bor wn (fair !! 0)
+--    goalorwin    <- $r2 bor wn (goal !! 0)
+--    cPre''       <- cpre'' ops si rs rd hasOutgoings labelVars consistentPlusCULCont consistentMinusCULUCont fairorwin
+--
+--
+--    fairWinU     <- solveFair (cPreUnder ops si rs rd hasOutgoings labelVars)  ops rs btrue wn (fair !! 0)
+--    fairWinM     <- solveFair (cPreOverMy ops si rs rd hasOutgoings labelVars) ops rs btrue wn (fair !! 0)
+--    $d deref fairorwin
+--    $d deref goalorwin
 
-    let srConsistent = toDdNode ?m consistentNoRefine
+--    tgt'         <- $r2 band (goal !! 0) buchiWinning
+--    reachUnder   <- solveReach (cPreUnder ops si rs rd hasOutgoings labelVars) ops rs buchiWinning tgt' wn
+--    liftBDD $ $d deref tgt'
+--
+--    winNoConstraint <- cpreCont' ops si rd labelVars cont hasOutgoings reachUnder
+
+    -- let srConsistent = toDdNode ?m consistentNoRefine
     let (state, untracked) = partition func $ M.toList _stateVars
             where func (_, (_, is, _, _)) = not $ null $ intersect is _trackedInds
 
+        --srConsistent'   = toDdNode ?m consistent'
+       -- srCPreCont      = toDdNode ?m cPreCont
+        --srCPreUCont     = toDdNode ?m cPreUCont
+        --srCPre''        = toDdNode ?m cPre''
         srWin           = res 
         srCtx           = ?m
         srStateVars     = map toTupleState state
@@ -126,6 +162,9 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         srCPlusC        = toDdNode srCtx consistentPlusCULCont
         srCMinusU       = toDdNode srCtx consistentMinusCULUCont
         srCPlusU        = toDdNode srCtx consistentPlusCULUCont
+        --srSolveFairU    = toDdNode srCtx fairWinU
+        --srSolveFairM    = toDdNode srCtx fairWinM
+
     return SynthesisRes{..}
 
 -- Extract type information from AbsVar
@@ -196,10 +235,12 @@ mkModel' sr@SynthesisRes{..} = model
     mUntrackedVars        = srUntrackedVars 
     mLabelVars            = srLabelVars
     mInitVars             = srInitVars
-    mStateRels            = [ (D.contRelName  , srCont)
-                            , ("win"          , srWinningRegion)
+    mStateRels            = [ (D.contRelName   , srCont)
+                            , ("win"           , srWinningRegion)
                             --, ("uncontrollable", let ?m = srCtx in nt srCont)
-                            , ("init"          , trace "computing init" $  if' (srWin == Just True || srWin == Nothing) srInit (let ?m = srCtx in srInit .& (nt srWinningRegion){- .& srConsistentNxt-}))] ++
+                            , ("init"          , if' (srWin == Just True || srWin == Nothing) 
+                                                     srInit 
+                                                     (let ?m = srCtx in srInit .& (nt srWinningRegion) {- .& srConsistentNxt-}))] ++
                             zip (map I.goalName $ I.tsGoal $ I.specTran ?spec) srGoals  {- ++ 
                             zip (map I.fairName $ I.tsFair $ I.specTran ?spec) srFairs -}
     mTransRels            = [ {- (case srWin of 
@@ -207,17 +248,22 @@ mkModel' sr@SynthesisRes{..} = model
                                     Just False -> "trel_lose" 
                                     Nothing    -> "trel", 
                                mkTRel sr)-}
-                              ("trel"                           , True , let ?m = srCtx in (conj srTran))
-                            , ("consistentNoRefine"             , True , srConsistent)
-                            , ("consistentNoRefine'"            , True , srConsistent')
-                            , ("stateLabelConstr"               , True , srStateLabConstr)
-                            , ("nt srInconsistent"              , True , let ?m = srCtx in nt srInconsistent)
-                            --, ("c-c"                            , srCMinusC)
-                            --, ("c+c"                            , srCPlusC)
-                            --, ("c-u"                            , srCMinusU)
-                            --, ("c+u"                            , srCPlusU)
-                            ] ++ 
-                            zip3 (map show [0..]) (repeat False) srTran
+                              ("trel"                           , True                , let ?m = srCtx in (conj srTran))
+                            --, ("consistentNoRefine"             , True                , srConsistent)
+                            --, ("consistentNoRefine'"            , True                , srConsistent')
+                            , ("stateLabelConstr"               , True                , srStateLabConstr)
+                            , ("nt srInconsistent"              , True                , let ?m = srCtx in nt srInconsistent)
+                            , ("c-c"                            , srWin == Just True  , srCMinusC)
+                            , ("c+c"                            , True                , srCPlusC)
+                            , ("c-u"                            , srWin == Just False , srCMinusU)
+                            , ("c+u"                            , True                , srCPlusU)
+                        --    , ("cpreCont win"                   , False               , srCPreCont)
+                       --     , ("cpreUCont win"                  , False               , srCPreUCont)
+                         --   , ("srCPre''"                       , False               , srCPre'')
+                          --  , ("solveFair cPreUnder"            , False               , srSolveFairU)
+                          --  , ("solveFair cPreMy"               , False               , srSolveFairM)
+                            ] 
+                            -- ++ zip3 (map show [(0::Int)..]) (repeat False) srTran
     mViews                = []
     mConcretiseState      = concretiseS
     mConcretiseTransition = concretiseT
@@ -252,7 +298,7 @@ mkModel' sr@SynthesisRes{..} = model
 
 
 mkStrategy :: I.Spec -> SynthesisRes DdManager DdNode -> Maybe (D.Strategy DdNode)
-mkStrategy spec SynthesisRes{..} = maybe Nothing (\_ -> Just D.Strategy{..}) srWin
+mkStrategy spec SynthesisRes{..} = Just D.Strategy{..}
     where
     stratName  = if' (srWin == Just True) "Winning strategy" "Counterexample strategy"
     stratGoals = zip (map I.goalName $ I.tsGoal $ I.specTran spec) srGoals
