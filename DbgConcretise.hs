@@ -38,8 +38,8 @@ concretiseRel mvars0 rel = do
     -- if one does not exist)
     qb <- oneCube (D.idxToVS $ concatMap D.mvarIdx mvars) rel
     asn <- D.oneSatVal qb mvars
-    let fs = mapMaybe (\(mvar, val) -> let av = ?absvars M.! D.mvarName mvar in 
-                                       if' (avarIsPred av) Nothing (Just $ avarAsnToFormula av val)) asn
+    let fs = map (\(mvar, val) -> let av = ?absvars M.! D.mvarName mvar in 
+                                  avarAsnToFormula av val) asn
     -- Try to concretise this assignment
     case smtGetModelOrCore ?solver fs of
          Nothing            -> Nothing
