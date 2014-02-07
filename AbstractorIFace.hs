@@ -34,6 +34,7 @@ import qualified Spec            as F
 import qualified ISpec           as I
 import qualified TranSpec        as I
 import qualified IType           as I
+import qualified IVar            as I
 import qualified DbgTypes        as D
 import qualified DbgConcretise   as D
 import qualified DbgAbstract     as D
@@ -43,6 +44,10 @@ import qualified SourceViewTypes as D
 import Resource hiding (trace)
 
 instance D.Rel DdManager VarData DdNode [[SatBit]]
+
+-- Statistics about concrete variables used in predicates:
+-- (state vars, state bits, label vars, label bits)
+type VarStats  = (Int, Int, Int, Int)
 
 data SynthesisRes c a = SynthesisRes { srWin            :: Maybe Bool
                                      , srWinningRegion  :: DdNode
@@ -71,6 +76,7 @@ data SynthesisRes c a = SynthesisRes { srWin            :: Maybe Bool
 --                                     , srCPre''         :: a
 --                                     , srSolveFairU     :: a
 --                                     , srSolveFairM     :: a
+                                     , srStats          :: VarStats
                                      }
 
 --cpreOverMy' :: (MonadResource (DDNode s u) (ST s) t) => Ops s u -> SectionInfo s u -> RefineStatic s u -> RefineDynamic s u -> DDNode s u -> Lab s u -> DDNode s u -> t (ST s) (DDNode s u)
@@ -162,6 +168,14 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         srCPlusC        = toDdNode srCtx consistentPlusCULCont
         srCMinusU       = toDdNode srCtx consistentMinusCULUCont
         srCPlusU        = toDdNode srCtx consistentPlusCULUCont
+        (svars, lvars)  = partition ((==I.VarState) . I.varCat) 
+                          $ nub
+                          $ concat [ concatMap (avarVar . fst) state
+                                   , concatMap (avarVar . fst) untracked
+                                   , concatMap (avarVar . fst) $ M.toList _labelVars]
+        sbits           = sum $ map I.typeWidth svars
+        lbits           = sum $ map I.typeWidth lvars
+        srStats         = (length svars, sbits, length lvars, lbits)
         --srSolveFairU    = toDdNode srCtx fairWinU
         --srSolveFairM    = toDdNode srCtx fairWinM
 
