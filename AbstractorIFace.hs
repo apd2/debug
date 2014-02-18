@@ -73,10 +73,10 @@ data SynthesisRes c a = SynthesisRes { srWin            :: Maybe Bool
                                      , srCPlusU         :: a
                                      , srCMinusU        :: a
                                      , srInconsistentInit :: a
-                                     , srCPreCont       :: a
+                                     --, srCPreCont       :: a
                                      --, srCPreUCont      :: a
-                                     , srCPre''         :: a
-                                     , srSolveFairU     :: a
+                                     --, srCPre''         :: a
+                                     --, srSolveFairU     :: a
 --                                     , srSolveFairM     :: a
                                      , srStats          :: VarStats
                                      }
@@ -114,22 +114,22 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
 
     let SectionInfo{..} = _sections pdb
         SymbolInfo{..}  = _symbolTable pdb
-        labelVars = map (\l -> (sel1 l, sel3 l)) $ M.elems _labelVars
+    --    labelVars = map (\l -> (sel1 l, sel3 l)) $ M.elems _labelVars
     --consSU           <- lift $ bexists _untrackedCube consistentNoRefine 
     --consS            <- lift $ bexists _labelCube     consSU
     --lift $ deref consSU
     --consistent'   <- lift $ mapVars consS
     --lift $ deref consS
-    hasOutgoings <- doHasOutgoings ops trans
-    cPreCont     <- cpreCont'  ops si rd labelVars cont hasOutgoings wu
+   -- hasOutgoings <- doHasOutgoings ops trans
+    --cPreCont     <- cpreCont'  ops si rd labelVars cont hasOutgoings wu
 --    cPreUCont    <- cpreUCont' ops si rd labelVars cont wn
-    fairorwin    <- $r2 bor wu (fair !! 0)
+   -- fairorwin    <- $r2 bor wu (fair !! 0)
 --    goalorwin    <- $r2 bor wn (goal !! 0)
-    cPre''       <- cpre'' ops si rs rd hasOutgoings labelVars consistentMinusCULCont consistentPlusCULUCont fairorwin
+   -- cPre''       <- cpre'' ops si rs rd hasOutgoings labelVars consistentMinusCULCont consistentPlusCULUCont fairorwin
 --    cPre''       <- cPreUnder ops si rs rd hasOutgoings labelVars fairorwin
 --
 --
-    fairWinU     <- solveFair (cPreUnder ops si rs rd hasOutgoings labelVars)  ops rs btrue wu (fair !! 0)
+    --fairWinU     <- solveFair (cPreUnder ops si rs rd hasOutgoings labelVars)  ops rs btrue wu (fair !! 0)
 --    fairWinM     <- solveFair (cPreOverMy ops si rs rd hasOutgoings labelVars) ops rs btrue wn (fair !! 0)
 --    $d deref fairorwin
 --    $d deref goalorwin
@@ -145,9 +145,9 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
             where func (_, (_, is, _, _)) = not $ null $ intersect is _trackedInds
 
         --srConsistent'   = toDdNode ?m consistent'
-        srCPreCont      = toDdNode ?m cPreCont
+        --srCPreCont      = toDdNode ?m cPreCont
         --srCPreUCont     = toDdNode ?m cPreUCont
-        srCPre''        = toDdNode ?m cPre''
+        --srCPre''        = toDdNode ?m cPre''
         srWin           = res 
         srCtx           = ?m
         srStateVars     = map toTupleState state
@@ -181,7 +181,7 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         sbits           = sum $ map I.typeWidth svars
         lbits           = sum $ map I.typeWidth lvars
         srStats         = (length svars, sbits, length lvars, lbits)
-        srSolveFairU    = toDdNode srCtx fairWinU
+        --srSolveFairU    = toDdNode srCtx fairWinU
         --srSolveFairM    = toDdNode srCtx fairWinM
 
     return SynthesisRes{..}
@@ -278,10 +278,10 @@ mkModel' sr@SynthesisRes{..} = model
                             , ("c-u"                            , srWin == Just False , srCMinusU)
                             , ("c+u"                            , True                , srCPlusU)
                             , ("nt inconsistentInit"            , True                , let ?m = srCtx in nt srInconsistentInit)
-                            , ("cpreCont win"                   , False               , srCPreCont)
+                        --    , ("cpreCont win"                   , False               , srCPreCont)
                        --     , ("cpreUCont win"                  , False               , srCPreUCont)
-                            , ("nt srCPre''"                       , False             , let ?m = srCtx in nt srCPre'')
-                            , ("solveFair cPreUnder"            , False               , srSolveFairU)
+                       --     , ("nt srCPre''"                       , False             , let ?m = srCtx in nt srCPre'')
+                       --     , ("solveFair cPreUnder"            , False               , srSolveFairU)
                           --  , ("solveFair cPreMy"               , False               , srSolveFairM)
                             ] 
                             -- ++ zip3 (map show [(0::Int)..]) (repeat False) srTran
