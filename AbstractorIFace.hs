@@ -24,7 +24,7 @@ import CuddConvert
 import Interface hiding (db)
 import TermiteGame
 import Implicit
-import CuddSymTab
+import BDDOps
 import BddRecord hiding ((.&))
 import Predicate
 import Store
