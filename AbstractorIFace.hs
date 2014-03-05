@@ -49,9 +49,11 @@ instance D.Rel DdManager VarData DdNode [[SatBit]]
 -- (state vars, state bits, label vars, label bits)
 type VarStats  = (Int, Int, Int, Int)
 
-data SynthesisRes c a = SynthesisRes { srWin            :: Maybe Bool
-                                     , srWinningRegionMay  :: DdNode
+data SynthesisRes c a = SynthesisRes { srWin                :: Maybe Bool
+                                     , srWinningRegionMay   :: DdNode
                                      , srWinningRegionMust  :: DdNode
+                                     , srWinningRegionMay'  :: DdNode
+                                     , srWinningRegionMust' :: DdNode
                                      , srStrat          :: [[DdNode]]  -- winning strategy or counterexample
                                      , srCtx            :: c
                                      , srStateVars      :: [D.ModelStateVar]
@@ -77,6 +79,7 @@ data SynthesisRes c a = SynthesisRes { srWin            :: Maybe Bool
                                      --, srCPreUCont      :: a
                                      --, srCPre''         :: a
                                      --, srSolveFairU     :: a
+                                     --, srSolveReachU    :: a
 --                                     , srSolveFairM     :: a
                                      , srStats          :: VarStats
                                      }
@@ -114,18 +117,18 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
 
     let SectionInfo{..} = _sections pdb
         SymbolInfo{..}  = _symbolTable pdb
-    --    labelVars = map (\l -> (sel1 l, sel3 l)) $ M.elems _labelVars
+        labelVars = map (\l -> (sel1 l, sel3 l)) $ M.elems _labelVars
     --consSU           <- lift $ bexists _untrackedCube consistentNoRefine 
     --consS            <- lift $ bexists _labelCube     consSU
     --lift $ deref consSU
     --consistent'   <- lift $ mapVars consS
     --lift $ deref consS
-   -- hasOutgoings <- doHasOutgoings ops trans
+    --hasOutgoings <- doHasOutgoings ops trans
     --cPreCont     <- cpreCont'  ops si rd labelVars cont hasOutgoings wu
 --    cPreUCont    <- cpreUCont' ops si rd labelVars cont wn
-   -- fairorwin    <- $r2 bor wu (fair !! 0)
+    --fairorwin    <- $r2 bor wu (fair !! 0)
 --    goalorwin    <- $r2 bor wn (goal !! 0)
-   -- cPre''       <- cpre'' ops si rs rd hasOutgoings labelVars consistentMinusCULCont consistentPlusCULUCont fairorwin
+    --cPre''       <- cpre'' ops si rs rd hasOutgoings labelVars consistentMinusCULCont consistentPlusCULUCont fairorwin
 --    cPre''       <- cPreUnder ops si rs rd hasOutgoings labelVars fairorwin
 --
 --
@@ -135,10 +138,12 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
 --    $d deref goalorwin
 
 --    tgt'         <- $r2 band (goal !! 0) buchiWinning
---    reachUnder   <- solveReach (cPreUnder ops si rs rd hasOutgoings labelVars) ops rs buchiWinning tgt' wn
+    --reachUnder   <- solveReach (cPreUnder ops si rs rd hasOutgoings labelVars) ops rs btrue (goal !! 0) bfalse
 --    liftBDD $ $d deref tgt'
 --
 --    winNoConstraint <- cpreCont' ops si rd labelVars cont hasOutgoings reachUnder
+    wo' <- lift $ mapVars wo
+    wu' <- lift $ mapVars wu
 
     -- let srConsistent = toDdNode ?m consistentNoRefine
     let (state, untracked) = partition func $ M.toList _stateVars
@@ -150,7 +155,11 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         --srCPre''        = toDdNode ?m cPre''
         srWin           = res 
         srCtx           = ?m
-        srStateVars     = map toTupleState state
+        ps = pairs state
+        check = any (\((p1,_),(p2,_)) -> show p1 == show p2) ps
+        srStateVars     = if check
+                             then error "found identical predicates"
+                             else map toTupleState state
             where toTupleState        (p, (_, is, _, is')) = (show p, avarType p, (is, is'))
         srUntrackedVars = map toModelVarUntracked untracked
             where toModelVarUntracked (p, (_, is, _, _)) = D.ModelVar (show p) (avarType p) is
@@ -159,8 +168,11 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         srInitVars      = map toModelVarInit $ M.toList _initVars
             where toModelVarInit      (p, (_, is, _, _)) = D.ModelVar (show p) (avarType p) is
         srAbsVars       = M.fromList $ map (\v -> (show v,v)) $ (M.keys _stateVars) ++ (M.keys _labelVars) ++ (M.keys _initVars)
-        srWinningRegionMay = toDdNode srCtx wo
-        srWinningRegionMust = toDdNode srCtx wu
+        srWinningRegionMay   = toDdNode srCtx wo
+        srWinningRegionMust  = toDdNode srCtx wu
+        srWinningRegionMay'  = toDdNode srCtx wo'
+        srWinningRegionMust' = toDdNode srCtx wu'
+
         srCont          = toDdNode srCtx cont
         srInit          = toDdNode srCtx init
         srGoals         = map (toDdNode srCtx) goal
@@ -182,6 +194,7 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         lbits           = sum $ map I.typeWidth lvars
         srStats         = (length svars, sbits, length lvars, lbits)
         --srSolveFairU    = toDdNode srCtx fairWinU
+        --srSolveReachU   = toDdNode srCtx reachUnder
         --srSolveFairM    = toDdNode srCtx fairWinM
 
     return SynthesisRes{..}
@@ -277,11 +290,21 @@ mkModel' sr@SynthesisRes{..} = model
                             , ("c+c"                            , True                , srCPlusC)
                             , ("c-u"                            , srWin == Just False , srCMinusU)
                             , ("c+u"                            , True                , srCPlusU)
+                            , ("win+"                           , False               , srWinningRegionMay)
+                            , ("win-"                           , False               , srWinningRegionMust)
+                            , ("win+'"                          , False               , srWinningRegionMay')
+                            , ("win-'"                          , False               , srWinningRegionMust')
+                            , ("nt win+"                        , False               , let ?m = srCtx in nt srWinningRegionMay)
+                            , ("nt win-"                        , False               , let ?m = srCtx in nt srWinningRegionMust)
+                            , ("nt win+'"                       , False               , let ?m = srCtx in nt srWinningRegionMay')
+                            , ("nt win-'"                       , False               , let ?m = srCtx in nt srWinningRegionMust')
                             , ("nt inconsistentInit"            , True                , let ?m = srCtx in nt srInconsistentInit)
-                        --    , ("cpreCont win"                   , False               , srCPreCont)
+                       --     , ("cpreCont win"                   , False               , srCPreCont)
                        --     , ("cpreUCont win"                  , False               , srCPreUCont)
                        --     , ("nt srCPre''"                       , False             , let ?m = srCtx in nt srCPre'')
                        --     , ("solveFair cPreUnder"            , False               , srSolveFairU)
+                       --     , ("solveReach cPreUnder"           , False               , srSolveReachU)
+                       --     , ("nt solveReach cPreUnder"        , False               , let ?m = srCtx in nt srSolveReachU)
                           --  , ("solveFair cPreMy"               , False               , srSolveFairM)
                             ] 
                             -- ++ zip3 (map show [(0::Int)..]) (repeat False) srTran
