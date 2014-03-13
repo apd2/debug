@@ -78,6 +78,17 @@ data SynthesisRes c a = SynthesisRes { srWin                :: Maybe Bool
                                      --, srCPreCont       :: a
                                      --, srCPreUCont      :: a
                                      --, srCPre''         :: a
+                                     --, srCPreOverUCont    :: a
+                                     --, srCPreOverCont     :: a
+                                     --, srCPreUnderUCont   :: a
+                                     --, srCPreUnderCont    :: a
+
+                                     --, srCpreOver         :: a
+                                     --, srCpreUnder        :: a
+                                     --, srReachUnder       :: a
+                                     --, srFairUnder        :: a
+                                     --, srReachOver        :: a
+                                     --, srFairOver         :: a
                                      --, srSolveFairU     :: a
                                      --, srSolveReachU    :: a
 --                                     , srSolveFairM     :: a
@@ -125,10 +136,33 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
     --lift $ deref consS
     --hasOutgoings <- doHasOutgoings ops trans
     --cPreCont     <- cpreCont'  ops si rd labelVars cont hasOutgoings wu
---    cPreUCont    <- cpreUCont' ops si rd labelVars cont wn
-    --fairorwin    <- $r2 bor wu (fair !! 0)
+
+
+    --fairorwinunder   <- $r2 bor wu (fair !! 0)
+    --fairorwinover    <- $r2 bor wo (fair !! 0)
+    --goalorfair       <- $r2 bor (goal !! 0) (fair !! 0)
 --    goalorwin    <- $r2 bor wn (goal !! 0)
-    --cPre''       <- cpre'' ops si rs rd hasOutgoings labelVars consistentMinusCULCont consistentPlusCULUCont fairorwin
+
+    --stratUCont   <- cpreUCont' ops si rd labelVars cont fairorwinover
+    --cPreUOver    <- liftM bnot $ $r2 (andAbstract _labelCube) consistentMinusCULUCont stratUCont
+    --stratCont    <- cpreCont' ops si rd labelVars cont hasOutgoings fairorwinover
+    --cPreCOver    <- $r2 (andAbstract _labelCube) consistentPlusCULCont stratCont
+
+    --stratUCont   <- cpreUCont' ops si rd labelVars cont fairorwinunder
+    --cPreUUnder   <- liftM bnot $ $r2 (andAbstract _labelCube) consistentPlusCULUCont stratUCont
+    --stratCont    <- cpreCont' ops si rd labelVars cont hasOutgoings fairorwinunder
+    --cPreCUnder   <- $r2 (andAbstract _labelCube) consistentMinusCULCont stratCont
+
+    --cPre''       <- cpre'' ops si rs rd hasOutgoings labelVars consistentPlusCULCont consistentMinusCULUCont fairorwinover
+    --cpreOver     <- cPreOver ops si rs rd hasOutgoings labelVars fairorwinover
+    --cpreUnder    <- cPreUnder ops si rs rd hasOutgoings labelVars fairorwinunder
+
+    --fairUnder    <- solveFair  (cPreUnder ops si rs rd hasOutgoings labelVars) ops rs btrue wu (fair !! 0)
+    --reachUnder   <- solveReach (cPreUnder ops si rs rd hasOutgoings labelVars) ops rs btrue (goal !! 0) bfalse
+
+    --fairOver     <- solveFair  (cPreOver ops si rs rd hasOutgoings labelVars) ops rs btrue wo (fair !! 0)
+    --reachOver    <- solveReach (cPreOver ops si rs rd hasOutgoings labelVars) ops rs btrue (goal !! 0) bfalse
+
 --    cPre''       <- cPreUnder ops si rs rd hasOutgoings labelVars fairorwin
 --
 --
@@ -193,6 +227,19 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         sbits           = sum $ map I.typeWidth svars
         lbits           = sum $ map I.typeWidth lvars
         srStats         = (length svars, sbits, length lvars, lbits)
+        --srCpreOver      = toDdNode srCtx cpreOver
+        --srCpreUnder     = toDdNode srCtx cpreUnder
+        --srCPreOverUCont = toDdNode srCtx cPreUOver
+        --srCPreOverCont  = toDdNode srCtx cPreCOver
+        --srCPreUnderUCont = toDdNode srCtx cPreUUnder
+        --srCPreUnderCont  = toDdNode srCtx cPreCUnder
+
+        --srReachUnder    = toDdNode srCtx reachUnder
+        --srFairUnder     = toDdNode srCtx fairUnder
+        --srReachOver     = toDdNode srCtx reachOver
+        --srFairOver      = toDdNode srCtx fairOver
+
+ 
         --srSolveFairU    = toDdNode srCtx fairWinU
         --srSolveReachU   = toDdNode srCtx reachUnder
         --srSolveFairM    = toDdNode srCtx fairWinM
@@ -299,9 +346,21 @@ mkModel' sr@SynthesisRes{..} = model
                             , ("nt win+'"                       , False               , let ?m = srCtx in nt srWinningRegionMay')
                             , ("nt win-'"                       , False               , let ?m = srCtx in nt srWinningRegionMust')
                             , ("nt inconsistentInit"            , True                , let ?m = srCtx in nt srInconsistentInit)
+                        --    , ("cpreOver"                       , False               , srCpreOver)
+                       --     , ("cpreUnder"                      , False               , srCpreUnder)
+                       --     , ("cpreOverUCont"                  , False               , srCPreOverUCont)
+                       --     , ("cpreOverCont"                   , False               , srCPreOverCont)
+                       --     , ("cpreUnderUCont"                 , False               , srCPreUnderUCont)
+                       --     , ("cpreUnderCont"                  , False               , srCPreUnderCont)
+                       --     , ("reachUnder"                     , False               , srReachUnder)
+                       --     , ("fairUnder"                      , False               , srFairUnder)
+                       --     , ("reachOver"                      , False               , srReachOver)
+                       --     , ("fairOver"                       , False               , srFairOver)
+ 
                        --     , ("cpreCont win"                   , False               , srCPreCont)
                        --     , ("cpreUCont win"                  , False               , srCPreUCont)
-                       --     , ("nt srCPre''"                       , False             , let ?m = srCtx in nt srCPre'')
+                       --     , ("nt srCPre''"                    , False               , let ?m = srCtx in nt srCPre'')
+                       --     , ("srCPre''"                       , False               , srCPre'')
                        --     , ("solveFair cPreUnder"            , False               , srSolveFairU)
                        --     , ("solveReach cPreUnder"           , False               , srSolveReachU)
                        --     , ("nt solveReach cPreUnder"        , False               , let ?m = srCtx in nt srSolveReachU)
