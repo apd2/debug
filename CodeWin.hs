@@ -19,10 +19,12 @@ module CodeWin(MBID(..),
                codeWinActiveMB,
                codeWinLookupMB,
                codeWinGetMB,
+               codeWinMBAtCursor,
                codeWinSaveAll,
                codeWinModifiedFiles,
                codeWinSetMBText,
                codeWinMBRefresh,
+               codeWinMBMakeStale,
                codeWinMBActivate,
                codeWinSetSelection,
                codeWinClearSelection) where
@@ -93,7 +95,9 @@ mbEpoch :: MBDescr -> Int
 mbEpoch (MBA mba) = mbaEpoch mba
 mbEpoch (MBI mbi) = mbiEpoch mbi
 
-data MBID    = MBID Pos [Loc] deriving (Eq, Ord, Show)
+data MBID = MBID { mbidPos  :: Pos
+                 , mbidLocs :: [Loc]
+                 } deriving (Eq, Ord, Show)
 --data MBEpoch = MBEpoch Int [Int]
 
 mbidChild :: MBID -> Loc -> MBID
@@ -190,6 +194,15 @@ codeWinLookupMB ref mbid = getIORef (\cw -> cwLookupMB cw mbid) ref
 codeWinGetMB :: RCodeWin -> MBID -> IO MBDescr
 codeWinGetMB ref mbid = getIORef (\cw -> cwGetMB cw mbid) ref
 
+codeWinMBAtCursor :: RCodeWin -> IO (Maybe (MBID, SourcePos))
+codeWinMBAtCursor ref = do
+    cw@CodeWin{..} <- readIORef ref
+    mreg <- regionUnderCursor cwAPI
+    case mreg of
+         Nothing       -> return Nothing
+         Just (reg, p) -> return $ Just $ ((regionMap cw) M.! reg, p)
+
+
 codeWinModifiedFiles :: RCodeWin -> IO [String]
 codeWinModifiedFiles ref = do
     CodeWin{..} <- readIORef ref
@@ -221,7 +234,7 @@ codeWinSetMBText ref mbid txt = do
                  Right _  -> return $ Right txt
     modifyIORef ref $ \cw' -> cwSetMB cw' mbid $ MBI $ MBIStale reg' (mbiEpoch mbi + 1)
 
--- Make stale MB active, creating nested MBs if necessary
+-- Make stale MB current, creating nested MBs if necessary
 -- Assumes: MBID refers to an existing stale MB whose parent is active.
 codeWinMBRefresh :: RCodeWin -> MBID -> CFA -> IO ()
 codeWinMBRefresh ref mbid cfa = do
@@ -234,8 +247,14 @@ codeWinMBRefresh ref mbid cfa = do
               $ cfaFindMBs cfa
     txt <- regionGetText cwAPI ireg
     writeIORef ref $ cwSetMB cw mbid $ MBI $ MBICurrent (Left ireg) mbiEpoch txt cfa (M.fromList nested)
-    activate ref mbid
     
+-- Make inactive MB (stale or current) stale.
+codeWinMBMakeStale :: RCodeWin -> MBID -> IO ()
+codeWinMBMakeStale ref mbid = do
+    cw@CodeWin{..} <- readIORef ref
+    let MBI mbi = cwGetMB cw mbid
+    writeIORef ref $ cwSetMB cw mbid $ MBI $ MBIStale (mbiRegion mbi) (mbiEpoch mbi)
+
 -- Activate MB
 -- Assumes: MBID refer to an existing non-stale MB
 codeWinMBActivate :: RCodeWin -> Maybe MBID -> IO ()
@@ -396,9 +415,19 @@ cfaGetMBPos :: CFA -> Loc -> Pos
 cfaGetMBPos cfa l = p
     where ActStat (F.SMagic p _) = locAct $ cfaLocLabel l cfa
 
-cfaFindMBs :: CFA -> [Loc]
-cfaFindMBs cfa = nub 
-                 $ filter (\l -> case locAct $ cfaLocLabel l cfa of
-                                      ActStat (F.SMagic _ _) -> True
-                                      _                      -> False)
-                 $ cfaDelayLocs cfa
+
+regionMap :: CodeWin -> M.Map Region MBID
+regionMap CodeWin{..} = M.fromList $ concatMap (\(p, descr) -> regionMap' (MBID p []) descr) $ M.toList cwMBRoots
+
+regionMap' :: MBID -> MBDescr -> [(Region, MBID)]
+regionMap' mbid (MBA MBActive{..})   = (mbaRegion,mbid) : (concatMap (\(loc, descr) -> regionMap' (mbidChild mbid loc) descr) $ M.toList mbaNested)
+regionMap' mbid (MBI MBIStale{..})   = 
+    case mbiRegion of
+         Left reg -> [(reg,mbid)]
+         Right _  -> []
+regionMap' mbid (MBI MBICurrent{..}) = 
+    case mbiRegion of
+         Left reg -> (reg, mbid) : (concatMap (\(loc, mbi) -> regionMap' (mbidChild mbid loc) (MBI mbi)) $ M.toList mbiNested)
+         Right _  -> []
+
+
