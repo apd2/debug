@@ -134,6 +134,7 @@ data SourceView c a = SourceView {
     svStepButton     :: G.ToolButton,
     svRunButton      :: G.ToolButton,
     svMagicButton    :: G.ToolButton,               -- generate code automatically
+    svCodeGenButton  :: G.ToolButton,
 
     -- Trace
     svTrace          :: Trace,                      -- steps from the current state
@@ -182,6 +183,7 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svStepButton     = error "SourceView: svStepButton undefined"
                              , svRunButton      = error "SourceView: svRunButton undefined"
                              , svMagicButton    = error "SourceView: svMagicButton undefined"
+                             , svCodeGenButton  = error "SourceView: svCodeGenButton undefined"
                              , svTrace          = []
                              , svTracePos       = 0
                              , svTraceCombo     = error "SourceView: svTraceCombo undefined"
@@ -269,10 +271,18 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
     G.widgetShow bmagic
     G.toolbarInsert tbar bmagic (-1)    
 
+    bcg <- G.toolButtonNewFromStock G.stockExecute
+    G.set bcg [G.widgetTooltipText G.:= Just "Generate code"]
+    _ <- G.onToolButtonClicked bcg (codegen ref)
+    G.widgetShow bcg
+    G.toolbarInsert tbar bcg (-1)    
+
+
     modifyIORef ref (\sv -> sv { svRunButton     = butrun
                                , svSaveAllButton = butsaveall
                                , svStepButton    = butstep
-                               , svMagicButton   = bmagic})
+                               , svMagicButton   = bmagic
+                               , svCodeGenButton = bcg})
 
     sep2 <- G.separatorToolItemNew
     G.widgetShow sep2
@@ -931,6 +941,7 @@ commandButtonsUpdate ref = do
     G.widgetSetSensitive (svSaveAllButton sv) True
     G.widgetSetSensitive (svStepButton sv)    en
     G.widgetSetSensitive (svRunButton sv)     en
+    G.widgetSetSensitive (svCodeGenButton sv) True
     G.widgetSetSensitive (svMagicButton sv) $  (isMBLabel $ currentLocLabel sv)                     -- we're at a magic block entrance
                                             && (currentMagic sv)
                                             && (svTracePos sv == 0)                                 -- there is no transition in progress
@@ -943,6 +954,7 @@ commandButtonsDisable ref = do
     G.widgetSetSensitive (svStepButton sv)    False
     G.widgetSetSensitive (svRunButton sv)     False
     G.widgetSetSensitive (svMagicButton sv)   False
+    G.widgetSetSensitive (svCodeGenButton sv) False
 
 -- Resolve --
 
@@ -1205,7 +1217,40 @@ autogen ref = do
     mactive <- codeWinActiveMB svCodeWin
     let mbid = maybe (MBID p []) (\m -> mbidChild m $ currentLoc sv) mactive
     codeWinSetMBText svCodeWin mbid txt
-       
+
+-- Generate code for MB under cursor
+codegen :: (D.Rel c v a s) => RSourceView c a -> IO ()
+codegen ref = do
+    sv@SourceView{..} <- readIORef ref
+    -- Locate MB under cursor or its parent MB (if the MB does not have its own region)
+    mmb <- codeWinMBAtCursor svCodeWin
+    case mmb of
+         Nothing          -> D.showMessage svModel G.MessageError "No editable magic block under cursor"
+         Just (mbid, pos) -> do 
+             -- Flatten MB by making it stale
+             codeWinMBMakeStale svCodeWin mbid
+             MBI mbi <- codeWinGetMB svCodeWin mbid
+             mbtxt <- mbiGetRegionText svCodeWin mbi
+             let (pid,sc) = fromJust $ specLookupMB svSpec (mbidPos mbid)
+             -- Compile parent MB and locate the MB to be synthesised inside it.
+             if mbtxt == "..."
+                then doCodeGen ref mbid
+                else case compileMB sv sc pid mbtxt of
+                          Left e    -> D.showMessage svModel G.MessageError e
+                          Right cfa -> do codeWinMBRefresh svCodeWin mbid cfa
+                                          case cfaFindMBAtPos cfa pos of
+                                               Nothing  -> D.showMessage svModel G.MessageError "No magic block at this location"
+                                               Just loc -> doCodeGen ref $ mbidChild mbid loc
+
+-- Generate code for empty MB identified by the argument
+doCodeGen :: (D.Rel c v a s) => RSourceView c a -> MBID -> IO ()
+doCodeGen ref mbid = error "doCodeGen is undefined"
+    -- check that magic blocks are leaves
+    -- set of states at MB entrance <- simulate
+    -- generate statement
+    -- concretise
+    -- update region
+
 
 -- If we are about to enter magic block, activate it.
 maybeEnterMB :: SourceView c a -> IO (Maybe (SourceView c a), Bool)
@@ -1225,14 +1270,16 @@ enterMB sv@SourceView{..} (p,l) = do
     MBI mbi <- codeWinGetMB svCodeWin mbid
     text <- mbiGetRegionText svCodeWin mbi
     let frames = currentStackFrames sv
+        sc = frScope $ head frames
     if' (isMBICurrent mbi)
         (do codeWinMBActivate svCodeWin (Just mbid)
-            return $ Just $ traceAppend sv (currentStore sv) (EProcStack $ (FrameMagic (frScope $ head frames) cfaInitLoc (mbiCFA mbi)):frames))
-        (case compileMB sv svPID text of
+            return $ Just $ traceAppend sv (currentStore sv) (EProcStack $ (FrameMagic sc cfaInitLoc (mbiCFA mbi)):frames))
+        (case compileMB sv sc svPID text of
               Left e    -> do D.showMessage svModel G.MessageError e
                               return Nothing
               Right cfa -> do codeWinMBRefresh svCodeWin mbid cfa
-                              return $ Just $ traceAppend sv (currentStore sv) (EProcStack $ (FrameMagic (frScope $ head frames) cfaInitLoc cfa):frames))
+                              codeWinMBActivate svCodeWin (Just mbid)
+                              return $ Just $ traceAppend sv (currentStore sv) (EProcStack $ (FrameMagic sc cfaInitLoc cfa):frames))
 
 -- If we are about to exit magic block, deactivate it first.
 maybeExitMB :: (D.Rel c v a s) => RSourceView c a -> IO ()
@@ -1402,12 +1449,6 @@ isControllableCode sv pid (EProcStack frames) = isMBLabel lab && storeEvalBool s
     cfa    = stackGetCFA sv pid (EProcStack pstack)
     loc    = frLoc $ head pstack
     lab    = cfaLocLabel loc cfa
-
-isMBLabel :: LocLabel -> Bool
-isMBLabel lab = isDelayLabel lab && 
-                         case locAct lab of
-                              ActStat (F.SMagic _ _) -> True
-                              _                      -> False                             
 
 -- update all displays
 updateDisplays :: RSourceView c a -> IO ()
@@ -1660,9 +1701,8 @@ storeEvalStr inspec flatspec spec store mpid sc str = do
     -- 6. evaluate
     return $ storeEval store iexpr
 
-compileMB :: SourceView c a -> PrID -> String -> Either String CFA
-compileMB sv@SourceView{..} pid str = do
-    let sc = frScope $ head $ currentStackFrames sv
+compileMB :: SourceView c a -> F.Scope -> PrID -> String -> Either String CFA
+compileMB SourceView{..} sc pid str = do
     -- Apply all transformations that the input spec goes through to the statement:
     -- 1. parse
     stat <- liftM (F.sSeq F.nopos Nothing)
@@ -1701,7 +1741,6 @@ compileMB sv@SourceView{..} pid str = do
                in execState (do aft <- F.procStatToCFA simpstat cfaInitLoc
                                 ctxFinal aft) ctx
     assert (null $ ctxVar ctx') (F.pos stat) "Cannot perform non-deterministic controllable action"
-    -- Prune the resulting CFA beyond the first pause location; add a return transition in the end
     let cfa   = cfaMapExpr (ctxCFA ctx') $ F.exprExpandLabels svSpec
         cfar  = cfaPruneUnreachable cfa [cfaInitLoc]
     return {-$ cfaTraceFile cfar "action"-} cfar
