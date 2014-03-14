@@ -15,6 +15,7 @@ import qualified Graphics.UI.Gtk            as G
 import Control.Monad
 import Control.Monad.State
 import Control.Monad.Error
+import Control.Monad.ST
 import Text.Parsec
 import Control.Applicative
 import qualified Text.PrettyPrint           as PP
@@ -38,7 +39,10 @@ import Inline
 import Predicate
 import Store
 import SMTSolver
-
+import qualified CodeGen           as CG
+import qualified CuddExplicitDeref as C
+import qualified Interface         as Abs
+import qualified TermiteGame       as Abs
 import CodeWin
 
 import qualified NS                as F
@@ -119,7 +123,7 @@ instance PP Trace where
 showTrace :: Trace -> String
 showTrace = PP.render . pp
 
-data SourceView c a = SourceView {
+data SourceView c a u = SourceView {
     svModel          :: D.RModel c a Store SVStore,
     svSpec           :: Spec,
     svInputSpec      :: F.Spec,
@@ -166,10 +170,15 @@ data SourceView c a = SourceView {
     svResolveView    :: G.TreeView,
     svResolveStore   :: G.TreeStore Expr,           -- tmp variables in the scope of the current expression
     svAutoResolve    :: Bool,                       -- resolve non-determinism automatically
-    svAutoResolveTog :: G.CheckButton               -- toggle auto-resolve mode button
+    svAutoResolveTog :: G.CheckButton,              -- toggle auto-resolve mode button
+
+    -- Stuff used for code generation
+    svSTDdManager    :: C.STDdManager RealWorld u,
+    svAbsDB          :: Abs.DB RealWorld u AbsVar AbsVar,
+    svRefineDyn      :: Abs.RefineDynamic RealWorld u
 }
 
-type RSourceView c a = IORef (SourceView c a)
+type RSourceView c a u = IORef (SourceView c a u)
 
 sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel undefined"
                              , svInputSpec      = error "SourceView: svInputSpec undefined"
@@ -204,6 +213,9 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svResolveStore   = error "SourceView: svResolveStore undefined"
                              , svAutoResolve    = True
                              , svAutoResolveTog = error "SourceView: svAutoResolveTog undefined"
+                             , svSTDdManager    = error "SourceView: svSTDdManager undefined"
+                             , svAbsDB          = error "SourceView: svAbsDB undefined"
+                             , svRefineDyn      = error "SourceView: svRefineDyn undefined"
                              }
 
 
@@ -211,8 +223,17 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
 -- View callbacks
 --------------------------------------------------------------
 
-sourceViewNew :: (D.Rel c v a s) => F.Spec -> F.Spec -> Spec -> M.Map String AbsVar -> SMTSolver -> D.RModel c a Store SVStore -> IO (D.View a Store SVStore)
-sourceViewNew inspec flatspec spec absvars solver rmodel = do
+sourceViewNew :: (D.Rel c v a s) 
+              => F.Spec 
+              -> F.Spec 
+              -> Spec 
+              -> M.Map String AbsVar 
+              -> SMTSolver 
+              -> C.STDdManager RealWorld u
+              -> Abs.RefineInfo RealWorld u AbsVar AbsVar st
+              -> D.RModel c a Store SVStore 
+              -> IO (D.View a Store SVStore)
+sourceViewNew inspec flatspec spec absvars solver m Abs.RefineInfo{..} rmodel = do
 
     ref <- newIORef $ sourceViewEmpty { svModel          = rmodel
                                       , svInputSpec      = inspec
@@ -220,6 +241,9 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
                                       , svSpec           = specInlineWirePrefix spec
                                       , svAbsVars        = absvars
                                       , svSolver         = solver
+                                      , svSTDdManager    = m
+                                      , svAbsDB          = db
+                                      , svRefineDyn      = rd
                                       }
 
     vbox <- G.vBoxNew False 0
@@ -333,7 +357,7 @@ sourceViewNew inspec flatspec spec absvars solver rmodel = do
                     }
     
 
-sourceViewStateSelected :: (D.Rel c v a s) => RSourceView c a -> Maybe (D.State a SVStore) -> IO ()
+sourceViewStateSelected :: (D.Rel c v a s) => RSourceView c a u -> Maybe (D.State a SVStore) -> IO ()
 sourceViewStateSelected ref Nothing                                = disable ref
 sourceViewStateSelected ref (Just s) | (not $ D.isConcreteState s) = disable ref
                                      | otherwise                   = do
@@ -344,7 +368,7 @@ sourceViewStateSelected ref (Just s) | (not $ D.isConcreteState s) = disable ref
     reset ref
     putStrLn "sourceViewStateSelected done"
 
-sourceViewTransitionSelected :: (D.Rel c v a s) => RSourceView c a -> D.Transition a Store SVStore -> IO ()
+sourceViewTransitionSelected :: (D.Rel c v a s) => RSourceView c a u -> D.Transition a Store SVStore -> IO ()
 sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = disable ref
                                       | otherwise                           = do
     putStrLn "sourceViewTransitionSelected"
@@ -358,7 +382,7 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
 -- Actions
 --------------------------------------------------------------
 
-stepAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
+stepAction :: (D.Rel c v a s) => RSourceView c a u -> IO ()
 stepAction ref = do 
     sv' <- readIORef ref
     sv <- readIORef ref
@@ -374,7 +398,7 @@ stepAction ref = do
                             updateDisplays ref
 
 -- Execute one statement
-step :: SourceView c a -> Maybe (SourceView c a)
+step :: SourceView c a u -> Maybe (SourceView c a u)
 step sv = 
     let sv0 = sv {svStackFrame = 0} in
     case microstep sv0 of
@@ -387,7 +411,7 @@ step sv =
          Nothing -> Nothing
 
 
-runAction :: (D.Rel c v a s) => RSourceView c a -> IO ()
+runAction :: (D.Rel c v a s) => RSourceView c a u -> IO ()
 runAction ref = do
     sv' <- readIORef ref
     sv <- readIORef ref
@@ -405,7 +429,7 @@ runAction ref = do
     
 
 -- run until pause or nondeterministic choice
-run :: SourceView c a -> Maybe (SourceView c a)
+run :: SourceView c a u -> Maybe (SourceView c a u)
 run sv = case step sv of
               Nothing  -> Nothing
               Just sv' -> if currentDelay sv' 
@@ -414,7 +438,7 @@ run sv = case step sv of
                                        Nothing   -> Just sv'
                                        Just sv'' -> Just sv''
 
-exitMagicBlock :: (D.Rel c v a s) => RSourceView c a -> IO ()
+exitMagicBlock :: (D.Rel c v a s) => RSourceView c a u -> IO ()
 exitMagicBlock ref = do
     modifyIORef ref (\sv -> modifyCurrentStore sv (\st0 -> storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)))
     makeTransition ref
@@ -424,7 +448,7 @@ simulateTransition :: F.Spec -> Spec -> M.Map String AbsVar -> Store -> Store ->
 simulateTransition flatspec spec absvars st lab =
     let spec' = specInlineWirePrefix spec
         -- create enough of source view to call run
-        sv0 :: SourceView () ()
+        sv0 :: SourceView () () ()
         sv0 = sourceViewEmpty { svSpec       = spec'
                               , svFlatSpec   = flatspec
                               , svAbsVars    = absvars
@@ -460,7 +484,7 @@ simulateTransition flatspec spec absvars st lab =
        $ trace ("simulateTransitions returns " ++ show mstore2) 
        $ mstore2
 
-saveAll :: RSourceView c a -> IO ()
+saveAll :: RSourceView c a u -> IO ()
 saveAll ref = do
     SourceView{..} <- readIORef ref
     codeWinSaveAll svCodeWin
@@ -472,7 +496,7 @@ contTransToSource inspec flatspec spec D.Transition{..} = do
     doc <- ppContAction inspec iid act
     return $ PP.render doc
 
-quit :: RSourceView c a -> IO Bool 
+quit :: RSourceView c a u -> IO Bool 
 quit ref = do
     SourceView{..} <- readIORef ref
     fs <- codeWinModifiedFiles svCodeWin
@@ -480,7 +504,7 @@ quit ref = do
          [] -> return True
          _  -> saveQuitDialog ref fs
 
-saveQuitDialog :: RSourceView c a -> [String] -> IO Bool
+saveQuitDialog :: RSourceView c a u -> [String] -> IO Bool
 saveQuitDialog ref fs = do
     SourceView{..} <- readIORef ref
     g <- G.messageDialogNew Nothing [] G.MessageQuestion G.ButtonsNone 
@@ -505,7 +529,7 @@ saveQuitDialog ref fs = do
 --------------------------------------------------------------
 
 -- Process selector --
-processSelectorCreate :: RSourceView c a -> IO G.Widget
+processSelectorCreate :: RSourceView c a u -> IO G.Widget
 processSelectorCreate ref = do
     sv <- readIORef ref
     hbox <- G.hBoxNew False 0
@@ -529,7 +553,7 @@ processSelectorCreate ref = do
     processSelectorInit ref
     return $ G.toWidget hbox
 
-processSelectorChanged :: RSourceView c a -> IO ()
+processSelectorChanged :: RSourceView c a u -> IO ()
 processSelectorChanged ref = do
     sv <- readIORef ref
     miter <- G.comboBoxGetActiveIter $ svProcessCombo sv
@@ -541,12 +565,12 @@ processSelectorChanged ref = do
            reset ref
 
 
-pidtree :: SourceView c a -> Forest PrID 
+pidtree :: SourceView c a u -> Forest PrID 
 pidtree sv = map (\p -> procTree (PrID (procName p) []) p) (specProc $ svSpec sv)
     where procTree pid p = Node { rootLabel = pid
                                 , subForest = map (\p' -> procTree (childPID pid (procName p')) p') (procChildren p)}
 
-processSelectorInit :: RSourceView c a -> IO ()
+processSelectorInit :: RSourceView c a u -> IO ()
 processSelectorInit ref = do
     sv <- readIORef ref
     let store = svProcessStore sv
@@ -555,7 +579,7 @@ processSelectorInit ref = do
     G.treeStoreClear store
     G.treeStoreInsertForest store [] 0 (map (fmap (,False)) $ pidtree sv)
 
-processSelectorUpdate :: RSourceView c a -> IO ()
+processSelectorUpdate :: RSourceView c a u -> IO ()
 processSelectorUpdate ref = do
     sv <- readIORef ref
     let store = svProcessStore sv
@@ -572,14 +596,14 @@ processSelectorUpdate ref = do
 
 -- Check if there's only one enabled process in the current state
 -- and, if yes, select this process.
-processSelectorChooseUniqueEnabled :: RSourceView c a -> IO ()
+processSelectorChooseUniqueEnabled :: RSourceView c a u -> IO ()
 processSelectorChooseUniqueEnabled ref = do
     sv <- readIORef ref
     enpids <- filterM (isProcEnabled sv)
               $ concatMap flatten $ pidtree sv
     when (length enpids == 1) $ processSelectorSelectPID ref (head enpids)
 
-processSelectorSelectPID :: RSourceView c a -> PrID -> IO ()
+processSelectorSelectPID :: RSourceView c a u -> PrID -> IO ()
 processSelectorSelectPID ref pid = do
     sv <- readIORef ref
     let store = svProcessStore sv
@@ -609,13 +633,13 @@ myTreeModelForeach' m miter f = do
     return ()
 
 
-processSelectorDisable :: RSourceView c a -> IO ()
+processSelectorDisable :: RSourceView c a u -> IO ()
 processSelectorDisable ref = do
     combo <- getIORef svProcessCombo ref
     G.widgetSetSensitive combo False
 
 -- Stack --
-stackViewCreate :: RSourceView c a -> IO G.Widget
+stackViewCreate :: RSourceView c a u -> IO G.Widget
 stackViewCreate ref = do
     view <- G.treeViewNew
     G.treeViewSetHeadersVisible view False
@@ -638,13 +662,13 @@ stackViewCreate ref = do
     panel <- D.framePanelNew (G.toWidget view) "Stack" (return ())
     D.panelGetWidget panel
 
-stackViewFrameSelected :: RSourceView c a -> G.TreePath -> G.TreeViewColumn -> IO ()
+stackViewFrameSelected :: RSourceView c a u -> G.TreePath -> G.TreeViewColumn -> IO ()
 stackViewFrameSelected ref (idx:_) _ = do
     modifyIORef ref (\sv -> sv{svStackFrame = idx})
     sourceWindowUpdate ref
     watchUpdate ref
 
-stackViewUpdate :: RSourceView c a -> IO ()
+stackViewUpdate :: RSourceView c a u -> IO ()
 stackViewUpdate ref = do
     sv <- readIORef ref
     let store = svStackStore sv
@@ -653,7 +677,7 @@ stackViewUpdate ref = do
     _ <- mapM (G.listStoreAppend store) frames
     return ()
 
-stackViewDisable :: RSourceView c a -> IO ()
+stackViewDisable :: RSourceView c a u -> IO ()
 stackViewDisable ref = do
     sv <- readIORef ref
     G.listStoreClear $ svStackStore sv
@@ -661,14 +685,14 @@ stackViewDisable ref = do
 -- Trace --
 
 -- indices of visible states in the trace
-svTraceVisible :: SourceView c a -> [Int]
+svTraceVisible :: SourceView c a u -> [Int]
 svTraceVisible sv = 
     filter (\i -> case locAct (getLocLabel sv i) of
                        ActNone -> False
                        _       -> True)
     $ [0..length (svTrace sv) - 1]
 
-traceViewCreate :: RSourceView c a -> IO G.Widget
+traceViewCreate :: RSourceView c a u -> IO G.Widget
 traceViewCreate ref = do
     hbox <- G.hBoxNew False 0
     G.widgetShow hbox
@@ -715,7 +739,7 @@ traceViewCreate ref = do
 
     return $ G.toWidget hbox
 
-tracePosChanged :: RSourceView c a -> IO ()
+tracePosChanged :: RSourceView c a u -> IO ()
 tracePosChanged ref = do
     sv <- readIORef ref
     miter <- G.comboBoxGetActiveIter $ svTraceCombo sv
@@ -727,7 +751,7 @@ tracePosChanged ref = do
                                           updateDisplays ref
 
 
-traceViewDisable :: RSourceView c a -> IO ()
+traceViewDisable :: RSourceView c a u -> IO ()
 traceViewDisable ref = do
     sv <- readIORef ref
     G.listStoreClear $ svTraceStore sv
@@ -735,7 +759,7 @@ traceViewDisable ref = do
     G.widgetSetSensitive (svTraceRedo sv) False
     G.widgetSetSensitive (svTraceCombo sv) False
 
-traceViewUpdate :: RSourceView c a -> IO ()
+traceViewUpdate :: RSourceView c a u -> IO ()
 traceViewUpdate ref = do
     sv <- readIORef ref
     --putStrLn $ "traceViewUpdate:\n" ++ (showTrace $ svTrace sv)
@@ -755,19 +779,19 @@ traceViewUpdate ref = do
     G.widgetSetSensitive (svTraceCombo sv) True
 
 
-traceAppend :: SourceView c a -> Store -> EProcStack -> SourceView c a
+traceAppend :: SourceView c a u -> Store -> EProcStack -> SourceView c a u
 traceAppend sv store stack = sv {svTrace = tr, svTracePos = p}
     where tr = take (svTracePos sv + 1) (svTrace sv) ++ [TraceEntry stack store]
           p  = length tr - 1
 
-traceSetPos :: SourceView c a -> Int -> SourceView c a
+traceSetPos :: SourceView c a u -> Int -> SourceView c a u
 traceSetPos sv i | (i >= (length $ svTrace sv)) || (i < 0) = sv
                  | otherwise = sv {svTracePos = i, svStackFrame = 0}
 
 
 -- Watch --
 
-watchCreate :: RSourceView c a -> IO G.Widget
+watchCreate :: RSourceView c a u -> IO G.Widget
 watchCreate ref = do
     view <- G.treeViewNew
     G.widgetShow view
@@ -826,27 +850,27 @@ watchCreate ref = do
     panel <- D.framePanelNew (G.toWidget view) "Watch" (return ())
     D.panelGetWidget panel
 
-watchEditingStarted :: RSourceView c a ->  G.Widget -> G.TreePath -> IO ()
+watchEditingStarted :: RSourceView c a u ->  G.Widget -> G.TreePath -> IO ()
 watchEditingStarted ref w path = do
     let entry = G.castToEntry w
     store <- getIORef svWatchStore ref
     val <- G.listStoreGetValue store (head path)
     when (isNothing val) $ G.entrySetText entry ""
 
-watchChanged :: RSourceView c a -> G.TreePath -> String -> IO ()
+watchChanged :: RSourceView c a u -> G.TreePath -> String -> IO ()
 watchChanged ref path val = do
     store <- getIORef svWatchStore ref
     G.listStoreSetValue store (head path) (Just val)
     watchUpdate ref 
 
-watchDelete :: RSourceView c a -> IO ()
+watchDelete :: RSourceView c a u -> IO ()
 watchDelete ref = do
     sv <- readIORef ref
     (idx, _) <- G.treeViewGetCursor (svWatchView sv)
     when (not $ null idx) $ G.listStoreRemove (svWatchStore sv) (head idx)
     watchUpdate ref
 
-watchUpdate :: RSourceView c a -> IO ()
+watchUpdate :: RSourceView c a u -> IO ()
 watchUpdate ref = do
     store <- getIORef svWatchStore ref
     items <- G.listStoreToList store
@@ -857,12 +881,12 @@ watchUpdate ref = do
     _ <- mapM (G.listStoreAppend store) items'
     return ()
 
-watchDisable :: RSourceView c a -> IO ()
+watchDisable :: RSourceView c a u -> IO ()
 watchDisable _ = return ()
 
 
 -- Code widget --
-sourceWindowCreate :: (D.Rel c v a s) => RSourceView c a -> IO G.Widget
+sourceWindowCreate :: (D.Rel c v a s) => RSourceView c a u -> IO G.Widget
 sourceWindowCreate ref = do
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox
@@ -888,7 +912,7 @@ sourceWindowCreate ref = do
 
     return $ G.toWidget vbox
 
-sourceWindowUpdate :: RSourceView c a -> IO ()
+sourceWindowUpdate :: RSourceView c a u -> IO ()
 sourceWindowUpdate ref = do
     putStrLn "sourceWindowUpdate"
     sv@SourceView{..} <- readIORef ref
@@ -913,14 +937,14 @@ sourceWindowUpdate ref = do
                                               else "<span weight=\"bold\">PAUSE</span>" 
                                       else ""
 
-sourceWindowDisable :: RSourceView c a -> IO ()
+sourceWindowDisable :: RSourceView c a u -> IO ()
 sourceWindowDisable ref = do
     sv <- readIORef ref
     G.labelSetText (svInprogLab sv) ""
     codeWinClearSelection (svCodeWin sv)
 
 -- Command buttons --
-commandButtonsUpdate :: RSourceView c a -> IO ()
+commandButtonsUpdate :: RSourceView c a u -> IO ()
 commandButtonsUpdate ref = do
     sv <- readIORef ref
     -- enable step and run buttons if we are not at a pause location or
@@ -946,7 +970,7 @@ commandButtonsUpdate ref = do
                                             && (currentMagic sv)
                                             && (svTracePos sv == 0)                                 -- there is no transition in progress
 
-commandButtonsDisable :: RSourceView c a -> IO ()
+commandButtonsDisable :: RSourceView c a u -> IO ()
 commandButtonsDisable ref = do
     sv <- readIORef ref
     -- disable command buttons
@@ -958,7 +982,7 @@ commandButtonsDisable ref = do
 
 -- Resolve --
 
-resolveViewCreate :: RSourceView c a -> IO G.Widget
+resolveViewCreate :: RSourceView c a u -> IO G.Widget
 resolveViewCreate ref = do
     spec <- getIORef svSpec ref
     let ?spec = spec
@@ -1034,7 +1058,7 @@ resolveViewCreate ref = do
     panel <- D.framePanelNew (G.toWidget vbox) "Resolve non-determinism" (return ())
     D.panelGetWidget panel
 
-toggleAutoResolve :: RSourceView c a -> IO ()
+toggleAutoResolve :: RSourceView c a u -> IO ()
 toggleAutoResolve ref = do
     sv <- readIORef ref
     mode <- G.toggleButtonGetActive $ svAutoResolveTog sv
@@ -1053,7 +1077,7 @@ comboTextModel _        = do store <- G.listStoreNew []
                              let column = G.makeColumnIdString 0
                              return (store, column)
 
-textAsnChanged :: RSourceView c a -> G.TreePath -> String -> IO ()
+textAsnChanged :: RSourceView c a u -> G.TreePath -> String -> IO ()
 textAsnChanged ref path valstr = do
     sv  <- readIORef ref
     let ?spec = svSpec sv
@@ -1067,7 +1091,7 @@ textAsnChanged ref path valstr = do
     writeIORef ref $ modifyCurrentStore sv (\store -> storeSet store e val)
     updateDisplays ref
 
-resolveViewUpdate :: RSourceView c a -> IO ()
+resolveViewUpdate :: RSourceView c a u -> IO ()
 resolveViewUpdate ref = do
     sv <- readIORef ref
     G.toggleButtonSetActive (svAutoResolveTog sv) (svAutoResolve sv)
@@ -1077,12 +1101,12 @@ resolveViewUpdate ref = do
     G.treeStoreInsertForest store [] 0 exprs
     G.treeViewExpandAll (svResolveView sv)
 
-resolveViewDisable :: RSourceView c a -> IO ()
+resolveViewDisable :: RSourceView c a u -> IO ()
 resolveViewDisable ref = do
     sv <- readIORef ref
     G.treeStoreClear $ svResolveStore sv
 
-autoResolve :: RSourceView c a -> IO ()
+autoResolve :: RSourceView c a u -> IO ()
 autoResolve ref = do
      sv <- readIORef ref
      let ?spec = svSpec sv
@@ -1092,14 +1116,14 @@ autoResolve ref = do
           $ currentTmpExprTree sv
      return ()
 
-autoResolve1 :: RSourceView c a -> Expr -> IO ()
+autoResolve1 :: RSourceView c a u -> Expr -> IO ()
 autoResolve1 ref e = do
     modifyIORef ref (\sv -> let ?spec = svSpec sv in
                             if isNothing $ storeTryEval (currentStore sv) e
                                then modifyCurrentStore sv (\s -> storeSet s e (Just $ SVal $ valDefault e))
                                else sv)
     
-runControllableCFA :: RSourceView c a -> CFA -> IO ()
+runControllableCFA :: RSourceView c a u -> CFA -> IO ()
 runControllableCFA ref cfa = do
     -- Push controllable cfa on the stack
     modifyIORef ref (\sv -> let frames = currentStackFrames sv
@@ -1170,7 +1194,7 @@ valToFExpr ts               _               = error $ "valToFExpr: type " ++ sho
 -- currently active magic block
 findActiveMagicBlock :: F.Spec -> Spec -> Store -> Maybe F.IID
 findActiveMagicBlock flatspec spec st = 
-   let sv0 :: SourceView () ()
+   let sv0 :: SourceView () () ()
        sv0 = sourceViewEmpty { svSpec       = spec
                              , svFlatSpec   = flatspec
                              , svState      = D.State { sAbstract = error "findMagicBlock: sAbstract is undefined"
@@ -1194,7 +1218,7 @@ findActiveMagicBlock flatspec spec st =
 -- assumes: 
 -- * we're at a magic block entrance
 -- * there is no transition in progress
-autogen :: (D.Rel c v a s) => RSourceView c a -> IO ()
+autogen :: (D.Rel c v a s) => RSourceView c a u -> IO ()
 autogen ref = do
     -- make sure we're in controllable state
     sv@SourceView{..} <- readIORef ref
@@ -1219,7 +1243,7 @@ autogen ref = do
     codeWinSetMBText svCodeWin mbid txt
 
 -- Generate code for MB under cursor
-codegen :: (D.Rel c v a s) => RSourceView c a -> IO ()
+codegen :: (D.Rel c v a s) => RSourceView c a u -> IO ()
 codegen ref = do
     sv@SourceView{..} <- readIORef ref
     -- Locate MB under cursor or its parent MB (if the MB does not have its own region)
@@ -1231,7 +1255,7 @@ codegen ref = do
              codeWinMBMakeStale svCodeWin mbid
              MBI mbi <- codeWinGetMB svCodeWin mbid
              mbtxt <- mbiGetRegionText svCodeWin mbi
-             let (pid,sc) = fromJust $ specLookupMB svSpec (mbidPos mbid)
+             let (pid,_,sc) = fromJust $ specLookupMB svSpec (mbidPos mbid)
              -- Compile parent MB and locate the MB to be synthesised inside it.
              if mbtxt == "..."
                 then doCodeGen ref mbid
@@ -1243,17 +1267,18 @@ codegen ref = do
                                                Just loc -> doCodeGen ref $ mbidChild mbid loc
 
 -- Generate code for empty MB identified by the argument
-doCodeGen :: (D.Rel c v a s) => RSourceView c a -> MBID -> IO ()
-doCodeGen ref mbid = error "doCodeGen is undefined"
+doCodeGen :: (D.Rel c v a s) => RSourceView c a u -> MBID -> IO ()
+doCodeGen ref (MBID pos locs) = do
+    SourceView{..} <- readIORef ref
+    return undefined
     -- check that magic blocks are leaves
     -- set of states at MB entrance <- simulate
     -- generate statement
     -- concretise
     -- update region
 
-
 -- If we are about to enter magic block, activate it.
-maybeEnterMB :: SourceView c a -> IO (Maybe (SourceView c a), Bool)
+maybeEnterMB :: SourceView c a u -> IO (Maybe (SourceView c a u), Bool)
 maybeEnterMB sv = do
     let lab = currentLocLabel sv
     if' (isMBLabel lab && currentMagic sv)
@@ -1261,7 +1286,7 @@ maybeEnterMB sv = do
             liftM (,True) $ enterMB sv (p, currentLoc sv))
         (return (Just sv, False))
 
-enterMB :: SourceView c a -> (F.Pos, Loc) -> IO (Maybe (SourceView c a))
+enterMB :: SourceView c a u -> (F.Pos, Loc) -> IO (Maybe (SourceView c a u))
 enterMB sv@SourceView{..} (p,l) = do
     putStrLn "enterMB"
     mactive <- codeWinActiveMB svCodeWin
@@ -1282,7 +1307,7 @@ enterMB sv@SourceView{..} (p,l) = do
                               return $ Just $ traceAppend sv (currentStore sv) (EProcStack $ (FrameMagic sc cfaInitLoc cfa):frames))
 
 -- If we are about to exit magic block, deactivate it first.
-maybeExitMB :: (D.Rel c v a s) => RSourceView c a -> IO ()
+maybeExitMB :: (D.Rel c v a s) => RSourceView c a u -> IO ()
 maybeExitMB ref = do
     putStrLn "maybeExitMB"
     sv <- readIORef ref
@@ -1292,7 +1317,7 @@ maybeExitMB ref = do
                maybeExitMB ref -- exit all nested MB's
        else return ()
 
-exitMB :: (D.Rel c v a s) => RSourceView c a -> IO ()
+exitMB :: (D.Rel c v a s) => RSourceView c a u -> IO ()
 exitMB ref = do
     putStrLn "exitMB"
     sv0 <- readIORef ref
@@ -1318,14 +1343,14 @@ exitMB ref = do
 
 -- Given a snapshot of the store at a pause location, compute
 -- process stack.
-stackFromStore :: SourceView c a -> Store -> PrID -> ProcStack
+stackFromStore :: SourceView c a u -> Store -> PrID -> ProcStack
 stackFromStore sv st pid = stackToProcStack (locStack lab)
     where cfa   = specGetCFA (svSpec sv) (EPIDProc pid)
           loc   = storeGetLoc st pid
           lab   = cfaLocLabel loc cfa
 
 -- As above, but include MB stack
-extStackFromStore :: SourceView c a -> SVStore -> PrID -> IO EProcStack
+extStackFromStore :: SourceView c a u -> SVStore -> PrID -> IO EProcStack
 extStackFromStore sv SVStore{..} pid = do
     cw <- readIORef $ svCodeWin sv
     let cfa  = specGetCFA (svSpec sv) (EPIDProc pid)
@@ -1362,11 +1387,11 @@ mbStackToProcStack' st0 cw mbid (MBFrame{..}:fs) =
 
 -- If the current process is inside MB, convert its stack to MB stack
 -- Otherwise, leave MB stack unmodified
-currentMBStack :: SourceView c a -> IO [MBFrame]
+currentMBStack :: SourceView c a u -> IO [MBFrame]
 currentMBStack sv | findProcInsideMagic sv == Just (svPID sv) = procStackToMBStack sv (currentStack sv)
                   | otherwise                                 = return $ sstMBStack $ fst $ fromJust $ D.sConcrete $ svState sv
 
-procStackToMBStack :: SourceView c a -> EProcStack -> IO [MBFrame]
+procStackToMBStack :: SourceView c a u -> EProcStack -> IO [MBFrame]
 procStackToMBStack sv stack@(EProcStack fs) = do
     case stackGetMBID sv stack of
          Nothing         -> return []
@@ -1376,10 +1401,10 @@ procStackToMBStack sv stack@(EProcStack fs) = do
                             $ filter isFrameMagic 
                             $ reverse fs
   
-stackGetMBID :: SourceView c a -> EProcStack -> Maybe MBID
+stackGetMBID :: SourceView c a u -> EProcStack -> Maybe MBID
 stackGetMBID sv (EProcStack frames) = stackGetMBID' sv Nothing $ reverse frames
 
-stackGetMBID' :: SourceView c a -> Maybe MBID -> [ProcStackFrame] -> Maybe MBID
+stackGetMBID' :: SourceView c a u -> Maybe MBID -> [ProcStackFrame] -> Maybe MBID
 stackGetMBID' _  mmbid [_]        = mmbid
 stackGetMBID' sv mmbid (f0:f1:fs) | isFrameMagic f1 = 
     maybe (let cfa = specGetCFA (svSpec sv) (EPIDProc $ svPID sv)
@@ -1389,10 +1414,10 @@ stackGetMBID' sv mmbid (f0:f1:fs) | isFrameMagic f1 =
           mmbid
                                   | otherwise       = stackGetMBID' sv mmbid (f1:fs)
 
-stackGetCFA :: SourceView c a -> PrID -> EProcStack -> CFA
+stackGetCFA :: SourceView c a u -> PrID -> EProcStack -> CFA
 stackGetCFA sv pid (EProcStack stack) = stackGetCFA' sv stack pid
 
-stackGetCFA' :: SourceView c a -> [ProcStackFrame] -> PrID -> CFA
+stackGetCFA' :: SourceView c a u -> [ProcStackFrame] -> PrID -> CFA
 stackGetCFA' sv []                     pid = specGetCFA (svSpec sv) (EPIDProc pid)
 stackGetCFA' sv ((FrameRegular _ _):s) pid = stackGetCFA' sv s pid
 stackGetCFA' _  ((FrameMagic{..}):_)   _   = frCFA
@@ -1403,7 +1428,7 @@ storeGetLoc s pid = pcEnumToLoc pc
           pc    = maybe (mkPCEnum pid cfaInitLoc) id $ storeTryEvalEnum s pcvar
 
 -- Used to highlight enabled processes in process selector
-isProcEnabled :: SourceView c a -> PrID -> IO Bool
+isProcEnabled :: SourceView c a u -> PrID -> IO Bool
 isProcEnabled sv pid = do
     let store@SVStore{..} = fst $ fromJust $ D.sConcrete $ svState sv
     stack@(EProcStack (frame:_)) <- extStackFromStore sv store pid
@@ -1430,18 +1455,18 @@ isProcEnabled sv pid = do
                                     cond
 
 
-isProcControllableCode :: SourceView c a -> PrID -> Bool
+isProcControllableCode :: SourceView c a u -> PrID -> Bool
 isProcControllableCode sv pid = isControllableCode sv pid (EProcStack stack)
     where
     store = sstStore $ fst $ fromJust $ D.sConcrete $ svState sv
     stack = stackFromStore sv store pid
 
-findProcInsideMagic :: SourceView c a -> Maybe PrID
+findProcInsideMagic :: SourceView c a u -> Maybe PrID
 findProcInsideMagic sv = find (isProcControllableCode sv)
                          $ concatMap flatten $ pidtree sv
 
 -- True if process is running controllable code, i.e., is inside a top-level MB.
-isControllableCode :: SourceView c a -> PrID -> EProcStack -> Bool
+isControllableCode :: SourceView c a u -> PrID -> EProcStack -> Bool
 isControllableCode sv pid (EProcStack frames) = isMBLabel lab && storeEvalBool store mkMagicVar
     where
     store  = sstStore $ fst $ fromJust $ D.sConcrete $ svState sv
@@ -1451,7 +1476,7 @@ isControllableCode sv pid (EProcStack frames) = isMBLabel lab && storeEvalBool s
     lab    = cfaLocLabel loc cfa
 
 -- update all displays
-updateDisplays :: RSourceView c a -> IO ()
+updateDisplays :: RSourceView c a u -> IO ()
 updateDisplays ref = do
     autores <- getIORef svAutoResolve ref
     when autores $ autoResolve ref
@@ -1463,7 +1488,7 @@ updateDisplays ref = do
     resolveViewUpdate    ref
 
 -- Reset all components
-reset :: RSourceView c a -> IO ()
+reset :: RSourceView c a u -> IO ()
 reset ref = do
     -- processSelectorUpdate expects initialised store
     sv0 <- readIORef ref
@@ -1482,7 +1507,7 @@ reset ref = do
     updateDisplays ref
 
 -- Disable all controls
-disable :: RSourceView c a -> IO ()
+disable :: RSourceView c a u -> IO ()
 disable ref = do
     -- disable process selector
     processSelectorDisable ref
@@ -1496,79 +1521,79 @@ disable ref = do
 
 -- Access current location in the trace 
 
-currentCFA :: SourceView c a -> CFA
+currentCFA :: SourceView c a u -> CFA
 currentCFA sv = getCFA sv (svTracePos sv)
 
-currentLoc :: SourceView c a -> Loc
+currentLoc :: SourceView c a u -> Loc
 currentLoc sv = getLoc sv (svTracePos sv)
 
-currentLocLabel :: SourceView c a -> LocLabel
+currentLocLabel :: SourceView c a u -> LocLabel
 currentLocLabel sv = getLocLabel sv (svTracePos sv)
 
-currentDelay :: SourceView c a -> Bool
+currentDelay :: SourceView c a u -> Bool
 currentDelay sv = getDelay sv (svTracePos sv)
 
-currentStore :: SourceView c a -> Store
+currentStore :: SourceView c a u -> Store
 currentStore sv = getStore sv (svTracePos sv)
 
-initialStore :: SourceView c a -> Store
+initialStore :: SourceView c a u -> Store
 initialStore sv = getStore sv 0
 
-modifyStore :: SourceView c a -> Int -> (Store -> Store) -> SourceView c a
+modifyStore :: SourceView c a u -> Int -> (Store -> Store) -> SourceView c a u
 modifyStore sv idx f = sv {svTrace = tr'}
     where tr     = svTrace sv
           entry  = tr !! idx
           entry' = entry {teStore = (f $ teStore entry)}
           tr'    = take idx tr ++ [entry'] ++ drop (idx+1) tr
 
-modifyCurrentStore :: SourceView c a -> (Store -> Store) -> SourceView c a
+modifyCurrentStore :: SourceView c a u -> (Store -> Store) -> SourceView c a u
 modifyCurrentStore sv f = modifyStore sv (svTracePos sv) f
 
-currentStack :: SourceView c a -> EProcStack
+currentStack :: SourceView c a u -> EProcStack
 currentStack sv = getStack sv (svTracePos sv)
 
 currentStackFrames = stackFrames . currentStack
 
-currentTmpExprTree :: SourceView c a -> Forest Expr
+currentTmpExprTree :: SourceView c a u -> Forest Expr
 currentTmpExprTree sv = getTmpExprTree sv (svTracePos sv)
 
---currentControllable :: SourceView c a -> Bool
+--currentControllable :: SourceView c a u -> Bool
 --currentControllable sv = storeEvalBool (currentStore sv) mkContVar
 
-currentMagic :: SourceView c a -> Bool
+currentMagic :: SourceView c a u -> Bool
 currentMagic sv = storeEvalBool (currentStore sv) mkMagicVar
 
-currentError :: SourceView c a -> Bool
+currentError :: SourceView c a u -> Bool
 currentError sv = storeEvalBool (currentStore sv) mkErrVar
 
-cfaAtFrame :: SourceView c a -> Int -> CFA
+cfaAtFrame :: SourceView c a u -> Int -> CFA
 cfaAtFrame sv frame = let frames = currentStackFrames sv 
                       in stackGetCFA sv (svPID sv) $ EProcStack $ drop frame frames
 
 -- Access arbitrary location in the trace 
 
-getCFA :: SourceView c a -> Int -> CFA
+getCFA :: SourceView c a u -> Int -> CFA
 getCFA sv p = stackGetCFA sv (svPID sv) $ getStack sv p
 
-getLoc :: SourceView c a -> Int -> Loc
+getLoc :: SourceView c a u -> Int -> Loc
 getLoc sv p = frLoc $ head $ stackFrames $ getStack sv p
 
-getLocLabel :: SourceView c a -> Int -> LocLabel
+getLocLabel :: SourceView c a u -> Int -> LocLabel
 getLocLabel sv p = cfaLocLabel (getLoc sv p) (getCFA sv p)
 
-getDelay :: SourceView c a -> Int -> Bool
+getDelay :: SourceView c a u -> Int -> Bool
 getDelay sv p = (isDelayLabel $ getLocLabel sv p) &&
                 -- initial location of magic block CFA is not considered delay location
                 (not $ (getLoc sv p == cfaInitLoc) && (isJust $ stackGetMBID sv $ getStack sv p))
                 
-getStore :: SourceView c a -> Int -> Store
+getStore :: SourceView c a u -> Int -> Store
 getStore sv p | p >= (length $ svTrace sv) = SStruct M.empty (svSpec sv)
               | otherwise                  = teStore $ svTrace sv !! p
 
-getStack :: SourceView c a -> Int -> EProcStack
+getStack :: SourceView c a u -> Int -> EProcStack
 getStack sv p = teStack $ svTrace sv !! p
 
-getTmpExprTree :: SourceView c a -> Int -> Forest Expr
+getTmpExprTree :: SourceView c a u -> Int -> Forest Expr
 getTmpExprTree sv p =
     let ?spec = svSpec sv in
     let -- collect tmp variables from all transitions from the current location
@@ -1595,7 +1620,7 @@ getTmpExprTree sv p =
 -- Returns True if the step was performed successfully and
 -- False otherwise (i.e., the user did not provide values
 -- for nondeterministic arguments)
-microstep :: SourceView c a -> Maybe (SourceView c a)
+microstep :: SourceView c a u -> Maybe (SourceView c a u)
 microstep sv = 
     -- Try all transitions from the current location; choose the first successful one
     let transitions = Graph.lsuc (currentCFA sv) (currentLoc sv)
@@ -1605,7 +1630,7 @@ microstep sv =
             (store, stack):_ -> trace ("microstep': stack=" ++ show stack)
                                 $ Just $ traceAppend sv store stack
 
-microstep' :: SourceView c a -> (Loc, TranLabel) -> Maybe (Store, EProcStack)
+microstep' :: SourceView c a u -> (Loc, TranLabel) -> Maybe (Store, EProcStack)
 microstep' sv (to, TranCall meth retloc)  = -- insert new stack frame and mofify the old frame to point to return location,
                                             -- so that Return can be performed later
                                             let ?spec = svFlatSpec sv in
@@ -1627,7 +1652,7 @@ microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=
                                                      Nothing -> Nothing
                                                      _       -> Just (store', EProcStack $ (head $ currentStackFrames sv){frLoc = to} : (tail $ currentStackFrames sv))
 
-makeTransition :: (D.Rel c v a s) => RSourceView c a -> IO ()
+makeTransition :: (D.Rel c v a s) => RSourceView c a u -> IO ()
 makeTransition ref = do
     putStrLn "makeTransition"
     sv@SourceView{..} <- readIORef ref
@@ -1644,7 +1669,7 @@ makeTransition ref = do
     -- add transition
     D.modelAddTransition svModel trans'
 
-applyExplicitUpdates :: SourceView c a -> Store
+applyExplicitUpdates :: SourceView c a u -> Store
 applyExplicitUpdates sv = foldl' (\s (n, upd) -> let asn = snd $ fromJust $ find (storeEvalBool initstore . fst) upd
                                                  in storeSet s (EVar n) $ Just $ storeEval initstore asn) 
                                  (currentStore sv) (M.toList $ specUpds spec)
@@ -1655,10 +1680,10 @@ applyExplicitUpdates sv = foldl' (\s (n, upd) -> let asn = snd $ fromJust $ find
     initstore = storeUnion (initialStore sv) (storeProject (currentStore sv) (map varName $ specTmpVar spec))
 
 
-setLPID :: PrID -> SourceView c a -> SourceView c a
+setLPID :: PrID -> SourceView c a u -> SourceView c a u
 setLPID pid sv = modifyCurrentStore sv (\s -> storeSet s mkPIDLVar (Just $ SVal $ EnumVal $ mkPIDEnumeratorName pid))
 
-maybeSetLCont :: SourceView c a -> SourceView c a
+maybeSetLCont :: SourceView c a u -> SourceView c a u
 maybeSetLCont sv | (isNothing $ storeTryEvalBool (currentStore sv) mkContLVar) = 
                    let cont = isProcControllableCode sv (svPID sv)
                    in modifyCurrentStore sv (\s -> storeSet s mkContLVar $ Just $ SVal $ BoolVal cont)
@@ -1701,7 +1726,7 @@ storeEvalStr inspec flatspec spec store mpid sc str = do
     -- 6. evaluate
     return $ storeEval store iexpr
 
-compileMB :: SourceView c a -> F.Scope -> PrID -> String -> Either String CFA
+compileMB :: SourceView c a u -> F.Scope -> PrID -> String -> Either String CFA
 compileMB SourceView{..} sc pid str = do
     -- Apply all transformations that the input spec goes through to the statement:
     -- 1. parse
