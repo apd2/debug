@@ -7,6 +7,7 @@ module SourceView(SourceView.sourceViewNew,
 import Data.Maybe
 import Data.List
 import Data.Tree
+import Data.Tuple.Select
 import Data.String.Utils
 import qualified Data.Map                   as M
 import Data.IORef
@@ -21,6 +22,7 @@ import Control.Applicative
 import qualified Text.PrettyPrint           as PP
 import Debug.Trace
 
+import Pos
 import PP
 import PID
 import qualified Grammar
@@ -175,7 +177,10 @@ data SourceView c a u = SourceView {
     -- Stuff used for code generation
     svSTDdManager    :: C.STDdManager RealWorld u,
     svAbsDB          :: Abs.DB RealWorld u AbsVar AbsVar,
-    svRefineDyn      :: Abs.RefineDynamic RealWorld u
+    svRefineDyn      :: Abs.RefineDynamic RealWorld u,
+    svRefineStat     :: Abs.RefineStatic RealWorld u,
+    svCompiledMBs    :: [(Pos, String)],             -- magic blocks completely filled with code
+    svReachable      :: Maybe (C.DDNode RealWorld u) -- reachable state computed by simulating the game
 }
 
 type RSourceView c a u = IORef (SourceView c a u)
@@ -216,6 +221,9 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svSTDdManager    = error "SourceView: svSTDdManager undefined"
                              , svAbsDB          = error "SourceView: svAbsDB undefined"
                              , svRefineDyn      = error "SourceView: svRefineDyn undefined"
+                             , svRefineStat     = error "SourceView: svRefineStat undefined"
+                             , svCompiledMBs    = []
+                             , svReachable      = Nothing
                              }
 
 
@@ -244,6 +252,7 @@ sourceViewNew inspec flatspec spec absvars solver m Abs.RefineInfo{..} rmodel = 
                                       , svSTDdManager    = m
                                       , svAbsDB          = db
                                       , svRefineDyn      = rd
+                                      , svRefineStat     = rs
                                       }
 
     vbox <- G.vBoxNew False 0
@@ -1268,14 +1277,62 @@ codegen ref = do
 
 -- Generate code for empty MB identified by the argument
 doCodeGen :: (D.Rel c v a s) => RSourceView c a u -> MBID -> IO ()
-doCodeGen ref (MBID pos locs) = do
-    SourceView{..} <- readIORef ref
-    return undefined
+doCodeGen ref mbid = do
+    -- Simulate game
+    ok <- reSimulate ref
+    when ok $ doCodeGen' ref mbid
+
+doCodeGen' :: (D.Rel c v a s) => RSourceView c a u -> MBID -> IO ()
+doCodeGen' ref mbid@(MBID pos locs) = do
+    sv@SourceView{..} <- readIORef ref
+    -- Set of states at the outermost MB entry
+    initset <- stToIO $ CG.restrictToMB svSpec svSTDdManager svAbsDB pos (fromJust svReachable)
+    -- Simulate nested MBs until reaching the target one
+    mbd <- codeWinGetMB svCodeWin mbid
+    minitset' <- simulateNestedMBs sv initset mbd locs
+    case minitset' of
+         Nothing       -> D.showMessage svModel G.MessageError "Magic block is not reachable--cannot generate code"
+         Just initset' -> do -- Generate code
+                             stToIO $ C.deref svSTDdManager initset'
+                             -- concretise
+                             -- update region
+
     -- check that magic blocks are leaves
-    -- set of states at MB entrance <- simulate
-    -- generate statement
-    -- concretise
-    -- update region
+
+
+-- Consumes the initset reference
+simulateNestedMBs :: SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> IO (Maybe (C.DDNode RealWorld u))
+simulateNestedMBs _                 initset _   []         = return $ Just initset
+simulateNestedMBs sv@SourceView{..} initset mbd (loc:locs) = do
+    minitset' <- stToIO $ do CG.simulateCFAAbstractToLoc svSpec svSTDdManager svRefineDyn svAbsDB (mbCFA mbd) initset loc
+    stToIO $ C.deref svSTDdManager initset
+    case minitset' of
+         Nothing       -> return Nothing
+         Just initset' -> simulateNestedMBs sv initset' (fromJust $ lookupMB mbd [loc]) locs
+
+reSimulate :: RSourceView c a u -> IO Bool
+reSimulate ref = do
+    sv@SourceView{..} <- readIORef ref
+    -- Find and compile all complete magic blocks
+    embs <- liftM sequence
+            $ mapM (\(p,_,_) -> do let (pid,loc,sc) = fromJust $ specLookupMB svSpec p
+                                   txt <- codeWinGetAllMBText svCodeWin (MBID p [])
+                                   case compileMB sv sc pid txt of
+                                        Left  e   -> return $ Left  (p,e)
+                                        Right cfa -> return $ Right (p,txt,cfa))
+            $ specAllMBs svSpec
+    case embs of
+         Left (p,e) -> do D.showMessage svModel G.MessageError $ "Error compiling magic block at " ++ show p ++ ": " ++ e
+                          return False
+         Right mbs  -> let mbs'  = filter (null . cfaFindMBs . sel3) mbs
+                           mbstxt = map (\(p, txt, _) -> (p,txt)) mbs'
+                           mbscfa = map (\(p, _, cfa) -> (p,cfa)) mbs' in
+                       if mbstxt == svCompiledMBs && isJust svReachable
+                          then return True
+                          else do reach <- stToIO $ do maybe (return ()) (C.deref svSTDdManager) svReachable
+                                                       CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB mbscfa (Abs.init svRefineStat)
+                                  writeIORef ref $ sv {svCompiledMBs = mbstxt, svReachable = Just reach}
+                                  return True
 
 -- If we are about to enter magic block, activate it.
 maybeEnterMB :: SourceView c a u -> IO (Maybe (SourceView c a u), Bool)
