@@ -10,8 +10,10 @@ module CodeWin(MBID(..),
                isMBICurrent,
                mbiGetRegionText,
                mbEpoch,
+               mbCFA,
                CodeWin,
                RCodeWin,
+               lookupMB,
                cwLookupMB,
                codeWinNew,
                codeWinWidget,
@@ -23,6 +25,7 @@ module CodeWin(MBID(..),
                codeWinSaveAll,
                codeWinModifiedFiles,
                codeWinSetMBText,
+               codeWinGetAllMBText,
                codeWinMBRefresh,
                codeWinMBMakeStale,
                codeWinMBActivate,
@@ -94,6 +97,10 @@ isMBActive _       = False
 mbEpoch :: MBDescr -> Int
 mbEpoch (MBA mba) = mbaEpoch mba
 mbEpoch (MBI mbi) = mbiEpoch mbi
+
+mbCFA :: MBDescr -> CFA
+mbCFA (MBA mba) = mbaCFA mba
+mbCFA (MBI mbi) = mbiCFA mbi
 
 data MBID = MBID { mbidPos  :: Pos
                  , mbidLocs :: [Loc]
@@ -233,6 +240,15 @@ codeWinSetMBText ref mbid txt = do
                                 return $ Left reg
                  Right _  -> return $ Right txt
     modifyIORef ref $ \cw' -> cwSetMB cw' mbid $ MBI $ MBIStale reg' (mbiEpoch mbi + 1)
+
+codeWinGetAllMBText :: RCodeWin -> MBID -> IO String
+codeWinGetAllMBText ref mbid = do
+   cw@CodeWin{..} <- readIORef ref
+   case cwGetMB cw mbid of
+        MBA mba -> regionGetAllText cwAPI (mbaRegion mba)
+        MBI mbi -> case mbiRegion mbi of
+                        Left reg  -> regionGetAllText cwAPI reg
+                        Right txt -> return txt
 
 -- Make stale MB current, creating nested MBs if necessary
 -- Assumes: MBID refers to an existing stale MB whose parent is active.
