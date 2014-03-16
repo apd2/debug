@@ -1294,11 +1294,11 @@ doCodeGen' ref mbid@(MBID pos locs) = do
          Nothing       -> D.showMessage svModel G.MessageError "Magic block is not reachable--cannot generate code"
          Just initset' -> do -- Generate code
                              stToIO $ C.deref svSTDdManager initset'
-                             -- concretise
-                             -- update region
 
-    -- check that magic blocks are leaves
-
+-- Compute wait condition
+-- Enumerate branches
+-- concretise
+-- update region
 
 -- Consumes the initset reference
 simulateNestedMBs :: SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> IO (Maybe (C.DDNode RealWorld u))
@@ -1524,13 +1524,12 @@ findProcInsideMagic sv = find (isProcControllableCode sv)
 
 -- True if process is running controllable code, i.e., is inside a top-level MB.
 isControllableCode :: SourceView c a u -> PrID -> EProcStack -> Bool
-isControllableCode sv pid (EProcStack frames) = isMBLabel lab && storeEvalBool store mkMagicVar
+isControllableCode sv pid (EProcStack frames) = isMBLoc cfa loc && storeEvalBool store mkMagicVar
     where
     store  = sstStore $ fst $ fromJust $ D.sConcrete $ svState sv
     pstack = reverse $ takeWhile (not . isFrameMagic) $ reverse frames
     cfa    = stackGetCFA sv pid (EProcStack pstack)
     loc    = frLoc $ head pstack
-    lab    = cfaLocLabel loc cfa
 
 -- update all displays
 updateDisplays :: RSourceView c a u -> IO ()
@@ -1825,6 +1824,10 @@ compileMB SourceView{..} sc pid str = do
     assert (null $ ctxVar ctx') (F.pos stat) "Cannot perform non-deterministic controllable action"
     let cfa   = cfaMapExpr (ctxCFA ctx') $ F.exprExpandLabels svSpec
         cfar  = cfaPruneUnreachable cfa [cfaInitLoc]
+    -- magic blocks inside cfar cannot be followed by any additional transitions
+    mapM_ (\mbloc -> assert (all ((flip elem) $ cfaFinal cfar) $ map fst $ cfaLocTrans cfar mbloc) (pos $ locAct $ cfaLocLabel mbloc cfa) 
+                            "No statements are allowed after nested magic block")
+          $ filter (isMBLoc cfar) $ cfaDelayLocs cfar
     return {-$ cfaTraceFile cfar "action"-} cfar
 
 -- Check whether statement specifies a valid controllable action:
