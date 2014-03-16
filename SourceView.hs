@@ -41,6 +41,7 @@ import Inline
 import Predicate
 import Store
 import SMTSolver
+import qualified AbsSim            as CG
 import qualified CodeGen           as CG
 import qualified CuddExplicitDeref as C
 import qualified Interface         as Abs
