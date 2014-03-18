@@ -183,10 +183,10 @@ update ref = do
     en  <- G.toggleButtonGetActive svEnBut
     gen <- (liftM $ findIndex (==True)) $ mapM G.toggleButtonGetActive svGoalButs
     fen <- (liftM $ findIndex (==True)) $ mapM G.toggleButtonGetActive svFairButs
-    let constr = if' (not en)                         Nothing
-               $ if' (isNothing gen || isNothing fen) Nothing
-               $ Just $ stratRel !! fromJust gen !! fromJust fen
-    D.modelSetConstraint svModel stratName constr
+    let constr = if' (isNothing gen || isNothing fen) Nothing
+                 $ Just $ stratRel !! fromJust gen !! fromJust fen
+    D.modelSetConstraint svModel stratName $ if' en constr Nothing
+    D.modelSetStrategy svModel constr
 
 --------------------------------------------------------------
 -- Automatic scheduling of goals and fair regions
