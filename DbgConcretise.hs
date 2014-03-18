@@ -69,7 +69,7 @@ concretiseLabel cstate alabel = do
                                             Nothing            -> Just $ avarAsnToFormula (?absvars M.! D.mvarName mvar) val 
                                             Just (_, val') -> if val' == 0
                                                                  then Nothing
-                                                                 else Just $ avarAsnToFormula (?absvars M.! D.mvarName mvar) val) 
+                                                                 else Just $ avarAsnToFormula (?absvars M.! D.mvarName mvar) val)
              $ filter (not . D.isEnVarName . D.mvarName . fst) asn
        -- extract values of relevant state variables from concrete 
        -- state and transform them into additional predicates

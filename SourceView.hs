@@ -1286,20 +1286,25 @@ doCodeGen ref mbid = do
 doCodeGen' :: (D.Rel c v a s) => RSourceView c a u -> MBID -> IO ()
 doCodeGen' ref mbid@(MBID pos locs) = do
     sv@SourceView{..} <- readIORef ref
+    ctx <- D.modelCtx svModel
     -- Set of states at the outermost MB entry
     initset <- stToIO $ CG.restrictToMB svSpec svSTDdManager svAbsDB pos (fromJust svReachable)
     -- Simulate nested MBs until reaching the target one
     mbd <- codeWinGetMB svCodeWin mbid
     minitset' <- simulateNestedMBs sv initset mbd locs
+    strategy <- fromJust <$> D.modelStrategy svModel
     case minitset' of
          Nothing       -> D.showMessage svModel G.MessageError "Magic block is not reachable--cannot generate code"
-         Just initset' -> do -- Generate code
-                             stToIO $ C.deref svSTDdManager initset'
+         Just initset' -> stToIO $ do -- Generate code
+                             let strategyst = D.relToDDNode ctx strategy
+                             step <- CG.gen1Step svSpec svSTDdManager svRefineDyn svAbsDB initset' strategyst
+                             C.deref svSTDdManager strategyst
+                             C.deref svSTDdManager initset'
+                             CG.derefStep svSTDdManager step
 
--- Compute wait condition
--- Enumerate branches
--- concretise
--- update region
+-- state condition to expression
+
+
 
 -- Consumes the initset reference
 simulateNestedMBs :: SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> IO (Maybe (C.DDNode RealWorld u))
