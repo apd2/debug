@@ -1,6 +1,6 @@
-{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, ImplicitParams, FunctionalDependencies, UndecidableInstances, RecordWildCards #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, ImplicitParams, FunctionalDependencies, UndecidableInstances, RecordWildCards, ScopedTypeVariables #-}
 
-module DbgTypes(Rel,
+module DbgTypes(Rel(..),
                 Vals,
                 View(..),
                 ViewEvents(..),
@@ -15,7 +15,7 @@ module DbgTypes(Rel,
                 isConcreteTransition,
                 Oracle(..),
                 ModelVar(..),
-                ModelStateVar(..),
+                ModelStateVar,
                 Model(..),
                 RModel,
                 mCurStateVars,
@@ -43,6 +43,8 @@ module DbgTypes(Rel,
                 modelUntrackedVars,
                 modelStateRels,
                 modelTransRels,
+                modelStrategy,
+                modelSetStrategy,
                 modelConcretiseState,
                 modelConcretiseTransition,
                 modelActiveTransRel,
@@ -55,17 +57,19 @@ module DbgTypes(Rel,
                 modelQuit,
                 showMessage) where
 
-import qualified Graphics.UI.Gtk as G 
+import qualified Graphics.UI.Gtk   as G 
+import Control.Applicative
 import Data.IORef
 import Data.List
 import Data.Maybe
-import qualified Data.Map        as M
+import qualified Data.Map          as M
 import Control.Monad
 
 import Util
 import IDE
-import qualified LogicClasses    as L
+import qualified LogicClasses      as L
 import Implicit
+import qualified CuddExplicitDeref as C
 
 ------------------------------------------------------
 -- Constants
@@ -88,7 +92,8 @@ class (L.Variable c v,
        L.EqRaw c v a [Bool],
        L.CUDDLike c v a,
        L.Cubeable c v a,
-       Show a) => Rel c v a s | c -> v, c -> a, c -> s
+       Show a) => Rel c v a s | c -> v, c -> a, c -> s where
+    relToDDNode :: c ->a -> C.DDNode t u
 
 -- Concrete variable valuation
 class (Eq b) => Vals b
@@ -235,7 +240,8 @@ data Model c a b d = Model {
     mAutoConcretiseTrans  :: Bool,
     mConstraints          :: M.Map String a,
     mTransRel             :: a,
-    mOracles              :: [Oracle a b d]
+    mOracles              :: [Oracle a b d],
+    mStrategy             :: Maybe a
 }
 
 mCurStateVars :: Model c a b d -> [ModelVar]
@@ -320,6 +326,9 @@ modelAddOracle ref oracle = modifyIORef ref $ \m -> mAddOracle m oracle
 modelAdviseTransition :: RModel c a b d -> IO (Maybe (Transition a b d))
 modelAdviseTransition ref = readIORef ref >>= mAdviseTransition
 
+modelStrategy :: RModel c a b d -> IO (Maybe a)
+modelStrategy ref = mStrategy <$> readIORef ref
+
 -- Actions
 modelSelectTransition :: RModel c a b d -> Transition a b d -> IO ()
 modelSelectTransition ref tran = doSelectTransition ref tran False
@@ -353,6 +362,9 @@ modelSetConstraint ref cname crel = do
     views <- modelViews ref
     _ <- mapM (evtTRelUpdated . viewCB) views
     return ()
+
+modelSetStrategy :: (Rel c v a s) => RModel c a b d -> Maybe a -> IO ()
+modelSetStrategy ref s = modifyIORef ref $ \m -> m {mStrategy = s}
 
 modelQuit :: RModel c a b d -> IO Bool
 modelQuit ref = do

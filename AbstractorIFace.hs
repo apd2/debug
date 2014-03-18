@@ -41,9 +41,10 @@ import qualified DbgAbstract     as D
 import qualified StrategyView    as D
 import qualified SourceView      as D
 import qualified SourceViewTypes as D
-import Resource hiding (trace)
+import Resource
 
-instance D.Rel DdManager VarData DdNode [[SatBit]]
+instance D.Rel DdManager VarData DdNode [[SatBit]] where
+    relToDDNode _ n = toDDNode n
 
 -- Statistics about concrete variables used in predicates:
 -- (state vars, state bits, label vars, label bits)
@@ -374,6 +375,7 @@ mkModel' sr@SynthesisRes{..} = model
     mConstraints          = M.empty
     mTransRel             = let ?m = srCtx in b
     mOracles              = []
+    mStrategy             = Nothing
 
     model = D.Model{..}
 
