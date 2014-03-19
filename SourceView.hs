@@ -42,7 +42,7 @@ import Predicate
 import Store
 import SMTSolver
 import qualified AbsSim            as CG
-import qualified CodeGen           as CG
+import qualified CFG               as CG
 import qualified CuddExplicitDeref as C
 import qualified Interface         as Abs
 import qualified TermiteGame       as Abs
@@ -1166,8 +1166,8 @@ transitionToAction inspec flatspec spec cnstate = do
     (if' (not cont) Nothing
      $ if' (tag == mkTagExit) (if' (not $ storeEvalBool cnstate mkMagicVar) (return ActExit) Nothing)
      $ do let flatmeth = let ?spec = flatspec in fromJust $ find ((== tag) . F.sname) $ F.tmMethod tmMain
-          let (caIID, methname) = F.itreeParseName (F.Ident F.nopos tag)
-              Just (F.ObjMethod tm caTask) = F.lookupGlobal ((F.Ident F.nopos "main"):caIID++[methname])
+          let (caIID, methname) = F.itreeParseName tag
+              Just (F.ObjMethod tm caTask) = F.lookupGlobal ((F.Ident F.nopos "main"):caIID++[F.Ident nopos methname])
           let caArgs = map (\a -> (F.sname a, let ?scope = F.ScopeTemplate tm in storeToFExpr a
                                               $ storeEval cnstate 
                                               $ (EVar $ mkVarNameS (NSID Nothing (Just flatmeth)) $ F.sname a)))
@@ -1217,7 +1217,7 @@ findActiveMagicBlock flatspec spec st =
                          tm = case sc of
                                    F.ScopeProcess tm' _ -> tm'
                                    F.ScopeMethod  tm' _ -> tm'
-                      in fst $ F.itreeParseName (F.name tm) )) 
+                      in fst $ F.itreeParseName (F.sname tm) )) 
       $ findProcInsideMagic sv0
 
 
@@ -1860,12 +1860,12 @@ flatScopeToScope :: F.Spec -> F.Scope -> (F.Scope, F.IID)
 flatScopeToScope inspec sc = 
     let ?spec = inspec in
     case sc of
-         F.ScopeMethod   _ meth -> let (i, mname) = F.itreeParseName $ F.name meth
+         F.ScopeMethod   _ meth -> let (i, mname) = F.itreeParseName $ F.sname meth
                                        tm = F.itreeTemplate i
-                                       meth' = fromJust $ find ((== mname) . F.methName) $ F.tmAllMethod tm
+                                       meth' = fromJust $ find ((== mname) . F.sname) $ F.tmAllMethod tm
                                    in (F.ScopeMethod tm meth', i)
-         F.ScopeProcess  _ proc -> let (i, pname) = F.itreeParseName $ F.name proc
+         F.ScopeProcess  _ proc -> let (i, pname) = F.itreeParseName $ F.sname proc
                                        tm = F.itreeTemplate i
-                                       proc' = fromJust $ find ((== pname) . F.procName) $ F.tmAllProcess tm
+                                       proc' = fromJust $ find ((== pname) . F.sname) $ F.tmAllProcess tm
                                    in (F.ScopeProcess tm proc', i)
          F.ScopeTemplate _      -> (F.ScopeTop, [])
