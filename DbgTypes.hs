@@ -64,6 +64,7 @@ import Data.List
 import Data.Maybe
 import qualified Data.Map          as M
 import Control.Monad
+import Control.Monad.ST
 
 import Util
 import IDE
@@ -93,7 +94,7 @@ class (L.Variable c v,
        L.CUDDLike c v a,
        L.Cubeable c v a,
        Show a) => Rel c v a s | c -> v, c -> a, c -> s where
-    relToDDNode :: c ->a -> C.DDNode t u
+    relToDDNode :: c -> a -> ST t (C.DDNode t u)
 
 -- Concrete variable valuation
 class (Eq b) => Vals b

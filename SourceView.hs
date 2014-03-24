@@ -393,7 +393,6 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
 
 stepAction :: (D.Rel c v a s) => RSourceView c a u -> IO ()
 stepAction ref = do 
-    sv' <- readIORef ref
     sv <- readIORef ref
     -- sync PID
     let sv0 = maybeSetLCont $ setLPID (svPID sv) sv
@@ -422,7 +421,6 @@ step sv =
 
 runAction :: (D.Rel c v a s) => RSourceView c a u -> IO ()
 runAction ref = do
-    sv' <- readIORef ref
     sv <- readIORef ref
     -- sync PID
     let sv0 = maybeSetLCont $ setLPID (svPID sv) sv
@@ -501,7 +499,7 @@ saveAll ref = do
 contTransToSource :: F.Spec -> F.Spec -> Spec -> D.Transition a Store SVStore -> Maybe String
 contTransToSource inspec flatspec spec D.Transition{..} = do
     iid <- findActiveMagicBlock flatspec spec (sstStore $ fst $ fromJust $ D.sConcrete tranFrom)
-    act <- transitionToAction inspec flatspec spec (storeUnion (sstStore $ fst $ fromJust $ D.sConcrete tranTo) (fromJust tranConcreteLabel))
+    act <- transitionToAction inspec flatspec (storeUnion (sstStore $ fst $ fromJust $ D.sConcrete tranTo) (fromJust tranConcreteLabel))
     doc <- ppContAction inspec iid act
     return $ PP.render doc
 
@@ -960,8 +958,7 @@ commandButtonsUpdate ref = do
     -- if we are in a pause location and the wait condition is true
     let ?spec = svSpec sv
     pen <- isProcEnabled sv (svPID sv)
-    let lab = currentLocLabel sv
-        en = -- current process must be enabled and ...
+    let en = -- current process must be enabled and ...
              pen
              && 
              -- ... non-determinism must be resolved
@@ -1132,13 +1129,13 @@ autoResolve1 ref e = do
                                then modifyCurrentStore sv (\s -> storeSet s e (Just $ SVal $ valDefault e))
                                else sv)
     
-runControllableCFA :: RSourceView c a u -> CFA -> IO ()
-runControllableCFA ref cfa = do
-    -- Push controllable cfa on the stack
-    modifyIORef ref (\sv -> let frames = currentStackFrames sv
-                                stack' = EProcStack $ (FrameMagic (frScope $ head frames) cfaInitLoc cfa) : frames
-                            in traceAppend sv (currentStore sv) stack')
-    updateDisplays ref
+--runControllableCFA :: RSourceView c a u -> CFA -> IO ()
+--runControllableCFA ref cfa = do
+--    -- Push controllable cfa on the stack
+--    modifyIORef ref (\sv -> let frames = currentStackFrames sv
+--                                stack' = EProcStack $ (FrameMagic (frScope $ head frames) cfaInitLoc cfa) : frames
+--                            in traceAppend sv (currentStore sv) stack')
+--    updateDisplays ref
 
 --------------------------------------------------------------
 -- Generating source code for controllable transitions
@@ -1157,8 +1154,8 @@ ppContAction inspec iid (ActCall methiid t as) = do
     
 -- Translate an abstract transition into a controllable action
 -- cnstate - concrete state before the transition
-transitionToAction :: F.Spec -> F.Spec -> Spec -> Store -> Maybe ContAction
-transitionToAction inspec flatspec spec cnstate = do
+transitionToAction :: F.Spec -> F.Spec -> Store -> Maybe ContAction
+transitionToAction inspec flatspec cnstate = do
     let ?spec = inspec
     let tag = storeEvalEnum cnstate mkTagVar 
     let cont = storeEvalBool cnstate mkContLVar
@@ -1258,8 +1255,8 @@ codegen ref = do
     -- Locate MB under cursor or its parent MB (if the MB does not have its own region)
     mmb <- codeWinMBAtCursor svCodeWin
     case mmb of
-         Nothing          -> D.showMessage svModel G.MessageError "No editable magic block under cursor"
-         Just (mbid, pos) -> do 
+         Nothing        -> D.showMessage svModel G.MessageError "No editable magic block under cursor"
+         Just (mbid, p) -> do 
              -- Flatten MB by making it stale
              codeWinMBMakeStale svCodeWin mbid
              MBI mbi <- codeWinGetMB svCodeWin mbid
@@ -1271,7 +1268,7 @@ codegen ref = do
                 else case compileMB sv sc pid mbtxt of
                           Left e    -> D.showMessage svModel G.MessageError e
                           Right cfa -> do codeWinMBRefresh svCodeWin mbid cfa
-                                          case cfaFindMBAtPos cfa pos of
+                                          case cfaFindMBAtPos cfa p of
                                                Nothing  -> D.showMessage svModel G.MessageError "No magic block at this location"
                                                Just loc -> doCodeGen ref $ mbidChild mbid loc
 
@@ -1283,12 +1280,12 @@ doCodeGen ref mbid = do
     when ok $ doCodeGen' ref mbid
 
 doCodeGen' :: (D.Rel c v a s) => RSourceView c a u -> MBID -> IO ()
-doCodeGen' ref mbid@(MBID pos locs) = do
+doCodeGen' ref mbid@(MBID p locs) = do
     sv@SourceView{..} <- readIORef ref
-    let (mbpid,_,mbsc) = fromJust $ specLookupMB svSpec pos
+    let (mbpid,_,mbsc) = fromJust $ specLookupMB svSpec p
     ctx <- D.modelCtx svModel
     -- Set of states at the outermost MB entry
-    initset <- stToIO $ CG.restrictToMB svSpec svSTDdManager svAbsDB pos (fromJust svReachable)
+    initset <- stToIO $ CG.restrictToMB svSpec svSTDdManager svAbsDB p (fromJust svReachable)
     -- Simulate nested MBs until reaching the target one
     mbd <- codeWinGetMB svCodeWin mbid
     minitset' <- simulateNestedMBs sv initset mbd locs
@@ -1296,7 +1293,7 @@ doCodeGen' ref mbid@(MBID pos locs) = do
     case minitset' of
          Nothing       -> D.showMessage svModel G.MessageError "Magic block is not reachable--cannot generate code"
          Just initset' -> do code <- stToIO $ do -- Generate code
-                                 let strategyst = D.relToDDNode ctx strategy
+                                 strategyst <- D.relToDDNode ctx strategy
                                  stp@CG.Step{..} <- CG.gen1Step svSpec svSTDdManager svRefineDyn svAbsDB initset' strategyst
                                  C.deref svSTDdManager strategyst
                                  C.deref svSTDdManager initset'
@@ -1320,7 +1317,7 @@ reSimulate ref = do
     sv@SourceView{..} <- readIORef ref
     -- Find and compile all complete magic blocks
     embs <- liftM sequence
-            $ mapM (\(p,_,_) -> do let (pid,loc,sc) = fromJust $ specLookupMB svSpec p
+            $ mapM (\(p,_,_) -> do let (pid,_,sc) = fromJust $ specLookupMB svSpec p
                                    txt <- codeWinGetAllMBText svCodeWin (MBID p [])
                                    case compileMB sv sc pid txt of
                                         Left  e   -> return $ Left  (p,e)
@@ -1562,9 +1559,9 @@ reset ref = do
     sv1 <- readIORef ref
     stack <- extStackFromStore sv1 (fst $ fromJust $ D.sConcrete $ svState sv1) (svPID sv1)
     -- initialise trace
-    let tr = [TraceEntry { teStack = stack
-                         , teStore = store}]
-    writeIORef ref sv1{svTrace = tr, svTracePos = 0, svStackFrame = 0}
+    let tr' = [TraceEntry { teStack = stack
+                          , teStore = store}]
+    writeIORef ref sv1{svTrace = tr', svTracePos = 0, svStackFrame = 0}
     updateDisplays ref
 
 -- Disable all controls
