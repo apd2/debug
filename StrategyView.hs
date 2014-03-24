@@ -117,6 +117,7 @@ strategyViewNew strat@Strategy{..} model = do
     _ <- mapM (\bt -> G.radioButtonSetGroup bt $ head gbuts) $ drop 1 gbuts
     _ <- mapM (\bt -> G.radioButtonSetGroup bt $ head fbuts) $ drop 1 fbuts
 
+    update ref
     return $ D.View { D.viewName      = stratName
                     , D.viewDefAlign  = D.AlignLeft
                     , D.viewShow      = return ()
