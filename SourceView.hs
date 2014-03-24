@@ -975,7 +975,6 @@ commandButtonsUpdate ref = do
     G.widgetSetSensitive (svSaveAllButton sv) True
     G.widgetSetSensitive (svStepButton sv)    en
     G.widgetSetSensitive (svRunButton sv)     en
-    G.widgetSetSensitive (svCodeGenButton sv) True
     G.widgetSetSensitive (svMagicButton sv) $  (isMBLabel $ currentLocLabel sv)                     -- we're at a magic block entrance
                                             && (currentMagic sv)
                                             && (svTracePos sv == 0)                                 -- there is no transition in progress
@@ -988,7 +987,6 @@ commandButtonsDisable ref = do
     G.widgetSetSensitive (svStepButton sv)    False
     G.widgetSetSensitive (svRunButton sv)     False
     G.widgetSetSensitive (svMagicButton sv)   False
-    G.widgetSetSensitive (svCodeGenButton sv) False
 
 -- Resolve --
 
