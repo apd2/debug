@@ -21,6 +21,7 @@ import Text.Parsec
 import Control.Applicative
 import qualified Text.PrettyPrint           as PP
 import Debug.Trace
+import Control.Concurrent
 
 import Pos
 import PP
@@ -1335,10 +1336,19 @@ reSimulate ref = do
                            mbscfa = map (\(p, _, cfa) -> (p,cfa)) mbs' in
                        if mbstxt == svCompiledMBs && isJust svReachable
                           then return True
-                          else do reach <- stToIO $ do maybe (return ()) (C.deref svSTDdManager) svReachable
-                                                       CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa (Abs.init svRefineStat)
-                                  writeIORef ref $ sv {svCompiledMBs = mbstxt, svReachable = Just reach}
+                          else do dlg <- G.messageDialogNew Nothing [G.DialogModal] G.MessageOther G.ButtonsNone "Simulating..."
+                                  G.windowSetDecorated dlg False
+                                  _ <- forkOS (simThread ref dlg mbstxt mbscfa)
+                                  _ <- G.dialogRun dlg
                                   return True
+
+simThread :: RSourceView c a u -> G.MessageDialog -> [(Pos, String)] -> [CG.CompiledMB] -> IO ()
+simThread ref dlg mbstxt mbscfa = do
+    sv@SourceView{..} <- readIORef ref
+    reach <- stToIO $ do maybe (return ()) (C.deref svSTDdManager) svReachable
+                         CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa (Abs.init svRefineStat)
+    writeIORef ref $ sv {svCompiledMBs = mbstxt, svReachable = Just reach}
+    G.dialogResponse dlg G.ResponseNone
 
 -- If we are about to enter magic block, activate it.
 maybeEnterMB :: SourceView c a u -> IO (Maybe (SourceView c a u), Bool)
