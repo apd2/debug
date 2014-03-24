@@ -1258,51 +1258,60 @@ codegen ref = do
     mmb <- codeWinMBAtCursor svCodeWin
     case mmb of
          Nothing        -> D.showMessage svModel G.MessageError "No editable magic block under cursor"
-         Just (mbid, p) -> do 
-             -- Flatten MB by making it stale
-             codeWinMBMakeStale svCodeWin mbid
-             MBI mbi <- codeWinGetMB svCodeWin mbid
-             mbtxt <- mbiGetRegionText svCodeWin mbi
-             let (pid,_,sc) = fromJust $ specLookupMB svSpec (mbidPos mbid)
-             -- Compile parent MB and locate the MB to be synthesised inside it.
-             if mbtxt == "..."
-                then doCodeGen ref mbid
-                else case compileMB sv sc pid mbtxt of
-                          Left e    -> D.showMessage svModel G.MessageError e
-                          Right cfa -> do codeWinMBRefresh svCodeWin mbid cfa
-                                          case cfaFindMBAtPos cfa p of
-                                               Nothing  -> D.showMessage svModel G.MessageError "No magic block at this location"
-                                               Just loc -> doCodeGen ref $ mbidChild mbid loc
+         Just (mbid, p) -> 
+             case specLookupMB svSpec (mbidPos mbid) of
+                  Nothing         -> D.showMessage svModel G.MessageError "This magic block is never invoked"
+                  Just (pid,_,sc) -> do
+                      -- Flatten MB by making it stale
+                      codeWinMBMakeStale svCodeWin mbid
+                      MBI mbi <- codeWinGetMB svCodeWin mbid
+                      mbtxt <- mbiGetRegionText svCodeWin mbi
+                      -- Compile parent MB and locate the MB to be synthesised inside it.
+                      if mbtxt == "..."
+                         then doCodeGen ref mbid
+                         else case compileMB sv sc pid mbtxt of
+                                   Left e    -> D.showMessage svModel G.MessageError e
+                                   Right cfa -> do codeWinMBRefresh svCodeWin mbid cfa
+                                                   case cfaFindMBAtPos cfa p of
+                                                        Nothing  -> D.showMessage svModel G.MessageError "No magic block at this location"
+                                                        Just loc -> doCodeGen ref $ mbidChild mbid loc
 
 -- Generate code for empty MB identified by the argument
 doCodeGen :: (D.Rel c v a s) => RSourceView c a u -> MBID -> IO ()
 doCodeGen ref mbid = do
-    -- Simulate game
-    ok <- reSimulate ref
-    when ok $ doCodeGen' ref mbid
+    putStrLn "doCodeGen"
+    SourceView{..} <- readIORef ref
+    mstrategy <- D.modelStrategy svModel
+    case mstrategy of 
+         Nothing       -> D.showMessage svModel G.MessageError "No strategy selected"
+         Just strategy -> do -- Simulate game
+                             ok <- reSimulate ref
+                             when ok $ doCodeGen' ref mbid strategy
 
-doCodeGen' :: (D.Rel c v a s) => RSourceView c a u -> MBID -> IO ()
-doCodeGen' ref mbid@(MBID p locs) = do
+doCodeGen' :: (D.Rel c v a s) => RSourceView c a u -> MBID -> a -> IO ()
+doCodeGen' ref mbid@(MBID p locs) strategy = do
     sv@SourceView{..} <- readIORef ref
-    let (mbpid,_,mbsc) = fromJust $ specLookupMB svSpec p
     ctx <- D.modelCtx svModel
     -- Set of states at the outermost MB entry
     initset <- stToIO $ CG.restrictToMB svSpec svSTDdManager svAbsDB p (fromJust svReachable)
-    -- Simulate nested MBs until reaching the target one
-    mbd <- codeWinGetMB svCodeWin mbid
-    minitset' <- simulateNestedMBs sv initset mbd locs
-    strategy <- fromJust <$> D.modelStrategy svModel
-    case minitset' of
-         Nothing       -> D.showMessage svModel G.MessageError "Magic block is not reachable--cannot generate code"
-         Just initset' -> do code <- stToIO $ do -- Generate code
-                                 strategyst <- D.relToDDNode ctx strategy
-                                 stp@CG.Step{..} <- CG.gen1Step svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab initset' strategyst
-                                 C.deref svSTDdManager strategyst
-                                 C.deref svSTDdManager initset'
-                                 res <- CG.ppStep svInputSpec svFlatSpec svSpec mbpid svSTDdManager mbsc svAbsDB stp
-                                 CG.derefStep svSTDdManager stp
-                                 return res
-                             codeWinSetMBText svCodeWin mbid $ PP.render code
+    if initset == C.bzero svSTDdManager 
+       then D.showMessage svModel G.MessageError "Magic block is not reachable--cannot generate code"
+       else do
+           -- Simulate nested MBs until reaching the target one
+           mbd <- codeWinGetMB svCodeWin mbid
+           minitset' <- simulateNestedMBs sv initset mbd locs
+           case minitset' of
+                Nothing       -> D.showMessage svModel G.MessageError "Magic block is not reachable from the outermost magic block--cannot generate code"
+                Just initset' -> do code <- stToIO $ do -- Generate code
+                                        let (mbpid,_,mbsc) = fromJust $ specLookupMB svSpec p
+                                        strategyst <- D.relToDDNode ctx strategy
+                                        stp@CG.Step{..} <- CG.gen1Step svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab initset' strategyst
+                                        C.deref svSTDdManager strategyst
+                                        C.deref svSTDdManager initset'
+                                        res <- CG.ppStep svInputSpec svFlatSpec svSpec mbpid svSTDdManager mbsc svAbsDB stp
+                                        CG.derefStep svSTDdManager stp
+                                        return res
+                                    codeWinSetMBText svCodeWin mbid $ PP.render code
 
 -- Consumes the initset reference
 simulateNestedMBs :: SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> IO (Maybe (C.DDNode RealWorld u))
@@ -1338,6 +1347,7 @@ reSimulate ref = do
                                   G.windowSetDecorated dlg False
                                   _ <- forkOS (simThread ref dlg mbstxt mbscfa)
                                   _ <- G.dialogRun dlg
+                                  G.widgetHide dlg
                                   return True
 
 simThread :: RSourceView c a u -> G.MessageDialog -> [(Pos, String)] -> [CG.CompiledMB] -> IO ()
@@ -1346,7 +1356,7 @@ simThread ref dlg mbstxt mbscfa = do
     reach <- stToIO $ do maybe (return ()) (C.deref svSTDdManager) svReachable
                          CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa (Abs.init svRefineStat)
     writeIORef ref $ sv {svCompiledMBs = mbstxt, svReachable = Just reach}
-    G.dialogResponse dlg G.ResponseNone
+    G.postGUIAsync $ G.dialogResponse dlg G.ResponseNone
 
 -- If we are about to enter magic block, activate it.
 maybeEnterMB :: SourceView c a u -> IO (Maybe (SourceView c a u), Bool)
