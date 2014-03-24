@@ -180,6 +180,7 @@ data SourceView c a u = SourceView {
     svRefineDyn      :: Abs.RefineDynamic RealWorld u,
     svRefineStat     :: Abs.RefineStatic RealWorld u,
     svCompiledMBs    :: [(Pos, String)],             -- magic blocks completely filled with code
+    svLab            :: Abs.Lab RealWorld u,
     svReachable      :: Maybe (C.DDNode RealWorld u) -- reachable state computed by simulating the game
 }
 
@@ -223,6 +224,7 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svRefineDyn      = error "SourceView: svRefineDyn undefined"
                              , svRefineStat     = error "SourceView: svRefineStat undefined"
                              , svCompiledMBs    = []
+                             , svLab            = error "SourceView: svLab undefined"
                              , svReachable      = Nothing
                              }
 
@@ -253,6 +255,7 @@ sourceViewNew inspec flatspec spec absvars solver m Abs.RefineInfo{..} rmodel = 
                                       , svAbsDB          = db
                                       , svRefineDyn      = rd
                                       , svRefineStat     = rs
+                                      , svLab            = lp
                                       }
 
     vbox <- G.vBoxNew False 0
@@ -1294,7 +1297,7 @@ doCodeGen' ref mbid@(MBID p locs) = do
          Nothing       -> D.showMessage svModel G.MessageError "Magic block is not reachable--cannot generate code"
          Just initset' -> do code <- stToIO $ do -- Generate code
                                  strategyst <- D.relToDDNode ctx strategy
-                                 stp@CG.Step{..} <- CG.gen1Step svSpec svSTDdManager svRefineDyn svAbsDB initset' strategyst
+                                 stp@CG.Step{..} <- CG.gen1Step svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab initset' strategyst
                                  C.deref svSTDdManager strategyst
                                  C.deref svSTDdManager initset'
                                  res <- CG.ppStep svInputSpec svFlatSpec svSpec mbpid svSTDdManager mbsc svAbsDB stp
@@ -1306,7 +1309,7 @@ doCodeGen' ref mbid@(MBID p locs) = do
 simulateNestedMBs :: SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> IO (Maybe (C.DDNode RealWorld u))
 simulateNestedMBs _                 initset _   []         = return $ Just initset
 simulateNestedMBs sv@SourceView{..} initset mbd (loc:locs) = do
-    minitset' <- stToIO $ do CG.simulateCFAAbstractToLoc svSpec svSTDdManager svRefineDyn svAbsDB (mbCFA mbd) initset loc
+    minitset' <- stToIO $ do CG.simulateCFAAbstractToLoc svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab (mbCFA mbd) initset loc
     stToIO $ C.deref svSTDdManager initset
     case minitset' of
          Nothing       -> return Nothing
@@ -1332,7 +1335,7 @@ reSimulate ref = do
                        if mbstxt == svCompiledMBs && isJust svReachable
                           then return True
                           else do reach <- stToIO $ do maybe (return ()) (C.deref svSTDdManager) svReachable
-                                                       CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB mbscfa (Abs.init svRefineStat)
+                                                       CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa (Abs.init svRefineStat)
                                   writeIORef ref $ sv {svCompiledMBs = mbstxt, svReachable = Just reach}
                                   return True
 
