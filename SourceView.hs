@@ -1319,13 +1319,14 @@ reSimulate :: RSourceView c a u -> IO Bool
 reSimulate ref = do
     sv@SourceView{..} <- readIORef ref
     -- Find and compile all complete magic blocks
-    embs <- liftM sequence
-            $ mapM (\(p,_,_) -> do let (pid,_,sc) = fromJust $ specLookupMB svSpec p
-                                   txt <- codeWinGetAllMBText svCodeWin (MBID p [])
-                                   case compileMB sv sc pid txt of
-                                        Left  e   -> return $ Left  (p,e)
-                                        Right cfa -> return $ Right (p,txt,cfa))
-            $ specAllMBs svSpec
+    embs <- (sequence
+             . map (\(p,txt) -> let (pid,_,sc) = fromJust $ specLookupMB svSpec p in
+                                case compileMB sv sc pid txt of
+                                     Left  e   -> Left  (p,e)
+                                     Right cfa -> Right (p,txt,cfa))
+             . filter ((/= "...") . snd))
+            <$> (mapM (\(p,_,_) -> (p,) <$> codeWinGetAllMBText svCodeWin (MBID p []))
+                 $ specAllMBs svSpec)
     case embs of
          Left (p,e) -> do D.showMessage svModel G.MessageError $ "Error compiling magic block at " ++ show p ++ ": " ++ e
                           return False
