@@ -17,6 +17,7 @@ module CodeWin(MBID(..),
                cwLookupMB,
                codeWinNew,
                codeWinWidget,
+               codeWinGetMBPos,
                codeWinPos,
                codeWinActiveMB,
                codeWinLookupMB,
@@ -40,6 +41,7 @@ import Data.List
 import Data.Tuple.Select
 import Text.Parsec
 import Control.Monad
+import Text.Parsec.Pos
 
 import Util
 import Pos
@@ -129,6 +131,25 @@ data CodeWin = CodeWin { cwAPI       :: CwAPI
                        , cwSelection :: Maybe (Region, Pos, G.TextTag)
                        , cwCBEnabled :: Bool
                        }
+
+-- MB position inside the entire file
+cwGetMBPos :: CodeWin -> MBID -> SourcePos
+cwGetMBPos _  (MBID p _)  = fst p
+cwGetMBPos cw (MBID p ls) = newPos (sourceName parpos)
+                                   (sourceLine parpos + sourceLine relpos - 1) 
+                                   (if sourceLine relpos == 1 
+                                       then sourceColumn parpos + sourceColumn relpos - 1
+                                       else sourceColumn relpos)
+    where parmbid = MBID p (init ls)
+          parpos  = cwGetMBPos cw parmbid
+          parcfa  = mbCFA $ cwGetMB cw parmbid
+          -- position relative to parent
+          relpos  = fst $ pos $ locAct $ cfaLocLabel (last ls) parcfa
+
+codeWinGetMBPos :: RCodeWin -> MBID -> IO SourcePos
+codeWinGetMBPos ref mbid = do
+    cw <- readIORef ref
+    return $ cwGetMBPos cw mbid
 
 cwLookupMB :: CodeWin -> MBID -> Maybe MBDescr
 cwLookupMB cw (MBID p ls) = lookupMB (cwMBRoots cw M.! p) ls
@@ -235,10 +256,14 @@ codeWinSetMBText ref mbid txt = do
     putStrLn $ "codeWinSetMBText " ++ show mbid ++ " \"" ++ txt ++ "\""
     cw@CodeWin{..} <- readIORef ref
     let MBI mbi = cwGetMB cw mbid
+    let offset = (sourceColumn $ cwGetMBPos cw mbid) - 1
+    let txt' = case lines txt of
+                    []     -> txt
+                    (l:ls) -> unlines $ l:(map ((replicate offset ' ') ++) ls)
     reg' <- case mbiRegion mbi of
-                 Left reg -> do regionSetTextSafe ref reg txt
+                 Left reg -> do regionSetTextSafe ref reg txt'
                                 return $ Left reg
-                 Right _  -> return $ Right txt
+                 Right _  -> return $ Right txt'
     modifyIORef ref $ \cw' -> cwSetMB cw' mbid $ MBI $ MBIStale reg' (mbiEpoch mbi + 1)
 
 codeWinGetAllMBText :: RCodeWin -> MBID -> IO String
