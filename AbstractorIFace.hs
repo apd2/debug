@@ -115,7 +115,7 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
     stateLabelExpr <- flip evalStateT pdb $ hoist lift $ doUpdate ops (tslStateLabelConstraintAbs ?spec m)
     inconsistent   <- flip evalStateT pdb $ hoist lift $ doUpdate ops (tslInconsistent ?spec m)
     srStrat <- case res of
-                  Just True -> liftM (map (map (toDdNode ?m)) . snd) $ strat ri
+                  Just True -> liftM (map (map (toDdNode ?m)) . fst) $ strat ri
 --                               do s0 <- strat ri
 --                                  lift $ mapM (mapM (\s -> do s' <- bor m s $ bnot cont
 --                                                              deref m s
