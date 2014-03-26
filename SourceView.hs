@@ -1298,7 +1298,7 @@ doCodeGen' ref mbid@(MBID p locs) strategy = do
        then D.showMessage svModel G.MessageError "Magic block is not reachable--cannot generate code"
        else do
            -- Simulate nested MBs until reaching the target one
-           mbd <- codeWinGetMB svCodeWin mbid
+           mbd <- codeWinGetMB svCodeWin (MBID p [])
            minitset' <- simulateNestedMBs sv initset mbd locs
            case minitset' of
                 Nothing       -> D.showMessage svModel G.MessageError "Magic block is not reachable from the outermost magic block--cannot generate code"
