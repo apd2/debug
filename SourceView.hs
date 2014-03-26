@@ -1240,7 +1240,7 @@ autogen ref = do
                                   (maybe "/* failed to convert transition to code */" 
                                          (\s -> if s == "exit"
                                                    then "{}"
-                                                   else s ++ ";\n" ++ replicate (sourceColumn (fst p) - 1) ' ' ++ "...")
+                                                   else s ++ ";\n...")
                                    . contTransToSource svInputSpec svFlatSpec svSpec)
                                   mt')
                  mtran
