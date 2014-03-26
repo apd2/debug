@@ -41,6 +41,7 @@ import Data.List
 import Data.Tuple.Select
 import Text.Parsec
 import Control.Monad
+import Control.Applicative
 import Text.Parsec.Pos
 
 import Util
@@ -134,7 +135,7 @@ data CodeWin = CodeWin { cwAPI       :: CwAPI
 
 -- MB position inside the entire file
 cwGetMBPos :: CodeWin -> MBID -> SourcePos
-cwGetMBPos _  (MBID p _)  = fst p
+cwGetMBPos _  (MBID p []) = fst p
 cwGetMBPos cw (MBID p ls) = newPos (sourceName parpos)
                                    (sourceLine parpos + sourceLine relpos - 1) 
                                    (if sourceLine relpos == 1 
@@ -254,17 +255,31 @@ codeWinSaveAll ref = do
 codeWinSetMBText :: RCodeWin -> MBID -> String -> IO ()
 codeWinSetMBText ref mbid txt = do
     putStrLn $ "codeWinSetMBText " ++ show mbid ++ " \"" ++ txt ++ "\""
-    cw@CodeWin{..} <- readIORef ref
-    let MBI mbi = cwGetMB cw mbid
+    cw <- readIORef ref
     let offset = (sourceColumn $ cwGetMBPos cw mbid) - 1
+    putStrLn $ "codeWinSetMBText: shifting by " ++ show offset
     let txt' = case lines txt of
                     []     -> txt
                     (l:ls) -> unlines $ l:(map ((replicate offset ' ') ++) ls)
-    reg' <- case mbiRegion mbi of
-                 Left reg -> do regionSetTextSafe ref reg txt'
-                                return $ Left reg
-                 Right _  -> return $ Right txt'
-    modifyIORef ref $ \cw' -> cwSetMB cw' mbid $ MBI $ MBIStale reg' (mbiEpoch mbi + 1)
+    codeWinSetMBText' ref mbid txt'
+
+codeWinSetMBText' :: RCodeWin -> MBID -> String -> IO ()
+codeWinSetMBText' ref mbid txt = do
+    cw@CodeWin{..} <- readIORef ref
+    let MBI mbi = cwGetMB cw mbid
+    case mbiRegion mbi of
+         Left reg -> do regionSetTextSafe ref reg txt
+                        modifyIORef ref $ \cw' -> cwSetMB cw' mbid $ MBI $ MBIStale (Left reg) (mbiEpoch mbi + 1) 
+         Right _  -> do let parid  = fromJust $ mbidParent mbid
+                            par    = cwGetMB cw parid
+                            parcfa = mbCFA par
+                            (from, to) = pos $ locAct $ cfaLocLabel (last $ mbidLocs mbid) parcfa
+                        partxt <- lines <$> codeWinGetAllMBText ref parid
+                        let partxt' = unlines $
+                                      take (sourceLine from - 1) partxt ++ 
+                                      [(\ln -> take (sourceColumn from - 1) ln ++ txt ++ drop (sourceColumn to) ln) $ (partxt !! (sourceLine from - 1))] ++
+                                      drop (sourceLine to) partxt
+                        codeWinSetMBText' ref parid partxt'
 
 codeWinGetAllMBText :: RCodeWin -> MBID -> IO String
 codeWinGetAllMBText ref mbid = do
