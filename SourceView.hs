@@ -1821,7 +1821,7 @@ compileMB SourceView{..} sc pid str = do
     -- 2. validate
     let ?spec = svInputSpec
         ?ispec = svSpec
-        ?privoverride = False
+        ?privoverride = True
     F.validateStat scope stat
     validateControllableStat scope stat
     -- 3. flatten
