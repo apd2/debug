@@ -1260,8 +1260,8 @@ codegen ref = do
          Nothing        -> D.showMessage svModel G.MessageError "No editable magic block under cursor"
          Just (mbid, p) -> 
              case specLookupMB svSpec (mbidPos mbid) of
-                  Nothing         -> D.showMessage svModel G.MessageError "This magic block is never invoked"
-                  Just (pid,_,sc) -> do
+                  []             -> D.showMessage svModel G.MessageError "This magic block is never invoked"
+                  ((pid,_,sc):_) -> do
                       -- Flatten MB by making it stale
                       codeWinMBMakeStale svCodeWin mbid
                       MBI mbi <- codeWinGetMB svCodeWin mbid
@@ -1303,7 +1303,7 @@ doCodeGen' ref mbid@(MBID p locs) strategy = do
            case minitset' of
                 Nothing       -> D.showMessage svModel G.MessageError "Magic block is not reachable from the outermost magic block--cannot generate code"
                 Just initset' -> do code <- stToIO $ do -- Generate code
-                                        let (mbpid,_,mbsc) = fromJust $ specLookupMB svSpec p
+                                        let (mbpid,_,mbsc) = head $ specLookupMB svSpec p
                                         strategyst <- D.relToDDNode ctx strategy
                                         stp@CG.Step{..} <- CG.gen1Step svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab initset' strategyst
                                         C.deref svSTDdManager strategyst
@@ -1335,12 +1335,12 @@ reSimulate ref = do
     sv@SourceView{..} <- readIORef ref
     -- Find and compile all complete magic blocks
     embs <- (sequence
-             . map (\(p,txt) -> let (pid,_,sc) = fromJust $ specLookupMB svSpec p in
+             . map (\(p,txt) -> let (pid,_,sc) = head $ specLookupMB svSpec p in
                                 case compileMB sv sc pid txt of
                                      Left  e   -> Left  (p,e)
                                      Right cfa -> Right (p,txt,cfa))
              . filter ((/= "...") . snd))
-            <$> (mapM (\(p,_,_) -> (p,) <$> codeWinGetAllMBText svCodeWin (MBID p []))
+            <$> (mapM (\p -> (p,) <$> codeWinGetAllMBText svCodeWin (MBID p []))
                  $ specAllMBs svSpec)
     case embs of
          Left (p,e) -> do D.showMessage svModel G.MessageError $ "Error compiling magic block at " ++ show p ++ ": " ++ e
