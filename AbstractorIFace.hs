@@ -45,6 +45,7 @@ import Resource
 
 instance D.Rel DdManager VarData DdNode [[SatBit]] where
     relToDDNode _ n = toDDNode n
+    ddNodeToRel m n = toDdNode m n
 
 -- Statistics about concrete variables used in predicates:
 -- (state vars, state bits, label vars, label bits)

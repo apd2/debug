@@ -95,6 +95,7 @@ class (L.Variable c v,
        L.Cubeable c v a,
        Show a) => Rel c v a s | c -> v, c -> a, c -> s where
     relToDDNode :: c -> a -> ST t (C.DDNode t u)
+    ddNodeToRel :: c -> (C.DDNode t u) -> a
 
 -- Concrete variable valuation
 class (Eq b) => Vals b

@@ -17,6 +17,7 @@ import Control.Monad
 import Control.Monad.State
 import Control.Monad.Error
 import Control.Monad.ST
+
 import Text.Parsec
 import Control.Applicative
 import qualified Text.PrettyPrint           as PP
@@ -1312,11 +1313,18 @@ doCodeGen' ref mbid@(MBID p locs) strategy = do
                                         return res
                                     codeWinSetMBText svCodeWin mbid $ PP.render code
 
+
+
 -- Consumes the initset reference
-simulateNestedMBs :: SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> IO (Maybe (C.DDNode RealWorld u))
+simulateNestedMBs :: (D.Rel c v a s) => SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> IO (Maybe (C.DDNode RealWorld u))
 simulateNestedMBs _                 initset _   []         = return $ Just initset
 simulateNestedMBs sv@SourceView{..} initset mbd (loc:locs) = do
-    minitset' <- stToIO $ do CG.simulateCFAAbstractToLoc svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab (mbCFA mbd) initset loc
+    ctx <- D.modelCtx svModel
+    --D.modelSelectState svModel (Just $ D.State (D.ddNodeToRel ctx initset) Nothing)
+    --  let simcb n r = unsafeIOToST $ do putStrLn $ "simcb: " ++ n
+    --                                  D.modelSetConstraint svModel n (Just $ D.ddNodeToRel ctx r)
+    let simcb _ _ = return ()
+    minitset' <- stToIO $ CG.simulateCFAAbstractToLoc svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab (mbCFA mbd) initset loc simcb
     stToIO $ C.deref svSTDdManager initset
     case minitset' of
          Nothing       -> return Nothing
@@ -1352,8 +1360,9 @@ reSimulate ref = do
 simThread :: RSourceView c a u -> [(Pos, String)] -> [CG.CompiledMB] -> IO ()
 simThread ref mbstxt mbscfa = do
     sv@SourceView{..} <- readIORef ref
+    let simcb _ _ = return ()
     reach <- stToIO $ do maybe (return ()) (C.deref svSTDdManager) svReachable
-                         CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa (Abs.init svRefineStat)
+                         CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa (Abs.init svRefineStat) simcb
     writeIORef ref $ sv {svCompiledMBs = mbstxt, svReachable = Just reach}
     --G.postGUIAsync $ G.dialogResponse dlg G.ResponseNone
 
