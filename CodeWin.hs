@@ -45,6 +45,7 @@ import Control.Applicative
 import Text.Parsec.Pos
 
 import Util
+import TSLUtil
 import Pos
 import qualified Spec            as F
 import qualified Template        as F
@@ -258,9 +259,9 @@ codeWinSetMBText ref mbid txt = do
     cw <- readIORef ref
     let offset = (sourceColumn $ cwGetMBPos cw mbid) - 1
     putStrLn $ "codeWinSetMBText: shifting by " ++ show offset
-    let txt' = case lines txt of
+    let txt' = case lines' txt of
                     []     -> txt
-                    (l:ls) -> unlines $ l:(map ((replicate offset ' ') ++) ls)
+                    (l:ls) -> unlines' $ l:(map ((replicate offset ' ') ++) ls)
     codeWinSetMBText' ref mbid txt'
 
 codeWinSetMBText' :: RCodeWin -> MBID -> String -> IO ()
@@ -274,10 +275,11 @@ codeWinSetMBText' ref mbid txt = do
                             par    = cwGetMB cw parid
                             parcfa = mbCFA par
                             (from, to) = pos $ locAct $ cfaLocLabel (last $ mbidLocs mbid) parcfa
-                        partxt <- lines <$> codeWinGetAllMBText ref parid
-                        let partxt' = unlines $
+                        partxt <- lines' <$> codeWinGetAllMBText ref parid
+                        let partxt' = unlines' $
                                       take (sourceLine from - 1) partxt ++ 
-                                      [(\ln -> take (sourceColumn from - 1) ln ++ txt ++ drop (sourceColumn to) ln) $ (partxt !! (sourceLine from - 1))] ++
+                                      [(\(firstln, lastln) -> take (sourceColumn from - 1) firstln ++ txt ++ drop (sourceColumn to - 1) lastln) 
+                                       $ (partxt !! (sourceLine from - 1), partxt !! (sourceLine to - 1))] ++
                                       drop (sourceLine to) partxt
                         codeWinSetMBText' ref parid partxt'
 

@@ -1273,7 +1273,7 @@ codegen ref = do
                                    Left e    -> D.showMessage svModel G.MessageError e
                                    Right cfa -> do codeWinMBRefresh svCodeWin mbid cfa
                                                    case cfaFindMBAtPos cfa p of
-                                                        Nothing  -> D.showMessage svModel G.MessageError "No magic block at this location"
+                                                        Nothing  -> D.showMessage svModel G.MessageError $ "No magic block at this location " ++ show p
                                                         Just loc -> doCodeGen ref $ mbidChild mbid loc
 
 -- Generate code for empty MB identified by the argument
