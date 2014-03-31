@@ -6,6 +6,7 @@ module StrategyView (Strategy(..),
 import Data.Maybe
 import Data.List
 import Data.IORef
+import Data.Tuple.Select
 import Control.Monad
 import qualified Graphics.UI.Gtk            as G
 
@@ -21,7 +22,7 @@ import Implicit
 -- Strategies and counterexamples
 data Strategy a = Strategy {
     stratName  :: String,
-    stratGoals :: [(String, a)],
+    stratGoals :: [(String, a, Maybe [a])], -- the last entry is a list of winning regions sorted by their proximity to the goal
     stratFair  :: [(String, a)],
     stratRel   :: [[a]]
 }
@@ -88,14 +89,14 @@ strategyViewNew strat@Strategy{..} model = do
     G.containerAdd frm2 vbox2
 
     -- Goals
-    gbuts <- mapIdxM (\(n,_) i -> do rad <- G.radioButtonNew
-                                     _ <- G.on rad G.toggled (goalToggled ref i)
-                                     G.widgetShow rad
-                                     lab <- G.labelNew $ Just n
-                                     G.widgetShow lab
-                                     G.containerAdd rad lab
-                                     G.boxPackStart vbox1 rad G.PackNatural 0
-                                     return rad)
+    gbuts <- mapIdxM (\(n,_,_) i -> do rad <- G.radioButtonNew
+                                       _ <- G.on rad G.toggled (goalToggled ref i)
+                                       G.widgetShow rad
+                                       lab <- G.labelNew $ Just n
+                                       G.widgetShow lab
+                                       G.containerAdd rad lab
+                                       G.boxPackStart vbox1 rad G.PackNatural 0
+                                       return rad)
                      stratGoals
 
 
@@ -158,8 +159,8 @@ highlightActiveGoals ref mst = do
     ctx <- D.modelCtx svModel
     let ?m = ctx
     _ <- mapIdxM (\bt i -> do lab <- (liftM $ G.castToLabel . fromJust) $ G.binGetChild bt
-                              let w = if' ((isJust mst) && ((D.sAbstract st .& (snd $ stratGoals !! i)) .== b)) "bold" "normal"
-                              G.labelSetMarkup lab $ "<span weight=\"" ++ w ++ "\">" ++ (fst $ stratGoals !! i) ++ "</span>")
+                              let w = if' ((isJust mst) && ((D.sAbstract st .& (sel2 $ stratGoals !! i)) .== b)) "bold" "normal"
+                              G.labelSetMarkup lab $ "<span weight=\"" ++ w ++ "\">" ++ (sel1 $ stratGoals !! i) ++ "</span>")
                  svGoalButs
     return ()
 
@@ -187,7 +188,7 @@ update ref = do
     let constr = if' (isNothing gen || isNothing fen) Nothing
                  $ Just $ stratRel !! fromJust gen !! fromJust fen
     D.modelSetConstraint svModel stratName $ if' en constr Nothing
-    D.modelSetStrategy svModel constr
+    D.modelSetStrategy svModel $ fmap (\c -> D.SelectedStrategy c (sel2 $ stratGoals !! (fromJust gen)) (sel3 $ stratGoals !! (fromJust gen))) constr
 
 --------------------------------------------------------------
 -- Automatic scheduling of goals and fair regions

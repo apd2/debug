@@ -1284,12 +1284,14 @@ doCodeGen ref mbid = do
     mstrategy <- D.modelStrategy svModel
     case mstrategy of 
          Nothing       -> D.showMessage svModel G.MessageError "No strategy selected"
-         Just strategy -> do -- Simulate game
-                             ok <- reSimulate ref
-                             when ok $ doCodeGen' ref mbid strategy
+         Just strategy -> case D.ssRegions strategy of
+                               Nothing -> D.showMessage svModel G.MessageError "Selected strategy does not contain winning regions (is it a counterexample strategy?)"
+                               Just _  -> do -- Simulate game
+                                             ok <- reSimulate ref
+                                             when ok $ doCodeGen' ref mbid strategy
 
-doCodeGen' :: (D.Rel c v a s) => RSourceView c a u -> MBID -> a -> IO ()
-doCodeGen' ref mbid@(MBID p locs) strategy = do
+doCodeGen' :: (D.Rel c v a s) => RSourceView c a u -> MBID -> D.SelectedStrategy a -> IO ()
+doCodeGen' ref mbid@(MBID p locs) D.SelectedStrategy{..} = do
     sv@SourceView{..} <- readIORef ref
     ctx <- D.modelCtx svModel
     -- Set of states at the outermost MB entry
@@ -1304,9 +1306,13 @@ doCodeGen' ref mbid@(MBID p locs) strategy = do
                 Nothing       -> D.showMessage svModel G.MessageError "Magic block is not reachable from the outermost magic block--cannot generate code"
                 Just initset' -> do code <- stToIO $ do -- Generate code
                                         let (mbpid,_,mbsc) = head $ specLookupMB svSpec p
-                                        strategyst <- D.relToDDNode ctx strategy
-                                        stp@CG.Step{..} <- CG.gen1Step svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab initset' strategyst
+                                        strategyst <- D.relToDDNode ctx ssStrat
+                                        goalst     <- D.relToDDNode ctx ssGoal
+                                        regionsst  <- mapM (D.relToDDNode ctx) $ fromJust ssRegions
+                                        stp@CG.Step{..} <- CG.gen1Step svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab initset' strategyst goalst regionsst
                                         C.deref svSTDdManager strategyst
+                                        C.deref svSTDdManager goalst
+                                        mapM_ (C.deref svSTDdManager) regionsst
                                         C.deref svSTDdManager initset'
                                         res <- CG.ppStep svInputSpec svFlatSpec svSpec mbpid svSTDdManager mbsc svAbsDB stp
                                         CG.derefStep svSTDdManager stp
@@ -1319,7 +1325,7 @@ doCodeGen' ref mbid@(MBID p locs) strategy = do
 simulateNestedMBs :: (D.Rel c v a s) => SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> IO (Maybe (C.DDNode RealWorld u))
 simulateNestedMBs _                 initset _   []         = return $ Just initset
 simulateNestedMBs sv@SourceView{..} initset mbd (loc:locs) = do
-    ctx <- D.modelCtx svModel
+    --ctx <- D.modelCtx svModel
     --D.modelSelectState svModel (Just $ D.State (D.ddNodeToRel ctx initset) Nothing)
     --  let simcb n r = unsafeIOToST $ do putStrLn $ "simcb: " ++ n
     --                                  D.modelSetConstraint svModel n (Just $ D.ddNodeToRel ctx r)

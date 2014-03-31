@@ -6,6 +6,7 @@ module DbgTypes(Rel(..),
                 ViewEvents(..),
                 Type(..),
                 State(..),
+                SelectedStrategy(..),
                 isConcreteState,
                 TranCategory(..),
                 transitionCategory,
@@ -218,6 +219,14 @@ instance Eq ModelVar where
 
 type ModelStateVar = (String, Type, ([Int],[Int]))
 
+-- ssStrat   - state-untracked to label mapping
+-- ssGoal    - goal that this strategy is for
+-- ssRegions - the set of winning regions at each distance from the goal. They are inclusive.
+data SelectedStrategy a = SelectedStrategy { ssStrat   :: a
+                                           , ssGoal    :: a
+                                           , ssRegions :: Maybe [a]
+                                           }
+
 -- Debugger state
 data Model c a b d = Model {
     -- Static part --
@@ -243,7 +252,7 @@ data Model c a b d = Model {
     mConstraints          :: M.Map String a,
     mTransRel             :: a,
     mOracles              :: [Oracle a b d],
-    mStrategy             :: Maybe a
+    mStrategy             :: Maybe (SelectedStrategy a)
 }
 
 mCurStateVars :: Model c a b d -> [ModelVar]
@@ -328,7 +337,7 @@ modelAddOracle ref oracle = modifyIORef ref $ \m -> mAddOracle m oracle
 modelAdviseTransition :: RModel c a b d -> IO (Maybe (Transition a b d))
 modelAdviseTransition ref = readIORef ref >>= mAdviseTransition
 
-modelStrategy :: RModel c a b d -> IO (Maybe a)
+modelStrategy :: RModel c a b d -> IO (Maybe (SelectedStrategy a))
 modelStrategy ref = mStrategy <$> readIORef ref
 
 -- Actions
@@ -365,7 +374,7 @@ modelSetConstraint ref cname crel = do
     _ <- mapM (evtTRelUpdated . viewCB) views
     return ()
 
-modelSetStrategy :: (Rel c v a s) => RModel c a b d -> Maybe a -> IO ()
+modelSetStrategy :: (Rel c v a s) => RModel c a b d -> Maybe (SelectedStrategy a) -> IO ()
 modelSetStrategy ref s = modifyIORef ref $ \m -> m {mStrategy = s}
 
 modelQuit :: RModel c a b d -> IO Bool

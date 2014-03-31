@@ -16,6 +16,7 @@ import Control.Monad.ST
 import Control.Monad.Morph
 import Control.Monad.Trans.Class
 import Control.Monad.State
+import Control.Applicative
 
 import Util
 import Cudd
@@ -57,6 +58,7 @@ data SynthesisRes c a = SynthesisRes { srWin                :: Maybe Bool
                                      , srWinningRegionMay'  :: DdNode
                                      , srWinningRegionMust' :: DdNode
                                      , srStrat          :: [[DdNode]]  -- winning strategy or counterexample
+                                     , srStratRegions   :: Maybe [[DdNode]]  -- winning regions sorted by their proximity to the goal
                                      , srCtx            :: c
                                      , srStateVars      :: [D.ModelStateVar]
                                      , srUntrackedVars  :: [D.ModelVar]
@@ -115,18 +117,20 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
     let ops@Ops{..} = constructOps m
     stateLabelExpr <- flip evalStateT pdb $ hoist lift $ doUpdate ops (tslStateLabelConstraintAbs ?spec m)
     inconsistent   <- flip evalStateT pdb $ hoist lift $ doUpdate ops (tslInconsistent ?spec m)
-    srStrat <- case res of
-                  Just True -> liftM (map (map (toDdNode ?m)) . fst) $ strat ri
+    (srStrat, srStratRegions) <- case res of
+                  Just True -> liftM (\(strats, regs) -> if length strats /= length regs
+                                                            then error "mkSynthesisRes: length strats /= length regs"
+                                                            else (map (map (toDdNode ?m)) strats, Just $ map (map (toDdNode ?m)) regs)) $ strat ri
 --                               do s0 <- strat ri
 --                                  lift $ mapM (mapM (\s -> do s' <- bor m s $ bnot cont
 --                                                              deref m s
 --                                                              return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
-                  Just False -> liftM (map (map (toDdNode ?m))) $ cex ri
+                  Just False -> liftM ((, Nothing) . (map (map (toDdNode ?m)))) $ cex ri
                                 --   lift $ mapM (mapM (\s -> do s' <- bor m s cont
                                 --                               deref m s
                                 --                               return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
                   Nothing    -> --liftM (map (map (toDdNode ?m))) $ cexLiberalEnv ri
-                                return [[t]]
+                                return ([[t]], Nothing)
 
     let SectionInfo{..} = _sections pdb
         SymbolInfo{..}  = _symbolTable pdb
@@ -407,6 +411,6 @@ mkStrategy :: I.Spec -> SynthesisRes DdManager DdNode -> Maybe (D.Strategy DdNod
 mkStrategy spec SynthesisRes{..} = Just D.Strategy{..}
     where
     stratName  = if' (srWin == Just True) "Winning strategy" "Counterexample strategy"
-    stratGoals = zip (map I.goalName $ I.tsGoal $ I.specTran spec) srGoals
+    stratGoals = zip3 (map I.goalName $ I.tsGoal $ I.specTran spec) srGoals (maybe (repeat Nothing) (map Just) srStratRegions)
     stratFair  = zip (map I.fairName $ I.tsFair $ I.specTran spec) srFairs
     stratRel   = srStrat
