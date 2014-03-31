@@ -1,4 +1,4 @@
-{-# LANGUAGE ImplicitParams, RecordWildCards, ScopedTypeVariables, TupleSections #-}
+{-# LANGUAGE ImplicitParams, RecordWildCards, ScopedTypeVariables, TupleSections, TemplateHaskell #-}
 
 module SourceView(SourceView.sourceViewNew, 
                   simulateTransition,
@@ -26,6 +26,7 @@ import Debug.Trace
 import Pos
 import PP
 import PID
+import Resource
 import qualified Grammar
 import Util hiding (name, trace)
 import TSLUtil
@@ -44,6 +45,8 @@ import Store
 import SMTSolver
 import qualified AbsSim            as CG
 import qualified CFG               as CG
+import BddRecord
+import BddUtil
 import qualified CuddExplicitDeref as C
 import qualified Interface         as Abs
 import qualified TermiteGame       as Abs
@@ -177,6 +180,7 @@ data SourceView c a u = SourceView {
 
     -- Stuff used for code generation
     svSTDdManager    :: C.STDdManager RealWorld u,
+    svInUse          :: InUse (C.DDNode RealWorld u),
     svAbsDB          :: Abs.DB RealWorld u AbsVar AbsVar,
     svRefineDyn      :: Abs.RefineDynamic RealWorld u,
     svRefineStat     :: Abs.RefineStatic RealWorld u,
@@ -221,6 +225,7 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
                              , svAutoResolve    = True
                              , svAutoResolveTog = error "SourceView: svAutoResolveTog undefined"
                              , svSTDdManager    = error "SourceView: svSTDdManager undefined"
+                             , svInUse          = error "SourceView: svInUse undefined"
                              , svAbsDB          = error "SourceView: svAbsDB undefined"
                              , svRefineDyn      = error "SourceView: svRefineDyn undefined"
                              , svRefineStat     = error "SourceView: svRefineStat undefined"
@@ -242,9 +247,10 @@ sourceViewNew :: (D.Rel c v a s)
               -> SMTSolver 
               -> C.STDdManager RealWorld u
               -> Abs.RefineInfo RealWorld u AbsVar AbsVar st
+              -> InUse (C.DDNode RealWorld u)
               -> D.RModel c a Store SVStore 
               -> IO (D.View a Store SVStore)
-sourceViewNew inspec flatspec spec absvars solver m Abs.RefineInfo{..} rmodel = do
+sourceViewNew inspec flatspec spec absvars solver m Abs.RefineInfo{..} inuse rmodel = do
 
     ref <- newIORef $ sourceViewEmpty { svModel          = rmodel
                                       , svInputSpec      = inspec
@@ -253,6 +259,7 @@ sourceViewNew inspec flatspec spec absvars solver m Abs.RefineInfo{..} rmodel = 
                                       , svAbsVars        = absvars
                                       , svSolver         = solver
                                       , svSTDdManager    = m
+                                      , svInUse          = inuse
                                       , svAbsDB          = db
                                       , svRefineDyn      = rd
                                       , svRefineStat     = rs
@@ -1280,58 +1287,64 @@ codegen ref = do
 doCodeGen :: (D.Rel c v a s) => RSourceView c a u -> MBID -> IO ()
 doCodeGen ref mbid = do
     putStrLn "doCodeGen"
-    SourceView{..} <- readIORef ref
-    mstrategy <- D.modelStrategy svModel
+    model <- getIORef svModel ref
+    mstrategy <- D.modelStrategy model
     case mstrategy of 
-         Nothing       -> D.showMessage svModel G.MessageError "No strategy selected"
+         Nothing       -> D.showMessage model G.MessageError "No strategy selected"
          Just strategy -> case D.ssRegions strategy of
-                               Nothing -> D.showMessage svModel G.MessageError "Selected strategy does not contain winning regions (is it a counterexample strategy?)"
+                               Nothing -> D.showMessage model G.MessageError "Selected strategy does not contain winning regions (is it a counterexample strategy?)"
                                Just _  -> do -- Simulate game
                                              ok <- reSimulate ref
-                                             when ok $ doCodeGen' ref mbid strategy
+                                             when ok $ do sv@SourceView{..} <- readIORef ref      
+                                                          ctx <- D.modelCtx svModel
+                                                          mbd <- codeWinGetMB svCodeWin (MBID (mbidPos mbid) [])
+                                                          (res, inuse) <- stToIO $ runResourceT svInUse $ doCodeGen' sv ctx mbd mbid strategy
+                                                          writeIORef ref $ sv {svInUse = inuse}
+                                                          case res of
+                                                               Left e     -> D.showMessage svModel G.MessageError e
+                                                               Right code -> codeWinSetMBText svCodeWin mbid code
 
-doCodeGen' :: (D.Rel c v a s) => RSourceView c a u -> MBID -> D.SelectedStrategy a -> IO ()
-doCodeGen' ref mbid@(MBID p locs) D.SelectedStrategy{..} = do
-    sv@SourceView{..} <- readIORef ref
-    ctx <- D.modelCtx svModel
+
+doCodeGen' :: (D.Rel c v a s, MonadResource (C.DDNode RealWorld u) (ST RealWorld) t) => SourceView c a u -> c -> MBDescr -> MBID -> D.SelectedStrategy a -> t (ST RealWorld) (Either String String)
+doCodeGen' sv@SourceView{..} ctx mbd (MBID p locs) D.SelectedStrategy{..} = do
     -- Set of states at the outermost MB entry
-    initset <- stToIO $ CG.restrictToMB svSpec svSTDdManager svAbsDB p (fromJust svReachable)
+    let ops@Ops{..} = constructOps svSTDdManager
+    initset <- CG.restrictToMB svSpec svSTDdManager svAbsDB p (fromJust svReachable)
     if initset == C.bzero svSTDdManager 
-       then D.showMessage svModel G.MessageError "Magic block is not reachable--cannot generate code"
+       then return $ Left "Magic block is not reachable--cannot generate code"
        else do
            -- Simulate nested MBs until reaching the target one
-           mbd <- codeWinGetMB svCodeWin (MBID p [])
            minitset' <- simulateNestedMBs sv initset mbd locs
            case minitset' of
-                Nothing       -> D.showMessage svModel G.MessageError "Magic block is not reachable from the outermost magic block--cannot generate code"
-                Just initset' -> do code <- stToIO $ do -- Generate code
-                                        let (mbpid,_,mbsc) = head $ specLookupMB svSpec p
-                                        strategyst <- D.relToDDNode ctx ssStrat
-                                        goalst     <- D.relToDDNode ctx ssGoal
-                                        regionsst  <- mapM (D.relToDDNode ctx) $ fromJust ssRegions
-                                        stp@CG.Step{..} <- CG.gen1Step svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab initset' strategyst goalst regionsst
-                                        C.deref svSTDdManager strategyst
-                                        C.deref svSTDdManager goalst
-                                        mapM_ (C.deref svSTDdManager) regionsst
-                                        C.deref svSTDdManager initset'
-                                        res <- CG.ppStep svInputSpec svFlatSpec svSpec mbpid svSTDdManager mbsc svAbsDB stp
-                                        CG.derefStep svSTDdManager stp
-                                        return res
-                                    codeWinSetMBText svCodeWin mbid $ PP.render code
+                Nothing       -> return $ Left "Magic block is not reachable from the outermost magic block--cannot generate code"
+                Just initset' -> do let (mbpid,_,mbsc) = head $ specLookupMB svSpec p
+                                    strategyst <- $r $ D.relToDDNode ctx ssStrat
+                                    goalst     <- $r $ D.relToDDNode ctx ssGoal
+                                    regionsst  <- mapM ($r . D.relToDDNode ctx) $ fromJust ssRegions
+                                    stp@CG.Step{..} <- CG.gen1Step svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab initset' strategyst goalst regionsst
+                                    $d deref strategyst
+                                    $d deref goalst
+                                    mapM_ ($d deref) regionsst
+                                    $d deref initset'
+                                    code <- CG.ppStep svInputSpec svFlatSpec svSpec mbpid svSTDdManager mbsc svAbsDB stp
+                                    CG.derefStep svSTDdManager stp
+                                    lift $ checkManagerConsistency " doCodeGen'" ops
+                                    return $ Right $ PP.render code
 
 
 
 -- Consumes the initset reference
-simulateNestedMBs :: (D.Rel c v a s) => SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> IO (Maybe (C.DDNode RealWorld u))
+simulateNestedMBs :: (D.Rel c v a s, MonadResource (C.DDNode RealWorld u) (ST RealWorld) t) => SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> t (ST RealWorld) (Maybe (C.DDNode RealWorld u))
 simulateNestedMBs _                 initset _   []         = return $ Just initset
 simulateNestedMBs sv@SourceView{..} initset mbd (loc:locs) = do
     --ctx <- D.modelCtx svModel
     --D.modelSelectState svModel (Just $ D.State (D.ddNodeToRel ctx initset) Nothing)
     --  let simcb n r = unsafeIOToST $ do putStrLn $ "simcb: " ++ n
     --                                  D.modelSetConstraint svModel n (Just $ D.ddNodeToRel ctx r)
+    let ops@Ops{..} = constructOps svSTDdManager
     let simcb _ _ = return ()
-    minitset' <- stToIO $ CG.simulateCFAAbstractToLoc svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab (mbCFA mbd) initset loc simcb
-    stToIO $ C.deref svSTDdManager initset
+    minitset' <- CG.simulateCFAAbstractToLoc svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab (mbCFA mbd) initset loc simcb
+    $d deref initset
     case minitset' of
          Nothing       -> return Nothing
          Just initset' -> simulateNestedMBs sv initset' (fromJust $ lookupMB mbd [loc]) locs
@@ -1364,12 +1377,14 @@ reSimulate ref = do
                                   return True
 
 simThread :: RSourceView c a u -> [(Pos, String)] -> [CG.CompiledMB] -> IO ()
-simThread ref mbstxt mbscfa = do
-    sv@SourceView{..} <- readIORef ref
+simThread rsv mbstxt mbscfa = do
+    sv@SourceView{..} <- readIORef rsv
+    let Ops{..} = constructOps svSTDdManager
     let simcb _ _ = return ()
-    reach <- stToIO $ do maybe (return ()) (C.deref svSTDdManager) svReachable
-                         CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa (Abs.init svRefineStat) simcb
-    writeIORef ref $ sv {svCompiledMBs = mbstxt, svReachable = Just reach}
+    (reach, inuse) <- stToIO $ runResourceT svInUse $ do 
+                                maybe (return ()) ($d deref) svReachable
+                                CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa (Abs.init svRefineStat) simcb
+    writeIORef rsv $ sv {svCompiledMBs = mbstxt, svReachable = Just reach, svInUse = inuse}
     --G.postGUIAsync $ G.dialogResponse dlg G.ResponseNone
 
 -- If we are about to enter magic block, activate it.
