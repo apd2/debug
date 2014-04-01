@@ -1298,7 +1298,7 @@ doCodeGen ref mbid = do
                                              when ok $ do sv@SourceView{..} <- readIORef ref      
                                                           ctx <- D.modelCtx svModel
                                                           mbd <- codeWinGetMB svCodeWin (MBID (mbidPos mbid) [])
-                                                          (res, inuse) <- stToIO $ runResourceT svInUse $ doCodeGen' sv ctx mbd mbid strategy
+                                                          (res, inuse) <- stToIO $ runResource svInUse $ doCodeGen' sv ctx mbd mbid strategy
                                                           writeIORef ref $ sv {svInUse = inuse}
                                                           case res of
                                                                Left e     -> D.showMessage svModel G.MessageError e
@@ -1381,7 +1381,7 @@ simThread rsv mbstxt mbscfa = do
     sv@SourceView{..} <- readIORef rsv
     let Ops{..} = constructOps svSTDdManager
     let simcb _ _ = return ()
-    (reach, inuse) <- stToIO $ runResourceT svInUse $ do 
+    (reach, inuse) <- stToIO $ runResource svInUse $ do 
                                 maybe (return ()) ($d deref) svReachable
                                 CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa (Abs.init svRefineStat) simcb
     writeIORef rsv $ sv {svCompiledMBs = mbstxt, svReachable = Just reach, svInUse = inuse}
