@@ -280,6 +280,7 @@ sourceViewNew inspec flatspec spec absvars solver m Abs.RefineInfo{..} inuse rmo
     _ <- G.onToolButtonClicked butsaveall (saveAll ref)
     G.widgetShow butsaveall
     G.toolbarInsert tbar butsaveall (-1)
+    G.widgetSetSensitive butsaveall True
 
     sep0 <- G.separatorToolItemNew
     G.widgetShow sep0
@@ -979,7 +980,6 @@ commandButtonsUpdate ref = do
               $ filter isScalar
               $ concatMap flatten 
               $ currentTmpExprTree sv)
-    G.widgetSetSensitive (svSaveAllButton sv) True
     G.widgetSetSensitive (svStepButton sv)    en
     G.widgetSetSensitive (svRunButton sv)     en
     G.widgetSetSensitive (svMagicButton sv) $  (isMBLabel $ currentLocLabel sv)                     -- we're at a magic block entrance
@@ -990,7 +990,6 @@ commandButtonsDisable :: RSourceView c a u -> IO ()
 commandButtonsDisable ref = do
     sv <- readIORef ref
     -- disable command buttons
-    G.widgetSetSensitive (svSaveAllButton sv) False
     G.widgetSetSensitive (svStepButton sv)    False
     G.widgetSetSensitive (svRunButton sv)     False
     G.widgetSetSensitive (svMagicButton sv)   False
