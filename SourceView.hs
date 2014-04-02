@@ -1705,7 +1705,13 @@ getTmpExprTree :: SourceView c a u -> Int -> Forest Expr
 getTmpExprTree sv p =
     let ?spec = svSpec sv in
     let -- collect tmp variables from all transitions from the current location
-        trans = map snd $ Graph.lsuc (getCFA sv p) (getLoc sv p)
+        cfa = getCFA sv p
+        trans = micros $ getLoc sv p
+        -- find all transition between current location and the next visible statement
+        micros :: Loc -> [TranLabel]
+        micros l = let (ls, trs) = unzip $ Graph.lsuc cfa l
+                   in trs ++ (concatMap micros $ filter (\l' -> let lab = cfaLocLabel l' cfa
+                                                                in (isActNone $ locAct lab) && (not $ isDelayLabel lab)) ls)
         -- expand expression into a tree of scalars
         mkTree e = Node { rootLabel = e
                         , subForest = map mkTree 
