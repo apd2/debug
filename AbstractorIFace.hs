@@ -70,8 +70,8 @@ data SynthesisRes c a = SynthesisRes { srWin                :: Maybe Bool
                                      , srGoals          :: [a]
                                      , srFairs          :: [a]
                                      , srTran           :: [a]
-                                     , srStateLabConstr :: a
-                                     , srInconsistent   :: a
+                                     --, srStateLabConstr :: a
+                                     --, srInconsistent   :: a
                                      --, srConsistent     :: a
                                      --, srConsistent'    :: a
                                      , srCPlusC         :: a
@@ -115,8 +115,8 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         pdb               = db
     -- Compute state-label constraint
     let ops@Ops{..} = constructOps m
-    stateLabelExpr <- flip evalStateT pdb $ hoist lift $ doUpdate ops (tslStateLabelConstraintAbs ?spec m)
-    inconsistent   <- flip evalStateT pdb $ hoist lift $ doUpdate ops (tslInconsistent ?spec m)
+    --stateLabelExpr <- flip evalStateT pdb $ hoist lift $ doUpdate ops (tslStateLabelConstraintAbs ?spec m)
+    --inconsistent   <- flip evalStateT pdb $ hoist lift $ doUpdate ops (tslInconsistent ?spec m)
     (srStrat, srStratRegions) <- case res of
                   Just True -> liftM (\(strats, regs) -> if length strats /= length regs
                                                             then error "mkSynthesisRes: length strats /= length regs"
@@ -218,8 +218,8 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
         srGoals         = map (toDdNode srCtx) goal
         srFairs         = map (toDdNode srCtx) fair
         srTran          = {-conj $-} map (toDdNode srCtx . snd) trans
-        srStateLabConstr = toDdNode srCtx stateLabelExpr
-        srInconsistent  = toDdNode srCtx inconsistent
+        --srStateLabConstr = toDdNode srCtx stateLabelExpr
+        -- srInconsistent  = toDdNode srCtx inconsistent
         srCMinusC       = toDdNode srCtx consistentMinusCULCont
         srCPlusC        = toDdNode srCtx consistentPlusCULCont
         srCMinusU       = toDdNode srCtx consistentMinusCULUCont
@@ -337,8 +337,8 @@ mkModel' sr@SynthesisRes{..} = model
                               ("trel"                           , True                , let ?m = srCtx in (conj srTran))
                             --, ("consistentNoRefine"             , True                , srConsistent)
                             --, ("consistentNoRefine'"            , True                , srConsistent')
-                            , ("stateLabelConstr"               , True                , srStateLabConstr)
-                            , ("nt srInconsistent"              , True                , let ?m = srCtx in nt srInconsistent)
+                            --, ("stateLabelConstr"               , True                , srStateLabConstr)
+                            --, ("nt srInconsistent"              , True                , let ?m = srCtx in nt srInconsistent)
                             , ("c-c"                            , srWin == Just True  , srCMinusC)
                             , ("c+c"                            , True                , srCPlusC)
                             , ("c-u"                            , srWin == Just False , srCMinusU)
