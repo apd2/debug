@@ -1313,7 +1313,9 @@ doCodeGen' sv@SourceView{..} ctx mbd (MBID p locs) D.SelectedStrategy{..} = do
        then return $ Left "Magic block is not reachable--cannot generate code"
        else do
            -- Simulate nested MBs until reaching the target one
-           minitset' <- simulateNestedMBs sv initset mbd locs
+           winregion <- $r $ D.relToDDNode ctx $ head $ fromJust ssRegions
+           minitset' <- simulateNestedMBs sv initset mbd locs winregion
+           $d deref winregion
            case minitset' of
                 Nothing       -> return $ Left "Magic block is not reachable from the outermost magic block--cannot generate code"
                 Just initset' -> do let (mbpid,_,mbsc) = head $ specLookupMB svSpec p
@@ -1330,25 +1332,23 @@ doCodeGen' sv@SourceView{..} ctx mbd (MBID p locs) D.SelectedStrategy{..} = do
                                     lift $ checkManagerConsistency " doCodeGen'" ops
                                     return $ Right $ PP.render code
 
-
-
 -- Consumes the initset reference
-simulateNestedMBs :: (D.Rel c v a s, MonadResource (C.DDNode RealWorld u) (ST RealWorld) t) => SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> t (ST RealWorld) (Maybe (C.DDNode RealWorld u))
-simulateNestedMBs _                 initset _   []         = return $ Just initset
-simulateNestedMBs sv@SourceView{..} initset mbd (loc:locs) = do
+simulateNestedMBs :: (D.Rel c v a s, MonadResource (C.DDNode RealWorld u) (ST RealWorld) t) => SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> DDNode RealWorld u -> t (ST RealWorld) (Maybe (C.DDNode RealWorld u))
+simulateNestedMBs _                 initset _   []         _         = return $ Just initset
+simulateNestedMBs sv@SourceView{..} initset mbd (loc:locs) winregion = do
     --ctx <- D.modelCtx svModel
     --D.modelSelectState svModel (Just $ D.State (D.ddNodeToRel ctx initset) Nothing)
     --  let simcb n r = unsafeIOToST $ do putStrLn $ "simcb: " ++ n
     --                                  D.modelSetConstraint svModel n (Just $ D.ddNodeToRel ctx r)
     let ops@Ops{..} = constructOps svSTDdManager
     let simcb _ _ = return ()
-    minitset' <- CG.simulateCFAAbstractToLoc svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab (mbCFA mbd) initset loc simcb
+    minitset' <- CG.simulateCFAAbstractToLoc svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab (mbCFA mbd) initset loc winregion simcb
     $d deref initset
     case minitset' of
          Nothing       -> return Nothing
-         Just initset' -> simulateNestedMBs sv initset' (fromJust $ lookupMB mbd [loc]) locs
+         Just initset' -> simulateNestedMBs sv initset' (fromJust $ lookupMB mbd [loc]) locs winregion
 
-reSimulate :: RSourceView c a u -> IO Bool
+reSimulate :: (D.Rel c v a s) => RSourceView c a u -> IO Bool
 reSimulate ref = do
     sv@SourceView{..} <- readIORef ref
     -- Find and compile all complete magic blocks
@@ -1375,14 +1375,19 @@ reSimulate ref = do
                                   --G.widgetHide dlg
                                   return True
 
-simThread :: RSourceView c a u -> [(Pos, String)] -> [CG.CompiledMB] -> IO ()
+simThread :: (D.Rel c v a s) => RSourceView c a u -> [(Pos, String)] -> [CG.CompiledMB] -> IO ()
 simThread rsv mbstxt mbscfa = do
     sv@SourceView{..} <- readIORef rsv
+    winregion <- (head . fromJust . D.ssRegions . fromJust) <$> D.modelStrategy svModel
+    ctx <- D.modelCtx svModel
     let Ops{..} = constructOps svSTDdManager
     let simcb _ _ = return ()
     (reach, inuse) <- stToIO $ runResource svInUse $ do 
+                                winregst <- $r $ D.relToDDNode ctx winregion
                                 maybe (return ()) ($d deref) svReachable
-                                CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa (Abs.init svRefineStat) simcb
+                                res <- CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa (Abs.init svRefineStat) winregst simcb
+                                $d deref winregst
+                                return res
     writeIORef rsv $ sv {svCompiledMBs = mbstxt, svReachable = Just reach, svInUse = inuse}
     --G.postGUIAsync $ G.dialogResponse dlg G.ResponseNone
 
