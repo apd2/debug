@@ -28,6 +28,7 @@ module DbgTypes(Rel(..),
                 mInitV,
                 mDumpIndices,
                 mUpdateTRel,
+                mInitState,
                 contRelName,
                 idxToVS,
                 mvarToVS,
@@ -44,6 +45,7 @@ module DbgTypes(Rel(..),
                 modelUntrackedVars,
                 modelStateRels,
                 modelTransRels,
+                modelInitState,
                 modelStrategy,
                 modelSetStrategy,
                 modelConcretiseState,
@@ -94,6 +96,7 @@ class (L.Variable c v,
        L.EqRaw c v a [Bool],
        L.CUDDLike c v a,
        L.Cubeable c v a,
+       L.Boolean c a,
        Show a) => Rel c v a s | c -> v, c -> a, c -> s where
     relToDDNode :: c -> a -> ST t (C.DDNode t u)
     ddNodeToRel :: c -> (C.DDNode t u) -> a
@@ -290,6 +293,9 @@ mAdviseTransition' :: [Oracle a b d] -> IO (Maybe (Transition a b d))
 mAdviseTransition' []                = return Nothing
 mAdviseTransition' ((Oracle _ f):os) = f >>= maybe (mAdviseTransition' os) (return . Just)
 
+mInitState :: (Rel c v a s) => Model c a b d -> a
+mInitState Model{..} = let ?m = mCtx in maybe b snd $ find ((== "init") . fst) mStateRels
+
 type RModel c a b d = IORef (Model c a b d)
 
 ----------------------------------------------------------
@@ -339,6 +345,9 @@ modelAdviseTransition ref = readIORef ref >>= mAdviseTransition
 
 modelStrategy :: RModel c a b d -> IO (Maybe (SelectedStrategy a))
 modelStrategy ref = mStrategy <$> readIORef ref
+
+modelInitState :: (Rel c v a s) =>  RModel c a b d -> IO a
+modelInitState ref = getIORef mInitState ref
 
 -- Actions
 modelSelectTransition :: RModel c a b d -> Transition a b d -> IO ()

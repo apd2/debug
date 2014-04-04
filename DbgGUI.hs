@@ -6,7 +6,6 @@ import qualified Graphics.UI.Gtk as G
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.IORef
-import Data.List
 
 import Util
 import DbgTypes
@@ -128,8 +127,7 @@ debugGUI extraFactories model = do
          $ zip dviews (map snd factories)
 
     putStr $ "Variable map\n" ++ mDumpIndices model ++ "\n"
-    let initst = fmap ((\rel -> State rel Nothing) . {- fromJust . oneCube (mStateV model) .-} snd) 
-                      $ find ((== "init") . fst) $ mStateRels model
+    let initst = Just $ State (mInitState model) Nothing 
     modelSelectState rmodel initst
 
     G.mainGUI

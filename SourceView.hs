@@ -1380,13 +1380,16 @@ simThread rsv mbstxt mbscfa = do
     sv@SourceView{..} <- readIORef rsv
     winregion <- (head . fromJust . D.ssRegions . fromJust) <$> D.modelStrategy svModel
     ctx <- D.modelCtx svModel
+    initset <- D.modelInitState svModel
     let Ops{..} = constructOps svSTDdManager
     let simcb _ _ = return ()
     (reach, inuse) <- stToIO $ runResource svInUse $ do 
                                 winregst <- $r $ D.relToDDNode ctx winregion
+                                initst   <- $r $ D.relToDDNode ctx initset
                                 maybe (return ()) ($d deref) svReachable
-                                res <- CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa (Abs.init svRefineStat) winregst simcb
+                                res <- CG.simulateGameAbstract svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab mbscfa initst winregst simcb
                                 $d deref winregst
+                                $d deref initst
                                 return res
     writeIORef rsv $ sv {svCompiledMBs = mbstxt, svReachable = Just reach, svInUse = inuse}
     --G.postGUIAsync $ G.dialogResponse dlg G.ResponseNone

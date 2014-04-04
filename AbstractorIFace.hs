@@ -215,6 +215,7 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
 
         srCont          = toDdNode srCtx cont
         srInit          = toDdNode srCtx init
+
         srGoals         = map (toDdNode srCtx) goal
         srFairs         = map (toDdNode srCtx) fair
         srTran          = {-conj $-} map (toDdNode srCtx . snd) trans
@@ -325,7 +326,7 @@ mkModel' sr@SynthesisRes{..} = model
                             , ("win-"           , srWinningRegionMust)
                             --, ("uncontrollable", let ?m = srCtx in nt srCont)
                             , ("init"          , if' (srWin == Just True || srWin == Nothing) 
-                                                     srInit 
+                                                     refinedInit 
                                                      (let ?m = srCtx in srInit .& (nt srWinningRegionMust) {- .& srConsistentNxt-}))] ++
                             zip (map I.goalName $ I.tsGoal $ I.specTran ?spec) srGoals  {- ++ 
                             zip (map I.fairName $ I.tsFair $ I.specTran ?spec) srFairs -}
@@ -390,6 +391,12 @@ mkModel' sr@SynthesisRes{..} = model
             ?model   = model
             ?absvars = srAbsVars
         in D.concretiseState d
+
+    refinedInit = 
+        let ?m       = mCtx
+            ?model   = model
+            ?absvars = srAbsVars
+        in D.refineInitialSet srInit
 
     concretiseT :: D.Transition DdNode Store D.SVStore-> Maybe (D.Transition DdNode Store D.SVStore)
     concretiseT D.Transition{..} | D.isConcreteState tranFrom = do

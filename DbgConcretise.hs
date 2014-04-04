@@ -3,6 +3,7 @@
 -- Concretising relations over abstract variables
 
 module DbgConcretise (concretiseRel,
+                      refineInitialSet,
                       concretiseState,
                       concretiseLabel,
                       concretiseTransition) where
@@ -58,6 +59,19 @@ concretiseState rel = case concretiseRel (D.mCurStateVars ?model ++ D.mInitVars 
                            Just (rel', store) -> do st  <- oneCube (D.mStateV ?model)     rel'
                                                     unt <- oneCube (D.mUntrackedV ?model) rel'
                                                     return $ D.State st (Just $ (D.SVStore (storeExtendDefaultState store) [], unt))
+
+refineInitialSet :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?solver::SMTSolver, ?model::D.Model c a Store D.SVStore, ?absvars::M.Map String AbsVar) => a -> a
+refineInitialSet initset = 
+    let statevs = D.mStateVars ?model
+        initvs  = D.mInitVars  ?model
+        varConstr (vname, vtype, (is, _)) = 
+            let av = ?absvars M.! vname
+            in conj $ mapMaybe (\i -> let asn = eqConstBE (vconcat $ map varAtIndex is) i
+                                      in case concretiseRel (D.ModelVar vname vtype is : initvs) (asn .& initset) of
+                                              Nothing -> Just $ nt asn
+                                              _       -> Nothing) 
+                     [0..avarRange av]
+    in conj $ initset : map varConstr statevs
 
 -- Given a concrete state and an abstract label, compute concrete label.  
 -- The abstract label is assumed to be a cube.
