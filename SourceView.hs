@@ -47,6 +47,7 @@ import qualified AbsSim            as CG
 import qualified CFG               as CG
 import BddRecord
 import BddUtil
+import LogicClasses
 import qualified CuddExplicitDeref as C
 import qualified Interface         as Abs
 import qualified TermiteGame       as Abs
@@ -1341,7 +1342,7 @@ simulateNestedMBs sv@SourceView{..} initset mbd (loc:locs) winregion = do
     --  let simcb n r = unsafeIOToST $ do putStrLn $ "simcb: " ++ n
     --                                  D.modelSetConstraint svModel n (Just $ D.ddNodeToRel ctx r)
     let ops@Ops{..} = constructOps svSTDdManager
-    let simcb _ _ = return ()
+    let simcb _ _ _ _ = return ()
     minitset' <- CG.simulateCFAAbstractToLoc svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab (mbCFA mbd) initset loc winregion simcb
     $d deref initset
     case minitset' of
@@ -1382,7 +1383,14 @@ simThread rsv mbstxt mbscfa = do
     ctx <- D.modelCtx svModel
     initset <- D.modelInitState svModel
     let Ops{..} = constructOps svSTDdManager
-    let simcb _ _ = return ()
+    let simcb _ _ _ _ = return() 
+--    let simcb msg from trel to = unsafeIOToST $ D.modelAddTransition svModel 
+--                               $ D.Transition (D.State (D.ddNodeToRel ctx from) Nothing)
+--                                              (topOp ctx)
+--                                              (topOp ctx)
+--                                              Nothing
+--                                              (Just msg)
+--                                              (D.State (D.ddNodeToRel ctx to) Nothing) 
     (reach, inuse) <- stToIO $ runResource svInUse $ do 
                                 winregst <- $r $ D.relToDDNode ctx winregion
                                 initst   <- $r $ D.relToDDNode ctx initset
