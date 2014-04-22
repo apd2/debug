@@ -73,7 +73,7 @@ import Util
 import IDE
 import qualified LogicClasses      as L
 import Implicit
-import qualified CuddExplicitDeref as C
+import qualified Cudd.Imperative as C
 
 ------------------------------------------------------
 -- Constants
