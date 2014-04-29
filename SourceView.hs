@@ -1298,7 +1298,9 @@ doCodeGen ref mbid = do
                                              when ok $ do sv@SourceView{..} <- readIORef ref      
                                                           ctx <- D.modelCtx svModel
                                                           mbd <- codeWinGetMB svCodeWin (MBID (mbidPos mbid) [])
+                                                          putStrLn $ "InUse before doCodeGen': " ++ (show $ M.toList svInUse)
                                                           (res, inuse) <- stToIO $ runResource svInUse $ doCodeGen' sv ctx mbd mbid strategy
+                                                          putStrLn $ "InUse after doCodeGen': " ++ (show $ M.toList inuse)
                                                           writeIORef ref $ sv {svInUse = inuse}
                                                           case res of
                                                                Left e     -> D.showMessage svModel G.MessageError e
@@ -1323,6 +1325,7 @@ doCodeGen' sv@SourceView{..} ctx mbd (MBID p locs) D.SelectedStrategy{..} = do
                                     strategyst <- $r $ D.relToDDNode ctx ssStrat
                                     goalst     <- $r $ D.relToDDNode ctx ssGoal
                                     regionsst  <- mapM ($r . D.relToDDNode ctx) $ fromJust ssRegions
+                                    lift $ unsafeIOToST $ D.modelSelectState svModel (Just $ D.State (D.ddNodeToRel ctx initset') Nothing)
                                     stp@CG.Step{..} <- CG.gen1Step svSpec svSTDdManager svRefineDyn svAbsDB (Abs.cont svRefineStat) svLab initset' strategyst goalst regionsst
                                     $d deref strategyst
                                     $d deref goalst
@@ -1391,6 +1394,7 @@ simThread rsv mbstxt mbscfa = do
 --                                              Nothing
 --                                              (Just msg)
 --                                              (D.State (D.ddNodeToRel ctx to) Nothing) 
+    putStrLn $ "InUse before simulation: " ++ (show $ M.toList svInUse)
     (reach, inuse) <- stToIO $ runResource svInUse $ do 
                                 winregst <- $r $ D.relToDDNode ctx winregion
                                 initst   <- $r $ D.relToDDNode ctx initset
@@ -1399,6 +1403,7 @@ simThread rsv mbstxt mbscfa = do
                                 $d deref winregst
                                 $d deref initst
                                 return res
+    putStrLn $ "InUse after simulation: " ++ (show $ M.toList inuse)
     writeIORef rsv $ sv {svCompiledMBs = mbstxt, svReachable = Just reach, svInUse = inuse}
     --G.postGUIAsync $ G.dialogResponse dlg G.ResponseNone
 
