@@ -48,7 +48,7 @@ import qualified CFG               as CG
 import BddRecord
 import BddUtil
 import LogicClasses
-import qualified CuddExplicitDeref as C
+import qualified Cudd.Imperative   as C
 import qualified Interface         as Abs
 import qualified TermiteGame       as Abs
 import CodeWin

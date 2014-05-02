@@ -19,9 +19,9 @@ import Control.Monad.State
 import Control.Applicative
 
 import Util
-import Cudd
+import Cudd.Cudd
 --import CuddExplicitDeref
-import CuddConvert
+import Cudd.Convert
 import Interface hiding (db)
 import TermiteGame
 import Implicit
