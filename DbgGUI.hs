@@ -15,8 +15,8 @@ import VarView
 import GraphView
 import RelationView
 
-dbgDefaultWidth  = 1024
-dbgDefaultHeight = 768
+dbgDefaultWidth  = 640
+dbgDefaultHeight = 480
 
 data Debugger a b d = Debugger {
     dbgIDE      :: RIDE,
