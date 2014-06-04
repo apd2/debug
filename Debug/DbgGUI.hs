@@ -1,6 +1,6 @@
 {-# LANGUAGE ImplicitParams #-}
 
-module DbgGUI(debugGUI) where
+module Debug.DbgGUI(debugGUI) where
 
 import qualified Graphics.UI.Gtk as G
 import Control.Monad
@@ -8,12 +8,12 @@ import Control.Monad.IO.Class
 import Data.IORef
 
 import Util
-import DbgTypes
-import IDE
-import Icon
-import VarView
-import GraphView
-import RelationView
+import Debug.DbgTypes
+import Debug.IDE
+import Debug.Icon
+import Debug.VarView
+import Debug.GraphView
+import Debug.RelationView
 
 dbgDefaultWidth  = 640
 dbgDefaultHeight = 480

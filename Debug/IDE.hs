@@ -1,4 +1,4 @@
-module IDE(RIDE,
+module Debug.IDE(RIDE,
            IDEAlign(..),
            IDEPanel(..),
            IDEPanels(..),

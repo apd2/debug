@@ -1,6 +1,6 @@
 {-# LANGUAGE ImplicitParams, RecordWildCards #-}
 
-module DbgAbstract (abstractState,
+module Debug.DbgAbstract (abstractState,
                     abstractUntracked,
                     abstractLabel,
                     abstractTransition) where
@@ -8,14 +8,14 @@ module DbgAbstract (abstractState,
 import qualified Data.Map as M
 import Data.Maybe
 
-import qualified DbgTypes as D
-import IExpr
-import ISpec
-import IVar
-import Predicate
-import Store
+import qualified Debug.DbgTypes as D
+import Internal.IExpr
+import Internal.ISpec
+import Internal.IVar
+import Abstract.Predicate
+import Solver.Store
 import qualified Implicit as Imp
-import SourceViewTypes
+import Debug.SourceViewTypes
 
 abstractRel :: (D.Rel c v a s, ?spec::Spec, ?m::c, ?absvars::M.Map String AbsVar) => [D.ModelVar] -> Store -> a
 abstractRel vars store = Imp.conj $ map (evalAbsVar store) vars

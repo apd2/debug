@@ -2,7 +2,7 @@
 
 -- Concretising relations over abstract variables
 
-module DbgConcretise (concretiseRel,
+module Debug.DbgConcretise (concretiseRel,
                       refineInitialSet,
                       concretiseState,
                       concretiseLabel,
@@ -15,19 +15,19 @@ import qualified Data.Map    as M
 import Debug.Trace
 
 import Util hiding (trace)
-import Store
-import SMTSolver
-import Predicate
-import qualified DbgTypes        as D
-import qualified SourceView      as D
-import qualified SourceViewTypes as D
+import Solver.Store
+import Solver.SMTSolver
+import Abstract.Predicate
+import qualified Debug.DbgTypes        as D
+import qualified Debug.SourceView      as D
+import qualified Debug.SourceViewTypes as D
 import Implicit
-import BFormula
-import qualified Spec        as F
+import Abstract.BFormula
+import qualified Frontend.Spec        as F
 
-import IVar
-import ISpec
-import IExpr hiding (conj)
+import Internal.IVar
+import Internal.ISpec
+import Internal.IExpr hiding (conj)
 
 -- Input: relation over a set of abstract variables
 -- Output: a single concrete assignment or Nothing if a 

@@ -1,10 +1,10 @@
 {-# LANGUAGE RecordWildCards #-}
 
-module SourceViewTypes where
+module Debug.SourceViewTypes where
 
-import CFA
-import Store
-import DbgTypes
+import Internal.CFA
+import Solver.Store
+import Debug.DbgTypes
 
 -- Magic block stack frame
 data MBFrame = MBFrame {

@@ -1,6 +1,6 @@
 {-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, ImplicitParams, FunctionalDependencies, UndecidableInstances, RecordWildCards, ScopedTypeVariables #-}
 
-module DbgTypes(Rel(..),
+module Debug.DbgTypes(Rel(..),
                 Vals,
                 View(..),
                 ViewEvents(..),
@@ -70,7 +70,7 @@ import Control.Monad
 import Control.Monad.ST
 
 import Util
-import IDE
+import Debug.IDE
 import qualified LogicClasses      as L
 import Implicit
 import qualified Cudd.Imperative as C

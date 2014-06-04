@@ -1,6 +1,6 @@
 {-# LANGUAGE ImplicitParams, RecordWildCards #-}
 
-module MultiSetExplorer(RMultiSetExplorer,
+module Debug.MultiSetExplorer(RMultiSetExplorer,
                         multiSetExplorerNew,
                         multiSetExplorerSetRelation,
                         multiSetExplorerReset,
@@ -13,8 +13,8 @@ import Data.Tuple.Select
 import Control.Monad
 
 import Util
-import qualified DbgTypes        as D
-import SetExplorer
+import qualified Debug.DbgTypes        as D
+import Debug.SetExplorer
 import Implicit
 
 

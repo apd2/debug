@@ -1,6 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 
-module CodeWin(MBID(..),
+module Debug.CodeWin(MBID(..),
                mbidChild,
                mbidParent,
                mbidFile,
@@ -47,14 +47,14 @@ import Text.Parsec.Pos
 import Util
 import TSLUtil
 import Pos
-import qualified Spec            as F
-import qualified Template        as F
-import qualified Method          as F
-import qualified Statement       as F
-import qualified Process         as F
-import CodeWidgetTypes
-import CodeWidget
-import CFA
+import qualified Frontend.Spec            as F
+import qualified Frontend.Template        as F
+import qualified Frontend.Method          as F
+import qualified Frontend.Statement       as F
+import qualified Frontend.Process         as F
+import CodeWidget.CodeWidgetTypes
+import CodeWidget.CodeWidget
+import Internal.CFA
 
 -- Magic block descriptor
 

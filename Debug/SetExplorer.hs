@@ -1,6 +1,6 @@
 {-# LANGUAGE RecordWildCards, ImplicitParams, ScopedTypeVariables #-}
 
-module SetExplorer(RSetExplorer,
+module Debug.SetExplorer(RSetExplorer,
                    Section,
                    setExplorerNew,
                    setExplorerSetRelation,
@@ -17,9 +17,9 @@ import Data.Tuple.Select
 import Control.Monad
 import qualified Graphics.UI.Gtk as G
 
-import IDE
+import Debug.IDE
 import Util hiding (trace)
-import qualified DbgTypes        as D
+import qualified Debug.DbgTypes        as D
 import Implicit
 
 ----------------------------------------------------------

@@ -1,14 +1,14 @@
 {-# LANGUAGE ImplicitParams, RecordWildCards #-}
 
-module VarView(RVarView,
+module Debug.VarView(RVarView,
                varViewNew) where
 
 import qualified Graphics.UI.Gtk as G
 import Data.IORef
 
-import qualified DbgTypes        as D
-import qualified IDE             as D
-import SetExplorer
+import qualified Debug.DbgTypes        as D
+import qualified Debug.IDE             as D
+import Debug.SetExplorer
 import Implicit
 import Util
 

@@ -2,7 +2,7 @@
 
 -- Interface to the abstraction library
 
-module AbstractorIFace( SynthesisRes(..)
+module Debug.AbstractorIFace( SynthesisRes(..)
                       , mkSynthesisRes
                       , mkModel
                       , mkStrategy) where
@@ -22,27 +22,27 @@ import Util
 import Cudd.Cudd
 --import CuddExplicitDeref
 import Cudd.Convert
-import Interface hiding (db)
-import TermiteGame
+import Synthesis.Interface hiding (db)
+import Synthesis.TermiteGame
 import Implicit
 import BDDOps
-import BddRecord hiding ((.&))
-import Predicate
-import Store
-import SMTSolver
-import TSLAbsGame
-import qualified Spec            as F
-import qualified ISpec           as I
-import qualified TranSpec        as I
-import qualified IType           as I
-import qualified IVar            as I
-import qualified DbgTypes        as D
-import qualified DbgConcretise   as D
-import qualified DbgAbstract     as D
-import qualified StrategyView    as D
-import qualified SourceView      as D
-import qualified SourceViewTypes as D
-import Resource
+import Synthesis.BddRecord hiding ((.&))
+import Abstract.Predicate
+import Solver.Store
+import Solver.SMTSolver
+import Abstract.TSLAbsGame
+import qualified Frontend.Spec            as F
+import qualified Internal.ISpec           as I
+import qualified Internal.TranSpec        as I
+import qualified Internal.IType           as I
+import qualified Internal.IVar            as I
+import qualified Debug.DbgTypes        as D
+import qualified Debug.DbgConcretise   as D
+import qualified Debug.DbgAbstract     as D
+import qualified Debug.StrategyView    as D
+import qualified Debug.SourceView      as D
+import qualified Debug.SourceViewTypes as D
+import Synthesis.Resource
 
 instance D.Rel DdManager VarData DdNode [[SatBit]] where
     relToDDNode _ n = toDDNode n

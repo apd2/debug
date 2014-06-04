@@ -1,6 +1,6 @@
 {-# LANGUAGE ImplicitParams, RecordWildCards, ScopedTypeVariables, TupleSections, TemplateHaskell #-}
 
-module SourceView(SourceView.sourceViewNew, 
+module Debug.SourceView(Debug.SourceView.sourceViewNew, 
                   simulateTransition,
                   contTransToSource) where
 
@@ -25,53 +25,53 @@ import Debug.Trace
 
 import Pos
 import PP
-import PID
-import Resource
-import qualified Grammar
+import Internal.PID
+import Synthesis.Resource
+import qualified Frontend.Grammar as Grammar
 import Util hiding (name, trace)
 import TSLUtil
-import qualified DbgTypes      as D
-import qualified IDE           as D
-import qualified DbgAbstract   as D
-import SourceViewTypes
-import ISpec
-import IExpr
-import IVar
-import IType
-import CFA
-import Inline
-import Predicate
-import Store
-import SMTSolver
-import qualified AbsSim            as CG
-import qualified CFG               as CG
-import BddRecord
-import BddUtil
+import qualified Debug.DbgTypes      as D
+import qualified Debug.IDE           as D
+import qualified Debug.DbgAbstract   as D
+import Debug.SourceViewTypes
+import Internal.ISpec
+import Internal.IExpr
+import Internal.IVar
+import Internal.IType
+import Internal.CFA
+import Frontend.Inline
+import Abstract.Predicate
+import Solver.Store
+import Solver.SMTSolver
+import qualified CodeGen.AbsSim            as CG
+import qualified CodeGen.CFG               as CG
+import Synthesis.BddRecord
+import Synthesis.BddUtil
 import LogicClasses
 import qualified Cudd.Imperative   as C
-import qualified Interface         as Abs
-import qualified TermiteGame       as Abs
-import CodeWin
+import qualified Synthesis.Interface         as Abs
+import qualified Synthesis.TermiteGame       as Abs
+import Debug.CodeWin
 
-import qualified NS                as F
-import qualified Method            as F
-import qualified InstTree          as F
-import qualified Template          as F
-import qualified TemplateOps       as F
-import qualified ExprInline        as F
-import qualified Spec              as F
-import qualified Expr              as F
-import qualified ExprFlatten       as F
-import qualified ExprOps           as F
-import qualified ExprValidate      as F
-import qualified Statement         as F
-import qualified StatementOps      as F
-import qualified StatementValidate as F
-import qualified StatementInline   as F
+import qualified Frontend.NS                as F
+import qualified Frontend.Method            as F
+import qualified Frontend.InstTree          as F
+import qualified Frontend.Template          as F
+import qualified Frontend.TemplateOps       as F
+import qualified Frontend.ExprInline        as F
+import qualified Frontend.Spec              as F
+import qualified Frontend.Expr              as F
+import qualified Frontend.ExprFlatten       as F
+import qualified Frontend.ExprOps           as F
+import qualified Frontend.ExprValidate      as F
+import qualified Frontend.Statement         as F
+import qualified Frontend.StatementOps      as F
+import qualified Frontend.StatementValidate as F
+import qualified Frontend.StatementInline   as F
 import qualified Name              as F
-import qualified Type              as F
+import qualified Frontend.Type              as F
 import qualified Pos               as F
-import qualified TypeOps           as F
+import qualified Frontend.TypeOps           as F
 
 --------------------------------------------------------------
 -- Constants

@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables, ImplicitParams, RecordWildCards #-}
 
-module GraphView(graphViewNew) where
+module Debug.GraphView(graphViewNew) where
 
 import Data.IORef
 import Data.List
@@ -14,8 +14,8 @@ import Util
 import Implicit
 import qualified Data.Graph.Inductive.Graph as G
 import qualified Data.Graph.Inductive.Tree  as G
-import qualified DbgTypes                   as D
-import qualified IDE                        as D
+import qualified Debug.DbgTypes                   as D
+import qualified Debug.IDE                        as D
 import GraphDraw
 
 --------------------------------------------------------------

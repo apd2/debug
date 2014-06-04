@@ -1,14 +1,14 @@
 {-# LANGUAGE RecordWildCards, ImplicitParams #-}
 
-module RelationView (relationViewNew) where
+module Debug.RelationView (relationViewNew) where
 
 import Data.IORef
 import Control.Monad
 import qualified Graphics.UI.Gtk            as G
 
 import Util
-import qualified DbgTypes                   as D
-import qualified IDE                        as D
+import qualified Debug.DbgTypes                   as D
+import qualified Debug.IDE                        as D
 import Implicit
 
 --------------------------------------------------------------

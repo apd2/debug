@@ -1,4 +1,4 @@
-module Icon where
+module Debug.Icon where
 
 ladyBugIcon = 
     ["319 319 3904 2",
