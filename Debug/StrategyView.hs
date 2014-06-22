@@ -15,6 +15,9 @@ import qualified Debug.DbgTypes                   as D
 import qualified Debug.IDE                        as D
 import Implicit
 
+stratViewMinWidth = 150
+stratViewMinHeight = 150
+
 --------------------------------------------------------------
 -- Types
 --------------------------------------------------------------
@@ -51,7 +54,7 @@ strategyViewNew strat@Strategy{..} model = do
 
     scroll <- G.scrolledWindowNew Nothing Nothing
     G.widgetShow scroll
-    G.widgetSetSizeRequest scroll 300 300
+    G.widgetSetSizeRequest scroll stratViewMinWidth stratViewMinHeight 
 
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox

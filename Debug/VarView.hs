@@ -12,6 +12,9 @@ import Debug.SetExplorer
 import Implicit
 import Util
 
+varViewMinWidth = 150
+varViewMinHeight = 150
+
 data VarView c a b d = VarView {
     vvModel     :: D.RModel c a b d,
     vvApplyBut  :: G.Button,
@@ -60,7 +63,7 @@ varViewNew rmodel = do
     -- Top-level vbox
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox
-    G.widgetSetSizeRequest vbox 300 300
+    G.widgetSetSizeRequest vbox varViewMinWidth varViewMinHeight
 
     G.boxPackStart vbox w G.PackGrow 0
     

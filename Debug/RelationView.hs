@@ -11,6 +11,9 @@ import qualified Debug.DbgTypes                   as D
 import qualified Debug.IDE                        as D
 import Implicit
 
+relViewMinWidth = 150
+relViewMinHeight = 150
+
 --------------------------------------------------------------
 -- Types
 --------------------------------------------------------------
@@ -33,7 +36,7 @@ relationViewNew model = do
     trels  <- D.modelTransRels model
     scroll <- G.scrolledWindowNew Nothing Nothing
     G.widgetShow scroll
-    G.widgetSetSizeRequest scroll 300 300
+    G.widgetSetSizeRequest scroll relViewMinWidth relViewMinHeight
 
     vbox <- G.vBoxNew False 0
     G.widgetShow vbox

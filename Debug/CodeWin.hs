@@ -56,6 +56,10 @@ import CodeWidget.CodeWidgetTypes
 import CodeWidget.CodeWidget
 import Internal.CFA
 
+codeMinWidth  = 320
+codeMinHeight = 240
+
+
 -- Magic block descriptor
 
 -- MBActive - magic block currently being executed
@@ -185,7 +189,7 @@ type RCodeWin = IORef CodeWin
 -- Load all spec files and initialise cwMBRoots
 codeWinNew :: F.Spec -> IO RCodeWin
 codeWinNew spec@F.Spec{..} = do
-    Code cwAPI cwView cwPos <- codeWidgetNew "tsl" 600 600
+    Code cwAPI cwView cwPos <- codeWidgetNew "tsl" codeMinWidth codeMinHeight
     G.widgetShow cwView
     G.widgetShow cwPos
 
