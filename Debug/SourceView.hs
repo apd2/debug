@@ -17,6 +17,7 @@ import Control.Monad
 import Control.Monad.State
 import Control.Monad.Error
 import Control.Monad.ST
+import Control.Monad.ST.Unsafe
 
 import Text.Parsec
 import Control.Applicative
@@ -55,6 +56,7 @@ import Debug.CodeWin
 
 import qualified Frontend.NS                as F
 import qualified Frontend.Method            as F
+import qualified Frontend.MethodOps         as F
 import qualified Frontend.InstTree          as F
 import qualified Frontend.Template          as F
 import qualified Frontend.TemplateOps       as F
@@ -978,7 +980,7 @@ commandButtonsUpdate ref = do
              -- (all scalar tmp variables that affect the next transition must be assigned)
              (all isJust           
               $ map (storeTryEval (currentStore sv))
-              $ filter isScalar
+              $ filter (isScalar . exprType)
               $ concatMap flatten 
               $ currentTmpExprTree sv)
     G.widgetSetSensitive (svStepButton sv)    en
@@ -1043,7 +1045,7 @@ resolveViewCreate ref = do
         (\iter -> do sv   <- readIORef ref
                      path <- G.treeModelGetPath store iter
                      e    <- G.treeStoreGetValue store path
-                     G.set textrend [ G.cellVisible      G.:= isInt e
+                     G.set textrend [ G.cellVisible      G.:= isInt $ exprType e
                                     , G.cellTextEditable G.:= True
                                     , G.cellText         G.:= case storeTryEval (currentStore sv) e of
                                                                    Nothing -> "*"
@@ -1056,8 +1058,8 @@ resolveViewCreate ref = do
         (\iter -> do sv              <- readIORef ref
                      path            <- G.treeModelGetPath store iter
                      e               <- G.treeStoreGetValue store path
-                     (tmodel, colid) <- comboTextModel $ typ e
-                     G.set combrend [ G.cellVisible        G.:= isScalar e && not (isInt e)
+                     (tmodel, colid) <- comboTextModel $ exprType e
+                     G.set combrend [ G.cellVisible        G.:= (isScalar $ exprType e) && not (isInt $ exprType e)
                                     , G.cellComboTextModel G.:= (tmodel, colid)
                                     , G.cellTextEditable   G.:= True
                                     , G.cellComboHasEntry  G.:= False
@@ -1099,7 +1101,7 @@ textAsnChanged ref path valstr = do
     e   <- G.treeStoreGetValue (svResolveStore sv) path
     val <- if valstr == "*"
               then return Nothing
-              else case parseVal (typ e) valstr of
+              else case parseVal (exprType e) valstr of
                         Left er -> do D.showMessage (svModel sv) G.MessageError er
                                       return Nothing
                         Right v -> return $ Just $ SVal v
@@ -1126,7 +1128,7 @@ autoResolve ref = do
      sv <- readIORef ref
      let ?spec = svSpec sv
      _ <- mapM (autoResolve1 ref)
-          $ filter isScalar
+          $ filter (isScalar . exprType)
           $ concatMap flatten 
           $ currentTmpExprTree sv
      return ()
@@ -1135,7 +1137,7 @@ autoResolve1 :: RSourceView c a u -> Expr -> IO ()
 autoResolve1 ref e = do
     modifyIORef ref (\sv -> let ?spec = svSpec sv in
                             if isNothing $ storeTryEval (currentStore sv) e
-                               then modifyCurrentStore sv (\s -> storeSet s e (Just $ SVal $ valDefault e))
+                               then modifyCurrentStore sv (\s -> storeSet s e (Just $ SVal $ valDefault $ exprType e))
                                else sv)
     
 --runControllableCFA :: RSourceView c a u -> CFA -> IO ()
@@ -1173,7 +1175,7 @@ transitionToAction inspec flatspec cnstate = do
      $ do let flatmeth = let ?spec = flatspec in fromJust $ find ((== tag) . F.sname) $ F.tmMethod tmMain
           let (caIID, methname) = F.itreeParseName tag
               Just (F.ObjMethod tm caTask) = F.lookupGlobal ((F.Ident F.nopos "main"):caIID++[F.Ident nopos methname])
-          let caArgs = map (\a -> (F.sname a, let ?scope = F.ScopeTemplate tm in storeToFExpr a
+          let caArgs = map (\a -> (F.sname a, let ?scope = F.ScopeTemplate tm in storeToFExpr (F.argType a)
                                               $ storeEval cnstate 
                                               $ (EVar $ mkVarNameS (NSID Nothing (Just flatmeth)) $ F.sname a)))
                        $ filter ((== F.ArgIn) . F.argDir)
@@ -1186,7 +1188,7 @@ storeToFExpr x s =
     let F.Type xsc  ts  = F.typ x
         F.Type xsc' ts' = F.typ' x
     in case ts' of
-            F.StructSpec _ fs  -> F.EStruct F.nopos tname' (Left $ map (\f -> (F.name f, let ?scope = xsc' in storeToFExpr f (sfs M.! F.sname f))) fs)
+            F.StructSpec _ fs  -> F.EStruct F.nopos tname' (Left $ map (\f -> (F.name f, let ?scope = xsc' in storeToFExpr (F.fieldType f) (sfs M.! F.sname f))) fs)
                                   where F.UserTypeSpec _ tname = ts
                                         (decl, tsc) = F.getTypeDecl xsc tname
                                         tname' = case tsc of 
@@ -1333,7 +1335,7 @@ doCodeGen' sv@SourceView{..} ctx mbd (MBID p locs) D.SelectedStrategy{..} = do
                                     $d deref initset'
                                     code <- CG.ppStep svInputSpec svFlatSpec svSpec mbpid svSTDdManager mbsc svAbsDB stp
                                     CG.derefStep svSTDdManager stp
-                                    lift $ checkManagerConsistency " doCodeGen'" ops
+                                    --lift $ checkManagerConsistency " doCodeGen'" ops
                                     return $ Right $ PP.render code
 
 -- Consumes the initset reference
@@ -1736,7 +1738,7 @@ getTmpExprTree sv p =
         -- expand expression into a tree of scalars
         mkTree e = Node { rootLabel = e
                         , subForest = map mkTree 
-                                      $ case typ e of
+                                      $ case exprType e of
                                              Struct fs  -> map (\(Field n _) -> EField e n) fs
                                              Array _ sz -> map (EIndex e . EConst . UIntVal 32 . fromIntegral) [0..sz-1]
                                              _          -> []

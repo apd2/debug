@@ -6,11 +6,13 @@ module Debug.DbgTypes(Rel(..),
                 ViewEvents(..),
                 Type(..),
                 State(..),
+                eqStates,
                 SelectedStrategy(..),
                 isConcreteState,
                 TranCategory(..),
                 transitionCategory,
                 Transition(..),
+                eqTransitions,
                 tranTo',
                 tranRel,
                 isConcreteTransition,
@@ -162,9 +164,8 @@ data State a d = State {
 isConcreteState :: State a d -> Bool
 isConcreteState = isJust . sConcrete
 
-
-instance (?m::c, L.Boolean c a, Eq d) => Eq (State a d) where
-    (==) x y = sAbstract x .== sAbstract y && (fmap fst $ sConcrete x) == (fmap fst $ sConcrete y)
+eqStates :: (?m::c, L.Boolean c a, Eq d) => State a d -> State a d -> Bool
+eqStates x y = sAbstract x .== sAbstract y && (fmap fst $ sConcrete x) == (fmap fst $ sConcrete y)
 
 transitionCategory :: (Rel c v a s, ?m::c) => Model c a b d -> Transition a b d -> IO TranCategory
 transitionCategory model tran = do
@@ -187,9 +188,9 @@ data Transition a b d = Transition {
     tranTo            :: State a d
 }
 
-instance (?m::c, L.Boolean c a, Eq b, Eq d) => Eq (Transition a b d) where
-    (==) x y =  tranFrom x == tranFrom y
-             && tranTo x == tranTo y
+eqTransitions :: (?m::c, L.Boolean c a, Eq b, Eq d) => Transition a b d -> Transition a b d -> Bool
+eqTransitions x y = eqStates (tranFrom x) (tranFrom y)
+             && eqStates (tranTo x) (tranTo y)
              && tranUntracked x .== tranUntracked y
              && tranAbstractLabel x .== tranAbstractLabel y
              && tranConcreteLabel x == tranConcreteLabel y

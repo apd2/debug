@@ -14,8 +14,8 @@ import Util
 import Implicit
 import qualified Data.Graph.Inductive.Graph as G
 import qualified Data.Graph.Inductive.Tree  as G
-import qualified Debug.DbgTypes                   as D
-import qualified Debug.IDE                        as D
+import qualified Debug.DbgTypes             as D
+import qualified Debug.IDE                  as D
 import GraphDraw
 
 --------------------------------------------------------------
@@ -172,7 +172,7 @@ nodeRightClick ref nid = do
 --------------------------------------------------------------
 
 findState :: (D.Rel c v a s, D.Vals d, ?m::c) => GraphView c a b d -> D.State a d -> Maybe G.Node
-findState gv s = fmap fst $ find ((==s) . snd) $ G.labNodes $ gvGraph gv
+findState gv s = fmap fst $ find (D.eqStates s . snd) $ G.labNodes $ gvGraph gv
 
 getState :: GraphView c a b d -> G.Node -> D.State a d
 getState gv nid = fromJust $ G.lab (gvGraph gv) nid
@@ -185,7 +185,7 @@ findTransition gv fromid toid tran =
     fmap (\(_,_,e) -> eId e)
     $ find (\(fr,to,e) -> fr == fromid && to == toid &&
                           case e of 
-                               EdgeTransition _ tran' -> tran' == tran
+                               EdgeTransition _ tran' -> D.eqTransitions tran' tran
                                _                      -> False) 
     $ G.labEdges $ gvGraph gv
 
