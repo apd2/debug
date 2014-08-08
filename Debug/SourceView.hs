@@ -1172,6 +1172,7 @@ transitionToAction inspec flatspec cnstate = do
     let cont = storeEvalBool cnstate mkContLVar
     (if' (not cont) Nothing
      $ if' (tag == mkTagExit) (if' (not $ storeEvalBool cnstate mkMagicVar) (return ActExit) Nothing)
+     $ if' (tag == mkTagDoNothing) Nothing
      $ do let flatmeth = let ?spec = flatspec in fromJust $ find ((== tag) . F.sname) $ F.tmMethod tmMain
           let (caIID, methname) = F.itreeParseName tag
               Just (F.ObjMethod tm caTask) = F.lookupGlobal ((F.Ident F.nopos "main"):caIID++[F.Ident nopos methname])
