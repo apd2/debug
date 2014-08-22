@@ -120,12 +120,12 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
     (srStrat, srStratRegions) <- case res of
                   Just True -> liftM (\(strats, regs) -> if length strats /= length regs
                                                             then error "mkSynthesisRes: length strats /= length regs"
-                                                            else (map (map (toDdNode ?m)) strats, Just $ map (map (toDdNode ?m)) regs)) $ strat ri
+                                                            else (map (map (toDdNode ?m)) strats, Just $ map (map (toDdNode ?m)) regs)) $ strat (Config False False False False False False False) ri
 --                               do s0 <- strat ri
 --                                  lift $ mapM (mapM (\s -> do s' <- bor m s $ bnot cont
 --                                                              deref m s
 --                                                              return $ toDdNode ?m s')) s0  -- don't restrict uncontrollable behaviour
-                  Just False -> liftM ((, Nothing) . (map (map (toDdNode ?m)))) $ cex ri
+                  Just False -> liftM ((, Nothing) . (map (map (toDdNode ?m)))) $ cex (Config False False False False False False False) ri
                                 --   lift $ mapM (mapM (\s -> do s' <- bor m s cont
                                 --                               deref m s
                                 --                               return $ toDdNode ?m s')) s0  -- don't restrict controllable behaviour
