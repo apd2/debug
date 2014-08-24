@@ -198,8 +198,8 @@ codeWinNew spec@F.Spec{..} = do
     let files = nub 
                 $ map (sourceName . fst)
                 $ map pos specTemplate ++ map pos specType ++ map pos specConst ++ concatMap (map pos . F.tmProcess) specTemplate
-    cwFiles <- trace ("codeWinNew: files=" ++ show files)
-               $ liftM M.fromList 
+    cwFiles <- -- trace ("codeWinNew: files=" ++ show files)
+               liftM M.fromList 
                $ mapM (\n -> do reg <- pageCreate cwAPI n
                                 regionEditable cwAPI reg False
                                 tag <- tagNew cwAPI reg
