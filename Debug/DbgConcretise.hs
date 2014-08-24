@@ -45,8 +45,8 @@ concretiseRel mvars0 rel = do
     case smtGetModelOrCore ?solver fs of
          Nothing            -> Nothing
          Just (Left core)   -> do -- Remove unsat core from rel and repeat
-                let unsatcube = trace ("concretiseRel (" ++ (show $ length mvars) ++ " vars): core = " ++ show core)
-                                $ conj
+                let unsatcube = -- trace ("concretiseRel (" ++ (show $ length mvars) ++ " vars): core = " ++ show core)
+                                conj
                                 $ map (\(mvar, v) -> eqConst (D.idxToVS (D.mvarIdx mvar)) v) 
                                 $ map (asn !!) core
                     rel' = rel .& (nt unsatcube)

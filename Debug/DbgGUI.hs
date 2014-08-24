@@ -126,7 +126,7 @@ debugGUI extraFactories model = do
     _ <- mapM (\(v,s) -> G.checkMenuItemSetActive (dbgViewMenuItem v) s)
          $ zip dviews (map snd factories)
 
-    putStr $ "Variable map\n" ++ mDumpIndices model ++ "\n"
+    -- putStr $ "Variable map\n" ++ mDumpIndices model ++ "\n"
     let initst = Just $ State (mInitState model) Nothing 
     modelSelectState rmodel initst
 
