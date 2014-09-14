@@ -1,4 +1,4 @@
-{-# LANGUAGE ImplicitParams, RecordWildCards, ScopedTypeVariables, TupleSections, TemplateHaskell #-}
+{-# LANGUAGE ImplicitParams, RecordWildCards, ScopedTypeVariables, TupleSections, TemplateHaskell, ConstraintKinds #-}
 
 module Debug.SourceView(Debug.SourceView.sourceViewNew, 
                   simulateTransition,
@@ -28,6 +28,7 @@ import Pos
 import PP
 import Internal.PID
 import Synthesis.Resource
+import Synthesis.RefineCommon
 import qualified Frontend.Grammar as Grammar
 import Util hiding (name, trace)
 import TSLUtil
@@ -1310,7 +1311,7 @@ doCodeGen ref mbid = do
                                                                Right code -> codeWinSetMBText svCodeWin mbid code
 
 
-doCodeGen' :: (D.Rel c v a s, MonadResource (C.DDNode RealWorld u) (ST RealWorld) t) => SourceView c a u -> c -> MBDescr -> MBID -> D.SelectedStrategy a -> t (ST RealWorld) (Either String String)
+doCodeGen' :: (D.Rel c v a s, RM RealWorld u t) => SourceView c a u -> c -> MBDescr -> MBID -> D.SelectedStrategy a -> t (ST RealWorld) (Either String String)
 doCodeGen' sv@SourceView{..} ctx mbd (MBID p locs) D.SelectedStrategy{..} = do
     -- Set of states at the outermost MB entry
     let ops@Ops{..} = constructOps svSTDdManager
@@ -1340,7 +1341,7 @@ doCodeGen' sv@SourceView{..} ctx mbd (MBID p locs) D.SelectedStrategy{..} = do
                                     return $ Right $ PP.render code
 
 -- Consumes the initset reference
-simulateNestedMBs :: (D.Rel c v a s, MonadResource (C.DDNode RealWorld u) (ST RealWorld) t) => SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> DDNode RealWorld u -> t (ST RealWorld) (Maybe (C.DDNode RealWorld u))
+simulateNestedMBs :: (D.Rel c v a s, RM RealWorld u t) => SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> DDNode RealWorld u -> t (ST RealWorld) (Maybe (C.DDNode RealWorld u))
 simulateNestedMBs _                 initset _   []         _         = return $ Just initset
 simulateNestedMBs sv@SourceView{..} initset mbd (loc:locs) winregion = do
     --ctx <- D.modelCtx svModel

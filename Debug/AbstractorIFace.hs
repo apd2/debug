@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards, MultiParamTypeClasses, FlexibleInstances, TypeSynonymInstances, UndecidableInstances, ImplicitParams, TupleSections, TemplateHaskell #-}
+{-# LANGUAGE RecordWildCards, MultiParamTypeClasses, FlexibleInstances, TypeSynonymInstances, UndecidableInstances, ImplicitParams, TupleSections, TemplateHaskell, ConstraintKinds #-}
 
 -- Interface to the abstraction library
 
@@ -43,6 +43,7 @@ import qualified Debug.StrategyView    as D
 import qualified Debug.SourceView      as D
 import qualified Debug.SourceViewTypes as D
 import Synthesis.Resource
+import Synthesis.RefineCommon
 
 instance D.Rel DdManager VarData DdNode [[SatBit]] where
     relToDDNode _ n = toDDNode n
@@ -106,7 +107,7 @@ data SynthesisRes c a = SynthesisRes { srWin                :: Maybe Bool
 --cPreOverMy ops@Ops{..} = cPreHelper cpreOverMy' bforall ops  
 
 
-mkSynthesisRes :: (MonadResource (DDNode s u) (ST s) mr) => I.Spec -> STDdManager s u -> (Maybe Bool, RefineInfo s u AbsVar AbsVar AbsPriv) -> mr (ST s) (SynthesisRes DdManager DdNode) 
+mkSynthesisRes :: (RM s u mr) => I.Spec -> STDdManager s u -> (Maybe Bool, RefineInfo s u AbsVar AbsVar AbsPriv) -> mr (ST s) (SynthesisRes DdManager DdNode) 
 mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
     let ?spec = spec 
         ?m    = toDdManager m
