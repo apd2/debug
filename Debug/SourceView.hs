@@ -1335,10 +1335,13 @@ doCodeGen' sv@SourceView{..} ctx mbd (MBID p locs) D.SelectedStrategy{..} = do
                                     $d deref goalst
                                     mapM_ ($d deref) regionsst
                                     $d deref initset'
-                                    code <- CG.ppStep svInputSpec svFlatSpec svSpec mbpid svSTDdManager mbsc svAbsDB stp
-                                    CG.derefStep svSTDdManager stp
-                                    --lift $ checkManagerConsistency " doCodeGen'" ops
-                                    return $ Right $ PP.render code
+                                    if (fst $ CG.stepWaitCond stp) == C.bzero svSTDdManager
+                                       then do CG.derefStep svSTDdManager stp
+                                               return $ Left "There is nothing to do for the selected goal at this location"
+                                       else do code <- CG.ppStep svInputSpec svFlatSpec svSpec mbpid svSTDdManager mbsc svAbsDB stp
+                                               CG.derefStep svSTDdManager stp
+                                               --lift $ checkManagerConsistency " doCodeGen'" ops
+                                               return $ Right $ PP.render code
 
 -- Consumes the initset reference
 simulateNestedMBs :: (D.Rel c v a s, RM RealWorld u t) => SourceView c a u -> C.DDNode RealWorld u -> MBDescr -> [Loc] -> DDNode RealWorld u -> t (ST RealWorld) (Maybe (C.DDNode RealWorld u))
