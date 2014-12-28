@@ -1316,7 +1316,7 @@ doCodeGen' sv@SourceView{..} ctx mbd (MBID p locs) D.SelectedStrategy{..} = do
     -- Set of states at the outermost MB entry
     let ops@Ops{..} = constructOps svSTDdManager
     initset <- CG.restrictToMB svSpec svSTDdManager svAbsDB p (fromJust svReachable)
-    if initset == C.bzero svSTDdManager 
+    if initset == C.bZero svSTDdManager 
        then return $ Left "Magic block is not reachable--cannot generate code"
        else do
            -- Simulate nested MBs until reaching the target one
@@ -1335,7 +1335,7 @@ doCodeGen' sv@SourceView{..} ctx mbd (MBID p locs) D.SelectedStrategy{..} = do
                                     $d deref goalst
                                     mapM_ ($d deref) regionsst
                                     $d deref initset'
-                                    if (fst $ CG.stepWaitCond stp) == C.bzero svSTDdManager
+                                    if (fst $ CG.stepWaitCond stp) == C.bZero svSTDdManager
                                        then do CG.derefStep svSTDdManager stp
                                                return $ Left "There is nothing to do for the selected goal at this location"
                                        else do code <- CG.ppStep svInputSpec svFlatSpec svSpec mbpid svSTDdManager mbsc svAbsDB stp
