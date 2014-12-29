@@ -45,6 +45,10 @@ import qualified Debug.SourceViewTypes as D
 import Synthesis.Resource
 import Synthesis.RefineCommon
 
+toDDNode    = toImperativeNode
+toDdNode    = fromImperativeNode
+toDdManager = fromImperativeManager
+
 instance D.Rel DdManager VarData DdNode [[SatBit]] where
     relToDDNode _ n = toDDNode n
     ddNodeToRel m n = toDdNode m n
