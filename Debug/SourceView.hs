@@ -183,7 +183,7 @@ data SourceView c a u = SourceView {
     svAutoResolveTog :: G.CheckButton,              -- toggle auto-resolve mode button
 
     -- Stuff used for code generation
-    svSTDdManager    :: C.STDdManager RealWorld u,
+    svSTDdManager    :: C.DDManager RealWorld u,
     svInUse          :: InUse (C.DDNode RealWorld u),
     svAbsDB          :: Abs.DB RealWorld u AbsVar AbsVar,
     svRefineDyn      :: Abs.RefineDynamic RealWorld u,
@@ -249,7 +249,7 @@ sourceViewNew :: (D.Rel c v a s)
               -> Spec 
               -> M.Map String AbsVar 
               -> SMTSolver 
-              -> C.STDdManager RealWorld u
+              -> C.DDManager RealWorld u
               -> Abs.RefineInfo RealWorld u AbsVar AbsVar st
               -> InUse (C.DDNode RealWorld u)
               -> D.RModel c a Store SVStore 

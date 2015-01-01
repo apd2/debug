@@ -26,7 +26,8 @@ import Synthesis.Interface hiding (db)
 import Synthesis.TermiteGame
 import Implicit
 import BDDOps
-import Synthesis.BddRecord hiding ((.&))
+import Synthesis.BddRecord hiding ((.&), DDManager, DDNode)
+import qualified Synthesis.BddRecord as I
 import Abstract.Predicate
 import Solver.Store
 import Solver.SMTSolver
@@ -49,7 +50,7 @@ toDDNode    = toImperativeNode
 toDdNode    = fromImperativeNode
 toDdManager = fromImperativeManager
 
-instance D.Rel DdManager VarData DdNode [[SatBit]] where
+instance D.Rel DDManager VarData DDNode [[SatBit]] where
     relToDDNode _ n = toDDNode n
     ddNodeToRel m n = toDdNode m n
 
@@ -58,12 +59,12 @@ instance D.Rel DdManager VarData DdNode [[SatBit]] where
 type VarStats  = (Int, Int, Int, Int)
 
 data SynthesisRes c a = SynthesisRes { srWin                :: Maybe Bool
-                                     , srWinningRegionMay   :: DdNode
-                                     , srWinningRegionMust  :: DdNode
-                                     , srWinningRegionMay'  :: DdNode
-                                     , srWinningRegionMust' :: DdNode
-                                     , srStrat          :: [[DdNode]]  -- winning strategy or counterexample
-                                     , srStratRegions   :: Maybe [[DdNode]]  -- winning regions sorted by their proximity to the goal
+                                     , srWinningRegionMay   :: DDNode
+                                     , srWinningRegionMust  :: DDNode
+                                     , srWinningRegionMay'  :: DDNode
+                                     , srWinningRegionMust' :: DDNode
+                                     , srStrat          :: [[DDNode]]  -- winning strategy or counterexample
+                                     , srStratRegions   :: Maybe [[DDNode]]  -- winning regions sorted by their proximity to the goal
                                      , srCtx            :: c
                                      , srStateVars      :: [D.ModelStateVar]
                                      , srUntrackedVars  :: [D.ModelVar]
@@ -111,7 +112,7 @@ data SynthesisRes c a = SynthesisRes { srWin                :: Maybe Bool
 --cPreOverMy ops@Ops{..} = cPreHelper cpreOverMy' bforall ops  
 
 
-mkSynthesisRes :: (RM s u mr) => I.Spec -> STDdManager s u -> (Maybe Bool, RefineInfo s u AbsVar AbsVar AbsPriv) -> mr (ST s) (SynthesisRes DdManager DdNode) 
+mkSynthesisRes :: (RM s u mr) => I.Spec -> I.DDManager s u -> (Maybe Bool, RefineInfo s u AbsVar AbsVar AbsPriv) -> mr (ST s) (SynthesisRes DDManager DDNode) 
 mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
     let ?spec = spec 
         ?m    = toDdManager m
@@ -310,15 +311,15 @@ mkModel :: F.Spec ->
            F.Spec ->
            I.Spec -> 
            SMTSolver -> 
-           SynthesisRes DdManager DdNode ->
-           D.Model DdManager DdNode Store D.SVStore
+           SynthesisRes DDManager DDNode ->
+           D.Model DDManager DDNode Store D.SVStore
 mkModel inspec flatspec spec solver sr = let ?spec     = spec 
                                              ?flatspec = flatspec
                                              ?inspec   = inspec
                                              ?solver   = solver
                                          in mkModel' sr
 
-mkModel' :: (?inspec::F.Spec, ?flatspec::F.Spec, ?spec::I.Spec, ?solver::SMTSolver) => SynthesisRes DdManager DdNode -> D.Model DdManager DdNode Store D.SVStore
+mkModel' :: (?inspec::F.Spec, ?flatspec::F.Spec, ?spec::I.Spec, ?solver::SMTSolver) => SynthesisRes DDManager DDNode -> D.Model DDManager DDNode Store D.SVStore
 mkModel' sr@SynthesisRes{..} = model
     where
     mCtx                  = srCtx
@@ -390,7 +391,7 @@ mkModel' sr@SynthesisRes{..} = model
 
     model = D.Model{..}
 
-    concretiseS :: DdNode -> Maybe (D.State DdNode D.SVStore)
+    concretiseS :: DDNode -> Maybe (D.State DDNode D.SVStore)
     concretiseS d =
         let ?m       = mCtx
             ?model   = model
@@ -403,7 +404,7 @@ mkModel' sr@SynthesisRes{..} = model
             ?absvars = srAbsVars
         in D.refineInitialSet srInit
 
-    concretiseT :: D.Transition DdNode Store D.SVStore-> Maybe (D.Transition DdNode Store D.SVStore)
+    concretiseT :: D.Transition DDNode Store D.SVStore-> Maybe (D.Transition DDNode Store D.SVStore)
     concretiseT D.Transition{..} | D.isConcreteState tranFrom = do
         let ?m       = mCtx
             ?model   = model
@@ -419,7 +420,7 @@ mkModel' sr@SynthesisRes{..} = model
                                  | otherwise = Nothing
 
 
-mkStrategy :: I.Spec -> SynthesisRes DdManager DdNode -> Maybe (D.Strategy DdNode)
+mkStrategy :: I.Spec -> SynthesisRes DDManager DDNode -> Maybe (D.Strategy DDNode)
 mkStrategy spec SynthesisRes{..} = Just D.Strategy{..}
     where
     stratName  = if' (srWin == Just True) "Winning strategy" "Counterexample strategy"
