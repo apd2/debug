@@ -1083,17 +1083,17 @@ toggleAutoResolve ref = do
     writeIORef ref $ sv {svAutoResolve = mode}
 
 comboTextModel :: (?spec::Spec) => Type -> IO (G.ListStore String, G.ColumnId String String)
-comboTextModel Bool     = do store <- G.listStoreNew ["*", "true", "false"]
-                             let column = G.makeColumnIdString 0
-                             G.customStoreSetColumn store column id
-                             return (store, column)
-comboTextModel (Enum n) = do store <- G.listStoreNew ("*": (enumEnums $ getEnumeration n))
-                             let column = G.makeColumnIdString 0
-                             G.customStoreSetColumn store column id
-                             return (store, column)
-comboTextModel _        = do store <- G.listStoreNew []
-                             let column = G.makeColumnIdString 0
-                             return (store, column)
+comboTextModel (Bool _)    = do store <- G.listStoreNew ["*", "true", "false"]
+                                let column = G.makeColumnIdString 0
+                                G.customStoreSetColumn store column id
+                                return (store, column)
+comboTextModel (Enum _ n)  = do store <- G.listStoreNew ("*": (enumEnums $ getEnumeration n))
+                                let column = G.makeColumnIdString 0
+                                G.customStoreSetColumn store column id
+                                return (store, column)
+comboTextModel _           = do store <- G.listStoreNew []
+                                let column = G.makeColumnIdString 0
+                                return (store, column)
 
 textAsnChanged :: RSourceView c a u -> G.TreePath -> String -> IO ()
 textAsnChanged ref path valstr = do
@@ -1744,9 +1744,9 @@ getTmpExprTree sv p =
         mkTree e = Node { rootLabel = e
                         , subForest = map mkTree 
                                       $ case exprType e of
-                                             Struct fs  -> map (\(Field n _) -> EField e n) fs
-                                             Array _ sz -> map (EIndex e . EConst . UIntVal 32 . fromIntegral) [0..sz-1]
-                                             _          -> []
+                                             Struct _ fs  -> map (\(Field n _) -> EField e n) fs
+                                             Array _ _ sz -> map (EIndex e . EConst . UIntVal 32 . fromIntegral) [0..sz-1]
+                                             _            -> []
                           }
     in map (mkTree . EVar . varName)
        $ filter ((== VarTmp) . varCat)

@@ -263,10 +263,10 @@ mkSynthesisRes spec m (res, ri@RefineInfo{..}) = do
 avarType :: (?spec::I.Spec) => AbsVar -> D.Type
 avarType (AVarPred _)  = D.Bool
 avarType (AVarBool tr) = D.Bool
-avarType (AVarEnum tr) = D.Enum $ (I.enumEnums $ I.getEnumeration n) where I.Enum n = termType tr
+avarType (AVarEnum tr) = D.Enum $ (I.enumEnums $ I.getEnumeration n) where I.Enum _ n = termType tr
 avarType (AVarInt  tr) = case termType tr of
-                              I.SInt w -> D.SInt w
-                              I.UInt w -> D.UInt w
+                              I.SInt _ w -> D.SInt w
+                              I.UInt _ w -> D.UInt w
 
 ---- Construct transition relation that represent the result of three-valued 
 ---- abstraction.
