@@ -1905,6 +1905,7 @@ compileMB SourceView{..} sc pid str = do
                      , ctxLabels  = []}
         ctx' = let ?procs = [] 
                    ?nestedmb = True
+                   ?xducer = False
                in execState (do aft <- F.procStatToCFA simpstat cfaInitLoc
                                 ctxFinal aft) ctx
     assert (null $ ctxVar ctx') (F.pos stat) "Cannot perform non-deterministic controllable action"
