@@ -1,6 +1,6 @@
 {-# LANGUAGE ImplicitParams, RecordWildCards, ScopedTypeVariables, TupleSections, TemplateHaskell, ConstraintKinds #-}
 
-module Debug.SourceView(Debug.SourceView.sourceViewNew, 
+module Debug.SourceView(Debug.SourceView.sourceViewNew,
                   simulateTransition,
                   contTransToSource) where
 
@@ -23,6 +23,7 @@ import Text.Parsec
 import Control.Applicative
 import qualified Text.PrettyPrint           as PP
 import Debug.Trace
+import qualified Data.Text                  as DT
 
 import Pos
 import PP
@@ -198,7 +199,7 @@ type RSourceView c a u = IORef (SourceView c a u)
 sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel undefined"
                              , svInputSpec      = error "SourceView: svInputSpec undefined"
                              , svFlatSpec       = error "SourceView: svFlatSpec undefined"
-                             , svSpec           = error "SourceView: svSpec undefined" 
+                             , svSpec           = error "SourceView: svSpec undefined"
                              , svAbsVars        = error "SourceView: svAbsVars undefined"
                              , svState          = error "SourceView: svState undefined"
                              , svTmp            = error "SourceView: svTmp undefined"
@@ -243,16 +244,16 @@ sourceViewEmpty = SourceView { svModel          = error "SourceView: svModel und
 -- View callbacks
 --------------------------------------------------------------
 
-sourceViewNew :: (D.Rel c v a s) 
-              => F.Spec 
-              -> F.Spec 
-              -> Spec 
-              -> M.Map String AbsVar 
-              -> SMTSolver 
+sourceViewNew :: (D.Rel c v a s)
+              => F.Spec
+              -> F.Spec
+              -> Spec
+              -> M.Map String AbsVar
+              -> SMTSolver
               -> C.DDManager RealWorld u
               -> Abs.RefineInfo RealWorld u AbsVar AbsVar st
               -> InUse (C.DDNode RealWorld u)
-              -> D.RModel c a Store SVStore 
+              -> D.RModel c a Store SVStore
               -> IO (D.View a Store SVStore)
 sourceViewNew inspec flatspec spec absvars solver m Abs.RefineInfo{..} inuse rmodel = do
 
@@ -318,13 +319,13 @@ sourceViewNew inspec flatspec spec absvars solver m Abs.RefineInfo{..} inuse rmo
     G.set bmagic [G.widgetTooltipText G.:= Just "Magic!"]
     _ <- G.onToolButtonClicked bmagic (autogen ref)
     G.widgetShow bmagic
-    G.toolbarInsert tbar bmagic (-1)    
+    G.toolbarInsert tbar bmagic (-1)
 
     bcg <- G.toolButtonNewFromStock G.stockExecute
     G.set bcg [G.widgetTooltipText G.:= Just "Generate code"]
     _ <- G.onToolButtonClicked bcg (codegen ref)
     G.widgetShow bcg
-    G.toolbarInsert tbar bcg (-1)    
+    G.toolbarInsert tbar bcg (-1)
 
 
     modifyIORef ref (\sv -> sv { svRunButton     = butrun
@@ -364,7 +365,7 @@ sourceViewNew inspec flatspec spec absvars solver m Abs.RefineInfo{..} inuse rmo
     D.panelsAppend rvpanes watch "Watch"
     D.panelsAppend rvpanes resolve "Resolve non-determinism"
 
-    let cb = D.ViewEvents { D.evtStateSelected      = sourceViewStateSelected      ref 
+    let cb = D.ViewEvents { D.evtStateSelected      = sourceViewStateSelected      ref
                           , D.evtTransitionSelected = sourceViewTransitionSelected ref
                           , D.evtTRelUpdated        = return ()
                           }
@@ -380,7 +381,7 @@ sourceViewNew inspec flatspec spec absvars solver m Abs.RefineInfo{..} inuse rmo
                     , D.viewQuit      = quit ref
                     , D.viewCB        = cb
                     }
-    
+
 
 sourceViewStateSelected :: (D.Rel c v a s) => RSourceView c a u -> Maybe (D.State a SVStore) -> IO ()
 sourceViewStateSelected ref Nothing                                = disable ref
@@ -408,22 +409,22 @@ sourceViewTransitionSelected ref tran | (not $ D.isConcreteTransition tran) = di
 --------------------------------------------------------------
 
 stepAction :: (D.Rel c v a s) => RSourceView c a u -> IO ()
-stepAction ref = do 
+stepAction ref = do
     sv <- readIORef ref
     -- sync PID
     let sv0 = maybeSetLCont $ setLPID (svPID sv) sv
     (msv1, entered) <- maybeEnterMB sv0
     -- don't make another step if we entered MB
-    let msv' = maybe Nothing (\sv1 -> if' entered (Just sv1) (step sv1)) msv1 
+    let msv' = maybe Nothing (\sv1 -> if' entered (Just sv1) (step sv1)) msv1
     when (isJust msv') $ do writeIORef ref $ fromJust msv'
-                            maybeExitMB ref 
-                            sv2 <- readIORef ref                           
+                            maybeExitMB ref
+                            sv2 <- readIORef ref
                             when (currentDelay sv2) $ makeTransition ref
                             updateDisplays ref
 
 -- Execute one statement
 step :: SourceView c a u -> Maybe (SourceView c a u)
-step sv = 
+step sv =
     let sv0 = sv {svStackFrame = 0} in
     case microstep sv0 of
          Just sv' -> let -- did we reach the next statement?
@@ -449,13 +450,13 @@ runAction ref = do
                         sv2 <- readIORef ref
                         when (currentDelay sv2) $ makeTransition ref
                         updateDisplays ref
-    
+
 
 -- run until pause or nondeterministic choice
 run :: SourceView c a u -> Maybe (SourceView c a u)
 run sv = case step sv of
               Nothing  -> Nothing
-              Just sv' -> if currentDelay sv' 
+              Just sv' -> if currentDelay sv'
                              then Just sv'
                              else case run sv' of
                                        Nothing   -> Just sv'
@@ -466,7 +467,7 @@ run sv = case step sv of
 --    modifyIORef ref (\sv -> modifyCurrentStore sv (\st0 -> storeSet st0 mkMagicVar (Just $ SVal $ BoolVal False)))
 --    makeTransition ref
 
--- simulate transition without GUI 
+-- simulate transition without GUI
 simulateTransition :: F.Spec -> Spec -> M.Map String AbsVar -> Store -> Store -> Maybe Store
 simulateTransition flatspec spec absvars st lab =
     let spec' = specInlineWirePrefix spec
@@ -483,7 +484,7 @@ simulateTransition flatspec spec absvars st lab =
                               }
         pid = if storeEvalBool lab mkContLVar
                  then -- find process currently inside a magic block
-                      case findProcInsideMagic sv0 of 
+                      case findProcInsideMagic sv0 of
                            Just p -> p
                            _      -> error $ "simulateTransition no process inside a magic block"
                  else parsePIDEnumerator $ storeEvalEnum lab mkPIDLVar
@@ -495,16 +496,16 @@ simulateTransition flatspec spec absvars st lab =
                                                   , teStack = EProcStack [FrameMagic F.ScopeTop cfaInitLoc (specCAct spec')]}]}
                  else -- execute uncontrollable process from its current location
                       sv0 { svPID   = pid
-                          , svTrace = [TraceEntry { teStore = storeUnion st lab 
-                                                  , teStack = EProcStack $ stackFromStore sv0 st pid}]} 
-        msv2 = run sv1 
+                          , svTrace = [TraceEntry { teStore = storeUnion st lab
+                                                  , teStack = EProcStack $ stackFromStore sv0 st pid}]}
+        msv2 = run sv1
         mstore2 = case msv2 of
                        Nothing  -> trace ("simulateTransition: msv2 = Nothing") Nothing
                        Just sv2 -> if not $ currentDelay sv2
                                       then Nothing
                                       else Just $ applyExplicitUpdates sv2
     in trace ("simulateTransition\nlabel: " ++ show lab ++ "\nstate: " ++ show st)
-       $ trace ("simulateTransitions returns " ++ show mstore2) 
+       $ trace ("simulateTransitions returns " ++ show mstore2)
        $ mstore2
 
 saveAll :: RSourceView c a u -> IO ()
@@ -519,7 +520,7 @@ contTransToSource inspec flatspec spec D.Transition{..} = do
     doc <- ppContAction inspec iid act
     return $ PP.render doc
 
-quit :: RSourceView c a u -> IO Bool 
+quit :: RSourceView c a u -> IO Bool
 quit ref = do
     SourceView{..} <- readIORef ref
     fs <- codeWinModifiedFiles svCodeWin
@@ -530,9 +531,9 @@ quit ref = do
 saveQuitDialog :: RSourceView c a u -> [String] -> IO Bool
 saveQuitDialog ref fs = do
     SourceView{..} <- readIORef ref
-    g <- G.messageDialogNew Nothing [] G.MessageQuestion G.ButtonsNone 
-         $ "Save changes to the following files?\n" 
-         ++ (intercalate "\n" $ fs) 
+    g <- G.messageDialogNew Nothing [] G.MessageQuestion G.ButtonsNone
+         $ "Save changes to the following files?\n"
+         ++ (intercalate "\n" $ fs)
 
     _ <- G.dialogAddButton g "Yes"    G.ResponseYes
     _ <- G.dialogAddButton g "No"     G.ResponseNo
@@ -567,7 +568,7 @@ processSelectorCreate ref = do
     G.comboBoxSetModel combo (Just store)
     rend <- G.cellRendererTextNew
     G.cellLayoutPackStart combo rend True
-    G.cellLayoutSetAttributeFunc combo rend store $ 
+    G.cellLayoutSetAttributeFunc combo rend store $
         (\iter -> do path <- G.treeModelGetPath store iter
                      (pid, en) <- G.treeStoreGetValue store path
                      G.set rend [G.cellTextMarkup G.:= Just $ "<span weight=\"" ++ (if en then "bold" else "normal") ++ "\">" ++ show pid ++ "</span>"])
@@ -580,7 +581,7 @@ processSelectorChanged :: RSourceView c a u -> IO ()
 processSelectorChanged ref = do
     sv <- readIORef ref
     miter <- G.comboBoxGetActiveIter $ svProcessCombo sv
-    when (isJust miter) $ 
+    when (isJust miter) $
         do path <- G.treeModelGetPath (svProcessStore sv) (fromJust miter)
            (pid, _) <- G.treeStoreGetValue (svProcessStore sv) path
            modifyIORef ref (\_sv -> _sv{svPID = pid})
@@ -588,7 +589,7 @@ processSelectorChanged ref = do
            reset ref
 
 
-pidtree :: SourceView c a u -> Forest PrID 
+pidtree :: SourceView c a u -> Forest PrID
 pidtree sv = map (\p -> procTree (PrID (procName p) []) p) (specProc $ svSpec sv)
     where procTree pid p = Node { rootLabel = pid
                                 , subForest = map (\p' -> procTree (childPID pid (procName p')) p') (procChildren p)}
@@ -635,7 +636,7 @@ processSelectorSelectPID ref pid = do
                                           (pid', _) <- G.treeStoreGetValue store path
                                           when (pid' == pid) $ G.comboBoxSetActiveIter combo iter)
 
--- GTK's treeModelForeach does not work if the 
+-- GTK's treeModelForeach does not work if the
 -- function modifies the store
 myTreeModelForeach :: G.TreeModelClass self => self -> (G.TreeIter -> IO ()) -> IO ()
 myTreeModelForeach m f = myTreeModelForeach' m Nothing f
@@ -651,7 +652,7 @@ myTreeModelForeach' m miter f = do
                         cpath <- G.treeModelGetPath m child
                         f child
                         mchild' <- G.treeModelGetIter m cpath
-                        myTreeModelForeach' m mchild' f) 
+                        myTreeModelForeach' m mchild' f)
          $ [0..nchildren - 1]
     return ()
 
@@ -673,7 +674,7 @@ stackViewCreate ref = do
 
     rend <- G.cellRendererTextNew
     G.cellLayoutPackStart col rend True
-    G.cellLayoutSetAttributeFunc col rend store $ 
+    G.cellLayoutSetAttributeFunc col rend store $
         (\iter -> do let idx = G.listStoreIterToIndex iter
                      frame <- G.listStoreGetValue store idx
                      G.set rend [G.cellTextMarkup G.:= Just $ G.escapeMarkup $ show $ frScope frame])
@@ -709,7 +710,7 @@ stackViewDisable ref = do
 
 -- indices of visible states in the trace
 svTraceVisible :: SourceView c a u -> [Int]
-svTraceVisible sv = 
+svTraceVisible sv =
     filter (\i -> case locAct (getLocLabel sv i) of
                        ActNone -> False
                        _       -> True)
@@ -732,15 +733,15 @@ traceViewCreate ref = do
     G.widgetShow combo
     G.boxPackStart hbox combo G.PackNatural 0
     store <- G.listStoreNew []
-    G.comboBoxSetModel combo (Just store)    
+    G.comboBoxSetModel combo (Just store)
     rend <- G.cellRendererTextNew
     G.cellLayoutPackStart combo rend True
-    G.cellLayoutSetAttributeFunc combo rend store $ 
+    G.cellLayoutSetAttributeFunc combo rend store $
         (\iter -> do let storeidx = G.listStoreIterToIndex iter
                      idx  <- G.listStoreGetValue store storeidx
                      sv   <- readIORef ref
-                     let txt = take 48  
-                               $ replace "\r" " " $ replace "\n" " " 
+                     let txt = take 48
+                               $ replace "\r" " " $ replace "\n" " "
                                $ case locAct $ getLocLabel sv idx of
                                       ActStat s -> show s
                                       ActExpr e -> show e
@@ -766,7 +767,7 @@ tracePosChanged :: RSourceView c a u -> IO ()
 tracePosChanged ref = do
     sv <- readIORef ref
     miter <- G.comboBoxGetActiveIter $ svTraceCombo sv
-    when (isJust miter) $ 
+    when (isJust miter) $
         do let storeidx = G.listStoreIterToIndex $ fromJust miter
            p <- G.listStoreGetValue (svTraceStore sv) storeidx
            -- only call updateDisplays if this is not a recursive call from updateDisplays
@@ -827,13 +828,13 @@ watchCreate ref = do
 
     exprend <- G.cellRendererTextNew
     G.cellLayoutPackStart namecol exprend False
-    G.cellLayoutSetAttributeFunc namecol exprend store $ 
+    G.cellLayoutSetAttributeFunc namecol exprend store $
         (\iter -> do let idx = G.listStoreIterToIndex iter
                      mexp <- G.listStoreGetValue store idx
                      G.set exprend [ G.cellTextEditable G.:= True
                                    , G.cellSensitive    G.:= True
-                                   , G.cellTextMarkup   G.:= Just 
-                                                             $ case mexp of 
+                                   , G.cellTextMarkup   G.:= Just
+                                                             $ case mexp of
                                                                     Nothing -> "<i>Add watch</i>"
                                                                     Just e  -> e])
     _ <- G.on exprend G.edited (watchChanged ref)
@@ -846,16 +847,16 @@ watchCreate ref = do
 
     valrend <- G.cellRendererTextNew
     G.cellLayoutPackStart valcol valrend True
-    G.cellLayoutSetAttributeFunc valcol valrend store $ 
+    G.cellLayoutSetAttributeFunc valcol valrend store $
         (\iter -> do sv@SourceView{..} <- readIORef ref
                      let idx = G.listStoreIterToIndex iter
                      mexp <- G.listStoreGetValue store idx
-                     G.set valrend [G.cellTextMarkup G.:= Just $ G.escapeMarkup 
-                                                          $ case mexp of 
+                     G.set valrend [G.cellTextMarkup G.:= Just $ G.escapeMarkup
+                                                          $ case mexp of
                                                                  Nothing  -> ""
                                                                  Just e -> case storeEvalStr svInputSpec svFlatSpec svSpec
-                                                                                             (currentStore sv) 
-                                                                                             (Just svPID) 
+                                                                                             (currentStore sv)
+                                                                                             (Just svPID)
                                                                                              (frScope $ currentStackFrames sv !! svStackFrame) e of
                                                                                 Left er -> er
                                                                                 Right v -> let str = show v in
@@ -863,7 +864,7 @@ watchCreate ref = do
     _ <- G.treeViewAppendColumn view valcol
 
     _ <- G.on view G.keyPressEvent (do key <- G.eventKeyVal
-                                       when (key == G.keyFromName "Delete") $ liftIO $ watchDelete ref
+                                       when (key == G.keyFromName (DT.pack "Delete")) $ liftIO $ watchDelete ref
                                        when (isJust $ G.keyToChar key)      $ liftIO $ (do (path, _) <- G.treeViewGetCursor view
                                                                                            G.treeViewSetCursor view path (Just $ (namecol, True)))
                                        return True)
@@ -884,7 +885,7 @@ watchChanged :: RSourceView c a u -> G.TreePath -> String -> IO ()
 watchChanged ref path val = do
     store <- getIORef svWatchStore ref
     G.listStoreSetValue store (head path) (Just val)
-    watchUpdate ref 
+    watchUpdate ref
 
 watchDelete :: RSourceView c a u -> IO ()
 watchDelete ref = do
@@ -925,11 +926,11 @@ sourceWindowCreate ref = do
     G.widgetShow sbar
     G.boxPackStart vbox sbar G.PackNatural 0
     -- transition-in-progress label
-    lprog <- G.labelNew Nothing
+    lprog <- G.labelNew  (Nothing :: Maybe DT.Text)
     G.widgetShow lprog
     G.boxPackStart sbar lprog G.PackGrow 0
     G.boxPackEnd sbar codepos G.PackNatural 0
-  
+
     modifyIORef ref (\sv -> sv { svCodeWin   = code
                                , svInprogLab = lprog})
 
@@ -957,7 +958,7 @@ sourceWindowUpdate ref = do
     G.labelSetMarkup svInprogLab $ if svTracePos == 0
                                       then if currentError sv
                                               then "<span color=\"red\" weight=\"bold\">ERROR</span>"
-                                              else "<span weight=\"bold\">PAUSE</span>" 
+                                              else "<span weight=\"bold\">PAUSE</span>"
                                       else ""
 
 sourceWindowDisable :: RSourceView c a u -> IO ()
@@ -976,13 +977,13 @@ commandButtonsUpdate ref = do
     pen <- isProcEnabled sv (svPID sv)
     let en = -- current process must be enabled and ...
              pen
-             && 
+             &&
              -- ... non-determinism must be resolved
              -- (all scalar tmp variables that affect the next transition must be assigned)
-             (all isJust           
+             (all isJust
               $ map (storeTryEval (currentStore sv))
               $ filter (isScalar . exprType)
-              $ concatMap flatten 
+              $ concatMap flatten
               $ currentTmpExprTree sv)
     G.widgetSetSensitive (svStepButton sv)    en
     G.widgetSetSensitive (svRunButton sv)     en
@@ -1027,7 +1028,7 @@ resolveViewCreate ref = do
 
     namerend <- G.cellRendererTextNew
     G.cellLayoutPackStart namecol namerend False
-    G.cellLayoutSetAttributeFunc namecol namerend store $ 
+    G.cellLayoutSetAttributeFunc namecol namerend store $
         (\iter -> do sv   <- readIORef ref
                      path <- G.treeModelGetPath store iter
                      e    <- G.treeStoreGetValue store path
@@ -1042,7 +1043,7 @@ resolveViewCreate ref = do
 
     textrend <- G.cellRendererTextNew
     G.cellLayoutPackStart valcol textrend True
-    G.cellLayoutSetAttributeFunc valcol textrend store $ 
+    G.cellLayoutSetAttributeFunc valcol textrend store $
         (\iter -> do sv   <- readIORef ref
                      path <- G.treeModelGetPath store iter
                      e    <- G.treeStoreGetValue store path
@@ -1055,7 +1056,7 @@ resolveViewCreate ref = do
 
     combrend <- G.cellRendererComboNew
     G.cellLayoutPackStart valcol combrend True
-    G.cellLayoutSetAttributeFunc valcol combrend store $ 
+    G.cellLayoutSetAttributeFunc valcol combrend store $
         (\iter -> do sv              <- readIORef ref
                      path            <- G.treeModelGetPath store iter
                      e               <- G.treeStoreGetValue store path
@@ -1067,7 +1068,7 @@ resolveViewCreate ref = do
                                     , G.cellText           G.:= case storeTryEval (currentStore sv) e of
                                                                      Nothing -> "*"
                                                                      Just v  -> show v])
-    _ <- G.on combrend G.edited (textAsnChanged ref) 
+    _ <- G.on combrend G.edited (textAsnChanged ref)
 
     _ <- G.treeViewAppendColumn view valcol
     modifyIORef ref (\sv -> sv { svResolveView    = view
@@ -1130,7 +1131,7 @@ autoResolve ref = do
      let ?spec = svSpec sv
      _ <- mapM (autoResolve1 ref)
           $ filter (isScalar . exprType)
-          $ concatMap flatten 
+          $ concatMap flatten
           $ currentTmpExprTree sv
      return ()
 
@@ -1140,7 +1141,7 @@ autoResolve1 ref e = do
                             if isNothing $ storeTryEval (currentStore sv) e
                                then modifyCurrentStore sv (\s -> storeSet s e (Just $ SVal $ valDefault $ exprType e))
                                else sv)
-    
+
 --runControllableCFA :: RSourceView c a u -> CFA -> IO ()
 --runControllableCFA ref cfa = do
 --    -- Push controllable cfa on the stack
@@ -1159,17 +1160,17 @@ data ContAction = ActExit  -- exit magic block
 
 ppContAction :: F.Spec ->  F.IID -> ContAction -> Maybe PP.Doc
 ppContAction _      _   ActExit                = Just $ PP.text "exit"
-ppContAction inspec iid (ActCall methiid t as) = do 
+ppContAction inspec iid (ActCall methiid t as) = do
     path <- let ?spec = inspec in F.itreeAbsToRelPath iid methiid
     return $ (PP.hcat $ PP.punctuate (PP.char '.') $ (map (PP.text . F.sname) path) ++ [PP.text $ F.sname t]) PP.<>
              (PP.parens $ PP.hcat $ PP.punctuate PP.comma $ map (\a -> if' (F.argDir a == F.ArgOut) (PP.char '_') (pp $ fromJust $ lookup (F.sname a) as)) $ F.methArg t)
-    
+
 -- Translate an abstract transition into a controllable action
 -- cnstate - concrete state before the transition
 transitionToAction :: F.Spec -> F.Spec -> Store -> Maybe ContAction
 transitionToAction inspec flatspec cnstate = do
     let ?spec = inspec
-    let tag = storeEvalEnum cnstate mkTagVar 
+    let tag = storeEvalEnum cnstate mkTagVar
     let cont = storeEvalBool cnstate mkContLVar
     (if' (not cont) Nothing
      $ if' (tag == mkTagExit) (if' (not $ storeEvalBool cnstate mkMagicVar) (return ActExit) Nothing)
@@ -1178,7 +1179,7 @@ transitionToAction inspec flatspec cnstate = do
           let (caIID, methname) = F.itreeParseName tag
               Just (F.ObjMethod tm caTask) = F.lookupGlobal ((F.Ident F.nopos "main"):caIID++[F.Ident nopos methname])
           let caArgs = map (\a -> (F.sname a, let ?scope = F.ScopeTemplate tm in storeToFExpr (F.argType a)
-                                              $ storeEval cnstate 
+                                              $ storeEval cnstate
                                               $ (EVar $ mkVarNameS (NSID Nothing (Just flatmeth)) $ F.sname a)))
                        $ filter ((== F.ArgIn) . F.argDir)
                        $ F.methArg caTask
@@ -1186,14 +1187,14 @@ transitionToAction inspec flatspec cnstate = do
 
 
 storeToFExpr :: (?spec::F.Spec, F.WithType a) => a -> Store -> F.Expr
-storeToFExpr x s = 
+storeToFExpr x s =
     let F.Type xsc  ts  = F.typ x
         F.Type xsc' ts' = F.typ' x
     in case ts' of
             F.StructSpec _ fs  -> F.EStruct F.nopos tname' (Left $ map (\f -> (F.name f, let ?scope = xsc' in storeToFExpr (F.fieldType f) (sfs M.! F.sname f))) fs)
                                   where F.UserTypeSpec _ tname = ts
                                         (decl, tsc) = F.getTypeDecl xsc tname
-                                        tname' = case tsc of 
+                                        tname' = case tsc of
                                                       F.ScopeTop         -> [F.name decl]
                                                       F.ScopeTemplate tm -> [F.name tm, F.name decl]
                                         SStruct sfs _ = s
@@ -1209,10 +1210,10 @@ valToFExpr (F.UIntSpec _ w) (UIntVal _ i)   = F.ELit  F.nopos w False F.Rad10 i
 valToFExpr (F.EnumSpec _ _) (EnumVal e)     = F.ETerm F.nopos (F.unflattenName $ F.Ident F.nopos e)
 valToFExpr ts               _               = error $ "valToFExpr: type " ++ show ts ++ " not supported"
 
--- Given a controllable state, find template instance that contains 
+-- Given a controllable state, find template instance that contains
 -- currently active magic block
 findActiveMagicBlock :: F.Spec -> Spec -> Store -> Maybe F.IID
-findActiveMagicBlock flatspec spec st = 
+findActiveMagicBlock flatspec spec st =
    let sv0 :: SourceView () () ()
        sv0 = sourceViewEmpty { svSpec       = spec
                              , svFlatSpec   = flatspec
@@ -1226,7 +1227,7 @@ findActiveMagicBlock flatspec spec st =
                          tm = case sc of
                                    F.ScopeProcess tm' _ -> tm'
                                    F.ScopeMethod  tm' _ -> tm'
-                      in fst $ F.itreeParseName (F.sname tm) )) 
+                      in fst $ F.itreeParseName (F.sname tm) ))
       $ findProcInsideMagic sv0
 
 
@@ -1234,7 +1235,7 @@ findActiveMagicBlock flatspec spec st =
 -- Private helpers
 --------------------------------------------------------------
 
--- assumes: 
+-- assumes:
 -- * we're at a magic block entrance
 -- * there is no transition in progress
 autogen :: (D.Rel c v a s) => RSourceView c a u -> IO ()
@@ -1247,9 +1248,9 @@ autogen ref = do
     -- translate transition to source
     txt <- maybe (return "/* no transition */")
                  (\t -> do mt' <- D.modelConcretiseTransition svModel t
-                           return $ 
+                           return $
                             maybe "/* failed to concretise transition */"
-                                  (maybe "/* failed to convert transition to code */" 
+                                  (maybe "/* failed to convert transition to code */"
                                          (\s -> if s == "exit"
                                                    then "{}"
                                                    else s ++ ";\n...")
@@ -1269,7 +1270,7 @@ codegen ref = do
     mmb <- codeWinMBAtCursor svCodeWin
     case mmb of
          Nothing        -> D.showMessage svModel G.MessageError "No editable magic block under cursor"
-         Just (mbid, p) -> 
+         Just (mbid, p) ->
              case specLookupMB svSpec (mbidPos mbid) of
                   []             -> D.showMessage svModel G.MessageError "This magic block is never invoked"
                   ((pid,_,sc):_) -> do
@@ -1293,13 +1294,13 @@ doCodeGen ref mbid = do
     putStrLn "doCodeGen"
     model <- getIORef svModel ref
     mstrategy <- D.modelStrategy model
-    case mstrategy of 
+    case mstrategy of
          Nothing       -> D.showMessage model G.MessageError "No strategy selected"
          Just strategy -> case D.ssRegions strategy of
                                Nothing -> D.showMessage model G.MessageError "Selected strategy does not contain winning regions (is it a counterexample strategy?)"
                                Just _  -> do -- Simulate game
                                              ok <- reSimulate ref
-                                             when ok $ do sv@SourceView{..} <- readIORef ref      
+                                             when ok $ do sv@SourceView{..} <- readIORef ref
                                                           ctx <- D.modelCtx svModel
                                                           mbd <- codeWinGetMB svCodeWin (MBID (mbidPos mbid) [])
                                                           putStrLn $ "InUse before doCodeGen': " ++ (show $ M.toList svInUse)
@@ -1316,7 +1317,7 @@ doCodeGen' sv@SourceView{..} ctx mbd (MBID p locs) D.SelectedStrategy{..} = do
     -- Set of states at the outermost MB entry
     let ops@Ops{..} = constructOps svSTDdManager
     initset <- CG.restrictToMB svSpec svSTDdManager svAbsDB p (fromJust svReachable)
-    if initset == C.bZero svSTDdManager 
+    if initset == C.bZero svSTDdManager
        then return $ Left "Magic block is not reachable--cannot generate code"
        else do
            -- Simulate nested MBs until reaching the target one
@@ -1393,16 +1394,16 @@ simThread rsv mbstxt mbscfa = do
     ctx <- D.modelCtx svModel
     initset <- D.modelInitState svModel
     let Ops{..} = constructOps svSTDdManager
-    let simcb _ _ _ _ = return() 
---    let simcb msg from trel to = unsafeIOToST $ D.modelAddTransition svModel 
+    let simcb _ _ _ _ = return()
+--    let simcb msg from trel to = unsafeIOToST $ D.modelAddTransition svModel
 --                               $ D.Transition (D.State (D.ddNodeToRel ctx from) Nothing)
 --                                              (topOp ctx)
 --                                              (topOp ctx)
 --                                              Nothing
 --                                              (Just msg)
---                                              (D.State (D.ddNodeToRel ctx to) Nothing) 
+--                                              (D.State (D.ddNodeToRel ctx to) Nothing)
     putStrLn $ "InUse before simulation: " ++ (show $ M.toList svInUse)
-    (reach, inuse) <- stToIO $ runResource svInUse $ do 
+    (reach, inuse) <- stToIO $ runResource svInUse $ do
                                 winregst <- $r $ D.relToDDNode ctx winregion
                                 initst   <- $r $ D.relToDDNode ctx initset
                                 maybe (return ()) ($d deref) svReachable
@@ -1473,7 +1474,7 @@ exitMB ref = do
     -- pop the magic block from the stack
         sv3 = if null ls
                  then sv2
-                 else fromJust $ step sv2 -- 
+                 else fromJust $ step sv2 --
     codeWinMBActivate (svCodeWin sv3) $ stackGetMBID sv3 $ currentStack sv3
     writeIORef ref sv3
 
@@ -1504,7 +1505,7 @@ mbStackToProcStack cw p fs = mbStackToProcStack' [] cw (MBID p []) $ reverse fs
 
 mbStackToProcStack' :: [ProcStackFrame] -> CodeWin -> MBID -> [MBFrame] -> [ProcStackFrame]
 mbStackToProcStack' st0 _  _    []               = st0
-mbStackToProcStack' st0 cw mbid (MBFrame{..}:fs) = 
+mbStackToProcStack' st0 cw mbid (MBFrame{..}:fs) =
     case cwLookupMB cw mbid of
          Nothing -> []
          Just mb -> if mbEpoch mb == mbfEpoch
@@ -1513,10 +1514,10 @@ mbStackToProcStack' st0 cw mbid (MBFrame{..}:fs) =
                                            MBA mba -> mbaCFA mba
                                            MBI mbi -> mbiCFA mbi
                                 lab = cfaLocLabel mbfLoc cfa
-                                st' = stackToProcStack (locStack lab) 
-                                sc  = frScope $ head st' 
+                                st' = stackToProcStack (locStack lab)
+                                sc  = frScope $ head st'
                                 st1 = FrameMagic sc mbfLoc cfa : st0 in
-                            if' (null fs) 
+                            if' (null fs)
                                 ((init st') ++ st1) {- bottom of st' is the same as FrameMagic -}
                                 (mbStackToProcStack' st1 cw (mbidChild mbid mbfLoc) fs)
                        else []
@@ -1535,17 +1536,17 @@ procStackToMBStack sv stack@(EProcStack fs) = do
          Just (MBID p _) -> foldM (\mbst fr -> do let mbid = MBID p $ map mbfLoc $ reverse mbst
                                                   mb <- codeWinGetMB (svCodeWin sv) mbid
                                                   return $ MBFrame (mbEpoch mb) (frLoc fr) : mbst) []
-                            $ filter isFrameMagic 
+                            $ filter isFrameMagic
                             $ reverse fs
-  
+
 stackGetMBID :: SourceView c a u -> EProcStack -> Maybe MBID
 stackGetMBID sv (EProcStack frames) = stackGetMBID' sv Nothing $ reverse frames
 
 stackGetMBID' :: SourceView c a u -> Maybe MBID -> [ProcStackFrame] -> Maybe MBID
 stackGetMBID' _  mmbid [_]        = mmbid
-stackGetMBID' sv mmbid (f0:f1:fs) | isFrameMagic f1 = 
+stackGetMBID' sv mmbid (f0:f1:fs) | isFrameMagic f1 =
     maybe (let cfa = specGetCFA (svSpec sv) (EPIDProc $ svPID sv)
-               ActStat (F.SMagic p _) = locAct $ cfaLocLabel (frLoc f0) cfa 
+               ActStat (F.SMagic p _) = locAct $ cfaLocLabel (frLoc f0) cfa
            in stackGetMBID' sv (Just $ MBID p []) (f1:fs))
           (\mbid -> stackGetMBID' sv (Just $ mbidChild mbid $ frLoc f0) (f1:fs))
           mmbid
@@ -1587,7 +1588,7 @@ isProcEnabled sv pid = do
                                 -- If the process is running controllable code, then it is enabled if its program
                                 -- counter (at the top of the stack) is either inside a magic block or at a pause
                                 -- location in a nested CFA whose wait condition is satisfied.
-                                if' (isControllableCode sv pid stack) 
+                                if' (isControllableCode sv pid stack)
                                     (cond || (isMBLabel lab))
                                     cond
 
@@ -1630,10 +1631,10 @@ reset ref = do
     sv0 <- readIORef ref
     let store = storeUnion (sstStore $ fst $ fromJust $ D.sConcrete $ svState sv0) (svTmp sv0)
         tr = [TraceEntry { teStack = error "teStack is undefined"
-                         , teStore = store }] 
+                         , teStore = store }]
     writeIORef ref (sv0 {svTrace = tr, svTracePos = 0, svStackFrame = 0})
     processSelectorUpdate ref
-    
+
     sv1 <- readIORef ref
     stack <- extStackFromStore sv1 (fst $ fromJust $ D.sConcrete $ svState sv1) (svPID sv1)
     -- initialise trace
@@ -1655,7 +1656,7 @@ disable ref = do
     watchDisable           ref
     resolveViewDisable     ref
 
--- Access current location in the trace 
+-- Access current location in the trace
 
 currentCFA :: SourceView c a u -> CFA
 currentCFA sv = getCFA sv (svTracePos sv)
@@ -1703,10 +1704,10 @@ currentError :: SourceView c a u -> Bool
 currentError sv = storeEvalBool (currentStore sv) mkErrVar
 
 cfaAtFrame :: SourceView c a u -> Int -> CFA
-cfaAtFrame sv frame = let frames = currentStackFrames sv 
+cfaAtFrame sv frame = let frames = currentStackFrames sv
                       in stackGetCFA sv (svPID sv) $ EProcStack $ drop frame frames
 
--- Access arbitrary location in the trace 
+-- Access arbitrary location in the trace
 
 getCFA :: SourceView c a u -> Int -> CFA
 getCFA sv p = stackGetCFA sv (svPID sv) $ getStack sv p
@@ -1721,7 +1722,7 @@ getDelay :: SourceView c a u -> Int -> Bool
 getDelay sv p = (isDelayLabel $ getLocLabel sv p) &&
                 -- initial location of magic block CFA is not considered delay location
                 (not $ (getLoc sv p == cfaInitLoc) && (isJust $ stackGetMBID sv $ getStack sv p))
-                
+
 getStore :: SourceView c a u -> Int -> Store
 getStore sv p | p >= (length $ svTrace sv) = SStruct M.empty (svSpec sv)
               | otherwise                  = teStore $ svTrace sv !! p
@@ -1742,7 +1743,7 @@ getTmpExprTree sv p =
                                                                 in (isActNone $ locAct lab) && (not $ isDelayLabel lab)) ls)
         -- expand expression into a tree of scalars
         mkTree e = Node { rootLabel = e
-                        , subForest = map mkTree 
+                        , subForest = map mkTree
                                       $ case exprType e of
                                              Struct _ fs  -> map (\(Field n _) -> EField e n) fs
                                              Array _ _ sz -> map (EIndex e . EConst . UIntVal 32 . fromIntegral) [0..sz-1]
@@ -1750,11 +1751,11 @@ getTmpExprTree sv p =
                           }
     in map (mkTree . EVar . varName)
        $ filter ((== VarTmp) . varCat)
-       $ nub        
+       $ nub
        $ concatMap (\t -> case t of
                                TranStat (SAssume e)   -> exprVars e
                                TranStat (SAssign _ e) -> exprVars e
-                               _                      -> []) 
+                               _                      -> [])
        $ trans
 
 
@@ -1763,7 +1764,7 @@ getTmpExprTree sv p =
 -- False otherwise (i.e., the user did not provide values
 -- for nondeterministic arguments)
 microstep :: SourceView c a u -> Maybe (SourceView c a u)
-microstep sv = 
+microstep sv =
     -- Try all transitions from the current location; choose the first successful one
     let transitions = Graph.lsuc (currentCFA sv) (currentLoc sv)
     in case mapMaybe (microstep' sv) transitions of
@@ -1790,7 +1791,7 @@ microstep' sv (to, TranStat (SAssume e))   = if storeTryEvalBool (currentStore s
 microstep' sv (to, TranStat (SAssign l r)) = trace ("SAssign: " ++ show l ++ ":=" ++ show r) $
                                              let rval = storeTryEval (currentStore sv) r
                                                  store' = storeSet (currentStore sv) l rval
-                                             in case rval of 
+                                             in case rval of
                                                      Nothing -> Nothing
                                                      _       -> Just (store', EProcStack $ (head $ currentStackFrames sv){frLoc = to} : (tail $ currentStackFrames sv))
 
@@ -1813,7 +1814,7 @@ makeTransition ref = do
 
 applyExplicitUpdates :: SourceView c a u -> Store
 applyExplicitUpdates sv = foldl' (\s (n, upd) -> let asn = snd $ fromJust $ find (storeEvalBool initstore . fst) upd
-                                                 in storeSet s (EVar n) $ Just $ storeEval initstore asn) 
+                                                 in storeSet s (EVar n) $ Just $ storeEval initstore asn)
                                  (currentStore sv) (M.toList $ specUpds spec)
     where
     spec = svSpec sv
@@ -1826,7 +1827,7 @@ setLPID :: PrID -> SourceView c a u -> SourceView c a u
 setLPID pid sv = modifyCurrentStore sv (\s -> storeSet s mkPIDLVar (Just $ SVal $ EnumVal $ mkPIDEnumeratorName pid))
 
 maybeSetLCont :: SourceView c a u -> SourceView c a u
-maybeSetLCont sv | (isNothing $ storeTryEvalBool (currentStore sv) mkContLVar) = 
+maybeSetLCont sv | (isNothing $ storeTryEvalBool (currentStore sv) mkContLVar) =
                    let cont = isProcControllableCode sv (svPID sv)
                    in modifyCurrentStore sv (\s -> storeSet s mkContLVar $ Just $ SVal $ BoolVal cont)
                  | otherwise                                                  = sv
@@ -1842,7 +1843,7 @@ storeEvalStr inspec flatspec spec store mpid sc str = do
     let (scope, iid) = flatScopeToScope inspec sc
     -- 2. validate
     let ?spec  = inspec
-        ?privoverride = True 
+        ?privoverride = True
         ?ispec = spec
     F.validateExpr scope expr
     let ?scope = scope
@@ -1875,7 +1876,7 @@ compileMB SourceView{..} sc pid str = do
     stat <- liftM (F.sSeq F.nopos Nothing)
             $ case parse (Grammar.statements1Parser <* eof) "" str of
                    Left  e  -> Left $ show e
-                   Right st -> do assert (case head st of 
+                   Right st -> do assert (case head st of
                                                F.SMagic _ _ -> False
                                                _            -> True)
                                          (F.pos $ head st) "Magic block body can not start with a magic block"
@@ -1903,7 +1904,7 @@ compileMB SourceView{..} sc pid str = do
                      , ctxLastVar = 0
                      , ctxVar     = []
                      , ctxLabels  = []}
-        ctx' = let ?procs = [] 
+        ctx' = let ?procs = []
                    ?nestedmb = True
                    ?xducer = False
                in execState (do aft <- F.procStatToCFA simpstat cfaInitLoc
@@ -1912,7 +1913,7 @@ compileMB SourceView{..} sc pid str = do
     let cfa   = cfaMapExpr (ctxCFA ctx') $ F.exprExpandLabels svSpec
         cfar  = cfaPruneUnreachable cfa [cfaInitLoc]
     -- magic blocks inside cfar cannot be followed by any additional transitions
-    mapM_ (\mbloc -> assert (all ((flip elem) $ cfaFinal cfar) $ map fst $ cfaLocTrans cfar mbloc) (pos $ locAct $ cfaLocLabel mbloc cfa) 
+    mapM_ (\mbloc -> assert (all ((flip elem) $ cfaFinal cfar) $ map fst $ cfaLocTrans cfar mbloc) (pos $ locAct $ cfaLocLabel mbloc cfa)
                             "No statements are allowed after nested magic block")
           $ filter (isMBLoc cfar) $ cfaDelayLocs cfar
     return {-$ cfaTraceFile cfar "action"-} cfar
@@ -1938,7 +1939,7 @@ validateControllableStat sc stat = do
     return ()
 
 flatScopeToScope :: F.Spec -> F.Scope -> (F.Scope, F.IID)
-flatScopeToScope inspec sc = 
+flatScopeToScope inspec sc =
     let ?spec = inspec in
     case sc of
          F.ScopeMethod   _ meth -> let (i, mname) = F.itreeParseName $ F.sname meth
