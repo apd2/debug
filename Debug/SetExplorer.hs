@@ -316,7 +316,7 @@ createSection ref panels section offset = do
                                    G.cellTextEditable G.:= True,
                                    G.cellTextForegroundColor G.:= entryColor e,
                                    G.cellComboHasEntry G.:= False,
-                                   G.cellComboTextModel G.:= (lstore, G.makeColumnIdString 0),
+                                   G.cellComboTextModel G.:= (lstore, G.makeColumnIdString 0 :: G.ColumnId String String),
                                    G.cellText G.:= varUserSelectionText]
 
     addColumn "Constraint" [(G.toObject constrTextRend, textSetFunc), (G.toObject constrComboRend, comboSetFunc)]
