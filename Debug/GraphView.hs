@@ -237,7 +237,7 @@ findOrCreateTransition gv fromid toid tran = do
 createState :: (D.Rel c v a s, D.Vals b, ?m::c) => GraphView c a b d -> (Double, Double) -> D.State a d -> IO (G.Node, GraphView c a b d)
 createState gv coords s = do
     let rel = D.sAbstract s
-        sid = (snd $ G.nodeRange (gvGraph gv)) + 1
+        sid = if G.order (gvGraph gv) == 0 then 0 else ((snd $ G.nodeRange (gvGraph gv)) + 1)
         gv' = gv {gvGraph = G.insNode (sid, s) (gvGraph gv)}
         (eqsets, other0)    = partition ((.== rel)           . D.sAbstract . getState gv) (G.nodes $ gvGraph gv)
         (subsets, other1)   = partition ((.== t) . (.-> rel) . D.sAbstract . getState gv) other0
